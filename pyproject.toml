@@ -1,0 +1,94 @@
+[build-system]
+requires = ["setuptools>=81.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "adv-archon"
+version = "0.1.0"
+description = "ADV ARCHON: local-first terminal assistant for Pablo"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "Proprietary" }
+authors = [
+  { name = "Pablo Alcocer" }
+]
+dependencies = [
+  "duckduckgo-search>=8.1.1",
+  "faster-whisper>=1.1.1",
+  "httpx>=0.28.1",
+  "numpy>=2.2.5",
+  "openpyxl>=3.1.5",
+  "pdf2image>=1.17.0",
+  "pdfplumber>=0.11.6",
+  "Pillow>=11.2.1",
+  "prompt-toolkit>=3.0.52",
+  "pydantic>=2.11.4",
+  "pypdf>=5.4.0",
+  "pytesseract>=0.3.13",
+  "python-docx>=1.1.2",
+  "python-dotenv>=1.1.0",
+  "python-pptx>=1.0.2",
+  "rich>=14.0.0",
+  "sounddevice>=0.5.2",
+  "sentence-transformers>=4.1.0",
+  "structlog>=25.3.0",
+  "trafilatura>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+  "mypy>=1.15.0",
+  "pytest>=8.3.5",
+  "pytest-asyncio>=1.0.0",
+  "ruff>=0.11.7",
+]
+wakeword = [
+  "pvporcupine>=3.0.5",
+]
+
+[project.scripts]
+adv-archon = "adv_archon.main:main"
+adv = "adv_archon.main:main"
+
+[tool.setuptools]
+package-dir = { "" = "src" }
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+adv_archon = ["py.typed", "resources/*.md"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+  "E",
+  "F",
+  "I",
+  "UP",
+  "B",
+  "SIM",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+packages = ["adv_archon"]
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_return_any = true
+warn_unreachable = true

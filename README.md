@@ -26,6 +26,8 @@ This repository currently includes:
 - Persistent tasks with a local SQLite scheduler and `launchd` integration
 - Personal macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
 - Managed browser automation for navigation, extraction, screenshots, and supervised form work
+- Persistent runtime profiles (`general`, `work`, `personal`, `research`, `coding`)
+- Dedicated Markdown/Obsidian vault search tied to the active profile
 - Session cost ledger and local JSON logs
 - Auto mode with confirmation before enabling
 - Optional PII redaction before cloud LLM calls
@@ -92,8 +94,10 @@ adv-archon tasks run-due
 - `/help`
 - `/exit`
 - `/mode <cloud|local>`
+- `/profile [name|status]`
 - `/read <path>`
 - `/web <query>`
+- `/vault <query>`
 - `/recall <query>`
 - `/forget <query|id>`
 - `/cost`
@@ -140,14 +144,49 @@ You can tune the knowledge scope in `~/.adv-archon/config.toml`:
 ```toml
 [knowledge]
 default_roots = ["~"]
+vault_roots = ["~/Obsidian", "~/Documents/Notes"]
 auto_index_on_search = true
 max_files_per_root = 2000
 max_file_bytes = 2000000
 search_limit = 5
 
+[profiles]
+default = "general"
+
+[profiles.work]
+description = "Clientes, propuestas y repos de trabajo"
+knowledge_roots = ["~/Desktop", "~/Documents"]
+vault_roots = ["~/Obsidian/Work"]
+
 [ui]
 show_context_panel = true
 operator_max_tool_steps = 8
+```
+
+## Profiles and Markdown vaults
+
+ADV ARCHON can keep an active profile between launches:
+
+```text
+/profile status
+/profile work
+/profile research
+```
+
+The active profile affects:
+
+- the context shown to the agent
+- the default read-only knowledge roots
+- the Markdown or Obsidian vault roots used by `/vault` and natural-language vault searches
+
+Examples:
+
+```text
+busca en mi vault de obsidian todo lo relacionado con acme
+```
+
+```text
+/vault propuesta acme
 ```
 
 ## Personal assistant connectors

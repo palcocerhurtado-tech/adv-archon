@@ -59,6 +59,7 @@ class KnowledgeStore:
         *,
         encoder: EmbeddingEncoder,
         default_roots: Sequence[str] = (),
+        vault_roots: Sequence[str] = (),
         auto_index_on_search: bool = True,
         max_files_per_root: int = 200,
         max_file_bytes: int = 2_000_000,
@@ -67,11 +68,18 @@ class KnowledgeStore:
         self._db_path = db_path
         self._encoder = encoder
         self._default_roots = tuple(default_roots)
+        self._vault_roots = tuple(vault_roots)
         self._auto_index_on_search = auto_index_on_search
         self._max_files_per_root = max_files_per_root
         self._max_file_bytes = max_file_bytes
         self._logger = logger
         self._conn = self._connect()
+
+    def set_default_roots(self, roots: Sequence[str]) -> None:
+        self._default_roots = tuple(roots)
+
+    def set_vault_roots(self, roots: Sequence[str]) -> None:
+        self._vault_roots = tuple(roots)
 
     def count(self) -> int:
         row = self._conn.execute("SELECT COUNT(*) AS count FROM knowledge_entries").fetchone()
@@ -81,6 +89,10 @@ class KnowledgeStore:
 
     def index_default_roots(self) -> KnowledgeIndexResult:
         resolved = [Path(root).expanduser() for root in self._default_roots]
+        return self.index_paths(resolved)
+
+    def index_vault_roots(self) -> KnowledgeIndexResult:
+        resolved = [Path(root).expanduser() for root in self._vault_roots]
         return self.index_paths(resolved)
 
     def index_paths(self, paths: Sequence[Path | str]) -> KnowledgeIndexResult:
@@ -158,7 +170,16 @@ class KnowledgeStore:
             )
         return result
 
-    def search(self, query: str, *, limit: int = 5) -> list[KnowledgeRecord]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        roots: Sequence[str] | None = None,
+        suffixes: Sequence[str] | None = None,
+    ) -> list[KnowledgeRecord]:
+        if roots and self._auto_index_on_search:
+            self.index_paths(roots)
         if self.count() == 0 and self._auto_index_on_search and self._default_roots:
             self.index_default_roots()
 
@@ -184,10 +205,17 @@ class KnowledgeStore:
         scores = matrix @ query_vector
         lowered_query = query.lower()
         records: list[KnowledgeRecord] = []
+        resolved_roots = {str(Path(root).expanduser().resolve()) for root in (roots or ())}
+        suffix_filter = {suffix.lower() for suffix in suffixes or ()}
         for row, score in zip(rows, scores.tolist(), strict=True):
             title = str(row["title"])
             excerpt = str(row["excerpt"])
             path = str(row["path"])
+            root = str(row["root"])
+            if resolved_roots and root not in resolved_roots:
+                continue
+            if suffix_filter and Path(path).suffix.lower() not in suffix_filter:
+                continue
             lexical_bonus = 0.0
             if lowered_query and lowered_query in title.lower():
                 lexical_bonus += 0.12
@@ -200,7 +228,7 @@ class KnowledgeStore:
                     path=path,
                     title=title,
                     excerpt=excerpt,
-                    root=str(row["root"]),
+                    root=root,
                     content_type=str(row["content_type"]),
                     updated_at=str(row["updated_at"]),
                     score=round(float(score + lexical_bonus), 4),
@@ -210,6 +238,21 @@ class KnowledgeStore:
         if self._logger is not None:
             self._logger.log("knowledge_searched", query=query, results=min(limit, len(records)))
         return records[:limit]
+
+    def search_vault(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        roots: Sequence[str] | None = None,
+    ) -> list[KnowledgeRecord]:
+        selected_roots = tuple(roots or self._vault_roots)
+        return self.search(
+            query,
+            limit=limit,
+            roots=selected_roots,
+            suffixes=(".md", ".markdown"),
+        )
 
     def _collect_candidates(self, root: Path) -> list[Path]:
         if root.is_file():

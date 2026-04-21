@@ -39,6 +39,12 @@ def _build_agent(tmp_path: Path) -> Agent:
                 fn=lambda **_kwargs: None,
             ),
             ToolSpec(
+                name="vault_search",
+                description="vault",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
                 name="contacts_search",
                 description="contacts",
                 schema={},
@@ -117,6 +123,21 @@ def test_rule_based_plan_uses_notes_connector_for_note_queries(tmp_path: Path) -
     assert plan is not None
     assert plan["tool_name"] == "notes_search"
     assert plan["arguments"]["query"] == "propuesta acme"
+
+
+def test_rule_based_plan_uses_vault_search_for_obsidian_queries(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "busca en mi vault de obsidian todo lo relacionado con acme",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "vault_search"
+    assert plan["arguments"]["query"] == "obsidian acme"
 
 
 def test_rule_based_plan_does_not_hijack_mail_draft_request(tmp_path: Path) -> None:

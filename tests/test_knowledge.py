@@ -46,3 +46,30 @@ def test_knowledge_store_indexes_and_searches(tmp_path: Path) -> None:
     assert index_result.indexed_files >= 1
     assert results[0].title == "acme-notes.md"
     assert "Python" in results[0].excerpt
+
+
+def test_knowledge_store_search_vault_filters_markdown_roots(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    vault = tmp_path / "vault"
+    docs.mkdir()
+    vault.mkdir()
+    (docs / "todo.txt").write_text("Acme en texto plano", encoding="utf-8")
+    (vault / "acme-vault.md").write_text(
+        "Acme desde Obsidian con Python y estrategia.",
+        encoding="utf-8",
+    )
+
+    store = KnowledgeStore(
+        tmp_path / "knowledge.db",
+        encoder=FakeEncoder(),
+        default_roots=[str(docs), str(vault)],
+        vault_roots=[str(vault)],
+        auto_index_on_search=False,
+        max_files_per_root=20,
+    )
+
+    store.index_paths([docs, vault])
+    results = store.search_vault("acme python", limit=5, roots=[str(vault)])
+
+    assert len(results) == 1
+    assert results[0].title == "acme-vault.md"

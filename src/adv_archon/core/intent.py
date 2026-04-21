@@ -86,6 +86,8 @@ ASSISTANT_KEYWORDS = {
     "notas",
     "notion",
     "obsidian",
+    "vault",
+    "markdown",
 }
 KNOWLEDGE_ASSISTANT_KEYWORDS = {
     "nota",
@@ -214,8 +216,16 @@ class IntentRouter:
         category = max(category_scores, key=lambda name: category_scores[name])
         if category_scores[category] == 0:
             category = "chat"
+        if (
+            category == "chat"
+            and context is not None
+            and context.active_profile != "general"
+            and _contains_any(text, PLAN_KEYWORDS)
+        ):
+            category = "assistant"
+            reasons.append("perfil activo aplicado")
 
-        profile = self._choose_profile(category, text)
+        profile = self._choose_profile(category, text, context)
         needs_plan = category in {"coding", "assistant", "research"} or _contains_any(
             text, PLAN_KEYWORDS
         ) or _contains_any(
@@ -241,7 +251,11 @@ class IntentRouter:
         )
 
     @staticmethod
-    def _choose_profile(category: str, text: str) -> str:
+    def _choose_profile(
+        category: str,
+        text: str,
+        context: RuntimeContext | None = None,
+    ) -> str:
         if category == "coding":
             return "coding"
         if category in {"web", "research"}:
@@ -251,8 +265,21 @@ class IntentRouter:
                 return "work"
             if any(token in text for token in {"familia", "casa", "personal"}):
                 return "personal"
+        if context is not None and context.active_profile != "general":
+            return context.active_profile
         return "general"
 
 
 def _contains_any(text: str, words: set[str]) -> bool:
-    return any(word in text for word in words)
+    for word in words:
+        if " " in word:
+            if word in text:
+                return True
+            continue
+        if len(word) <= 3:
+            if re.search(rf"(?<!\w){re.escape(word)}(?!\w)", text):
+                return True
+            continue
+        if word in text:
+            return True
+    return False

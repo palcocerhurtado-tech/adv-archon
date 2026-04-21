@@ -48,6 +48,45 @@ class FakeMemory:
     pass
 
 
+class FakeKnowledgeTools:
+    def vault_search(self, query: str, limit: int = 5) -> object:
+        from adv_archon.tools.knowledge_tools import ToolResult
+
+        return ToolResult(
+            name="vault_search",
+            payload={
+                "profile": "work",
+                "results": [
+                    {
+                        "title": "acme.md",
+                        "path": "/tmp/acme.md",
+                        "excerpt": f"resultado para {query}",
+                    }
+                ],
+            },
+        )
+
+
+class FakeProfile:
+    def __init__(self, name: str) -> None:
+        self.name = name
+        self.description = f"Perfil {name}"
+        self.knowledge_roots = ("~/Documents",)
+        self.vault_roots = ("~/Vault",)
+
+
+class FakeProfileManager:
+    def __init__(self) -> None:
+        self.active_profile = "general"
+
+    def describe(self) -> FakeProfile:
+        return FakeProfile(self.active_profile)
+
+    def set_active_profile(self, profile_name: str) -> str:
+        self.active_profile = profile_name
+        return profile_name
+
+
 class FakeAutoMode:
     def status(self) -> str:
         return "off"
@@ -97,6 +136,9 @@ def build_services() -> CommandServices:
         auto_mode=FakeAutoMode(),
         shell_tool=FakeShellTool(),
         python_tool=FakePythonTool(),
+        knowledge_tools=FakeKnowledgeTools(),
+        profile_manager=FakeProfileManager(),
+        on_profile_changed=lambda _profile: None,
         tts=FakeTTS(),
         stt=FakeSTT(),
     )
@@ -120,3 +162,22 @@ def test_listen_command_injects_transcribed_prompt() -> None:
     assert result.handled is True
     assert result.injected_prompt == "abre el README"
     assert services.renderer.infos[-1] == "Dictado: abre el README"
+
+
+def test_profile_command_switches_active_profile() -> None:
+    services = build_services()
+
+    result = handle_command("/profile work", services=services)
+
+    assert result.handled is True
+    assert services.profile_manager.active_profile == "work"
+    assert services.renderer.infos[-1].startswith("Perfil activo: work")
+
+
+def test_vault_command_renders_results() -> None:
+    services = build_services()
+
+    result = handle_command("/vault acme", services=services)
+
+    assert result.handled is True
+    assert "acme.md" in services.renderer.infos[-1]

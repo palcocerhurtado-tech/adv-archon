@@ -64,6 +64,7 @@ class RuntimeContext:
     now: datetime
     git: GitContext
     working_set: WorkingSet
+    active_profile: str = "general"
 
     def greeting(self) -> str:
         time_of_day = _time_of_day(self.now.hour)
@@ -80,13 +81,18 @@ class RuntimeContext:
             "Runtime context:",
             f"- Local time: {WEEKDAY_NAMES[self.now.weekday()]}, {self.now:%H:%M}",
             f"- Current directory: {self.cwd}",
+            f"- Active profile: {self.active_profile}",
             f"- Git: {self.git.summary()}",
             f"- Working set: {self.working_set.summary()}",
         ]
         return "\n".join(lines)
 
 
-def capture_runtime_context(cwd: Path | None = None) -> RuntimeContext:
+def capture_runtime_context(
+    cwd: Path | None = None,
+    *,
+    active_profile: str = "general",
+) -> RuntimeContext:
     resolved_cwd = (cwd or Path.cwd()).resolve()
     git = _capture_git_context(resolved_cwd)
     project_root = git.repo_root or _find_project_root(resolved_cwd) or resolved_cwd
@@ -96,6 +102,7 @@ def capture_runtime_context(cwd: Path | None = None) -> RuntimeContext:
         now=datetime.now(),
         git=git,
         working_set=working_set,
+        active_profile=active_profile,
     )
 
 

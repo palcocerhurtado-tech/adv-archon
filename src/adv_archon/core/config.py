@@ -9,6 +9,8 @@ from typing import Any
 
 from dotenv import load_dotenv
 
+from adv_archon.core.profiles import ProfileDefinition
+
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_SYSTEM_PROMPT = PACKAGE_ROOT / "resources" / "system.md"
 DEFAULT_SHELL_WHITELIST = (
@@ -68,6 +70,7 @@ class PathsConfig:
     knowledge_db: Path = field(init=False)
     tasks_db: Path = field(init=False)
     browser_profile_dir: Path = field(init=False)
+    profile_state_file: Path = field(init=False)
     sessions_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
 
@@ -79,6 +82,7 @@ class PathsConfig:
         self.knowledge_db = self.root / "knowledge.db"
         self.tasks_db = self.root / "tasks.db"
         self.browser_profile_dir = self.root / "browser-profile"
+        self.profile_state_file = self.root / "active-profile.txt"
         self.sessions_dir = self.root / "sessions"
         self.logs_dir = self.root / "logs"
 
@@ -112,6 +116,7 @@ class MemoryConfig:
 @dataclass(slots=True)
 class KnowledgeConfig:
     default_roots: tuple[str, ...] = ("~",)
+    vault_roots: tuple[str, ...] = ()
     auto_index_on_search: bool = True
     max_files_per_root: int = 2000
     max_file_bytes: int = 2_000_000
@@ -159,6 +164,12 @@ class VoiceConfig:
 
 
 @dataclass(slots=True)
+class ProfilesConfig:
+    default_profile: str = "general"
+    definitions: dict[str, ProfileDefinition] = field(default_factory=dict)
+
+
+@dataclass(slots=True)
 class AppConfig:
     paths: PathsConfig
     llm: LLMConfig
@@ -169,6 +180,7 @@ class AppConfig:
     tasks: TasksConfig
     browser: BrowserConfig
     voice: VoiceConfig
+    profiles: ProfilesConfig
     system_prompt_path: Path
 
 
@@ -245,8 +257,17 @@ def load_app_config(
     )
     if not isinstance(default_roots, list):
         default_roots = ["~"]
+    vault_roots = _lookup(
+        data,
+        "knowledge",
+        "vault_roots",
+        default=[],
+    )
+    if not isinstance(vault_roots, list):
+        vault_roots = []
     knowledge = KnowledgeConfig(
         default_roots=tuple(str(item) for item in default_roots),
+        vault_roots=tuple(str(item) for item in vault_roots),
         auto_index_on_search=bool(
             _lookup(data, "knowledge", "auto_index_on_search", default=True)
         ),
@@ -308,6 +329,32 @@ def load_app_config(
         porcupine_access_key=os.getenv("PORCUPINE_ACCESS_KEY")
         or _lookup(data, "voice", "porcupine_access_key", default=None),
     )
+    profiles_data = _lookup(data, "profiles", default={})
+    if not isinstance(profiles_data, dict):
+        profiles_data = {}
+    definitions: dict[str, ProfileDefinition] = {}
+    for profile_name, raw_entry in profiles_data.items():
+        if profile_name == "default" or not isinstance(raw_entry, dict):
+            continue
+        raw_knowledge_roots = raw_entry.get("knowledge_roots", [])
+        if not isinstance(raw_knowledge_roots, list):
+            raw_knowledge_roots = []
+        raw_vault_roots = raw_entry.get("vault_roots", [])
+        if not isinstance(raw_vault_roots, list):
+            raw_vault_roots = []
+        definitions[profile_name] = ProfileDefinition(
+            name=profile_name,
+            description=str(raw_entry.get("description", "")).strip()
+            or f"Perfil {profile_name}.",
+            system_hint=str(raw_entry.get("system_hint", "")).strip()
+            or f"Prioritize the {profile_name} profile.",
+            knowledge_roots=tuple(str(item) for item in raw_knowledge_roots),
+            vault_roots=tuple(str(item) for item in raw_vault_roots),
+        )
+    profiles = ProfilesConfig(
+        default_profile=str(profiles_data.get("default", "general")),
+        definitions=definitions,
+    )
 
     system_prompt_path = system_prompt_override or DEFAULT_SYSTEM_PROMPT
 
@@ -321,5 +368,6 @@ def load_app_config(
         tasks=tasks,
         browser=browser,
         voice=voice,
+        profiles=profiles,
         system_prompt_path=system_prompt_path,
     )

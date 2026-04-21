@@ -10,7 +10,9 @@ from adv_archon.core.costs import UsageLedger
 from adv_archon.core.llm import LLMRouter, ProviderMode
 from adv_archon.core.logging import AppLogger
 from adv_archon.core.memory import MemoryRecord, MemoryStore
+from adv_archon.core.profiles import ProfileManager
 from adv_archon.tools.files import read_file
+from adv_archon.tools.knowledge_tools import KnowledgeTools
 from adv_archon.tools.python_sandbox import PythonSandboxTool
 from adv_archon.tools.shell import AutoModeManager, ShellTool, format_shell_result
 from adv_archon.tools.web import web_search
@@ -40,6 +42,9 @@ class CommandServices:
     auto_mode: AutoModeManager
     shell_tool: ShellTool
     python_tool: PythonSandboxTool
+    knowledge_tools: KnowledgeTools
+    profile_manager: ProfileManager
+    on_profile_changed: Callable[[str], None]
     tts: MacTextToSpeech
     stt: WhisperSpeechToText
 
@@ -65,6 +70,17 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.llm.set_mode(cast(ProviderMode, argument))
         services.logger.log("mode_changed", mode=argument)
         services.renderer.show_info(f"Modo cambiado a {argument}.")
+        return CommandResult(handled=True)
+
+    if command == "/profile":
+        if not argument or argument == "status":
+            profile = services.profile_manager.describe()
+            services.renderer.show_info(_format_profile(profile))
+            return CommandResult(handled=True)
+        profile_name = services.profile_manager.set_active_profile(argument)
+        services.on_profile_changed(profile_name)
+        services.logger.log("profile_changed", profile=profile_name)
+        services.renderer.show_info(_format_profile(services.profile_manager.describe()))
         return CommandResult(handled=True)
 
     if command == "/auto":
@@ -139,6 +155,22 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
             for item in web_result.payload["results"]
         ]
         services.renderer.show_info("\n".join(lines) if lines else "Sin resultados.")
+        return CommandResult(handled=True)
+
+    if command == "/vault":
+        if not argument:
+            services.renderer.show_error("Uso: /vault <query>")
+            return CommandResult(handled=True)
+        vault_result = services.knowledge_tools.vault_search(argument, limit=5)
+        services.logger.log(
+            "slash_vault_search",
+            query=argument,
+            results=len(vault_result.payload["results"]),
+            profile=vault_result.payload.get("profile"),
+        )
+        services.renderer.show_info(
+            _format_knowledge_results(vault_result.payload, label="Vault")
+        )
         return CommandResult(handled=True)
 
     if command == "/run":
@@ -227,6 +259,40 @@ def _format_memory_records(records: list[MemoryRecord]) -> str:
         score = f" | score: {record.score:.2f}" if record.score is not None else ""
         descriptor = f"{record.memory_type}/{record.namespace}"
         lines.append(f"- [#{record.id}] ({descriptor}) {record.content}{tags}{score}")
+    return "\n".join(lines)
+
+
+def _format_profile(profile: object) -> str:
+    from adv_archon.core.profiles import ProfileDefinition
+
+    active_profile = cast(ProfileDefinition, profile)
+    lines = [
+        f"Perfil activo: {active_profile.name}",
+        active_profile.description,
+    ]
+    if active_profile.knowledge_roots:
+        lines.append(f"Raices de conocimiento: {', '.join(active_profile.knowledge_roots)}")
+    if active_profile.vault_roots:
+        lines.append(f"Vaults Markdown: {', '.join(active_profile.vault_roots)}")
+    return "\n".join(lines)
+
+
+def _format_knowledge_results(payload: dict[str, object], *, label: str) -> str:
+    raw_results = payload.get("results", [])
+    profile = payload.get("profile")
+    if not isinstance(raw_results, list) or not raw_results:
+        prefix = f"{label} ({profile})" if profile else label
+        return f"{prefix}: sin resultados."
+    lines = [f"{label} ({profile or 'general'}):"]
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        title = str(item.get("title", "sin titulo"))
+        path = str(item.get("path", ""))
+        excerpt = str(item.get("excerpt", "")).strip()
+        lines.append(f"- {title} | {path}")
+        if excerpt:
+            lines.append(f"  {excerpt[:220]}")
     return "\n".join(lines)
 
 

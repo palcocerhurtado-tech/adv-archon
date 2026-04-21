@@ -16,6 +16,7 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `core/tasks.py`: persistent scheduled tasks and local `launchd` scheduler support
 - `core/costs.py`: in-session token and cost accounting
 - `core/logging.py`: local JSON session event logging
+- `core/profiles.py`: persistent runtime profiles and profile-scoped roots
 - `core/privacy.py`: optional placeholder-based PII redaction for cloud LLM calls
 - `core/daily.py`: proactive daily summary routine from context, logs, memory, and git state
 - `core/agent.py`: agent loop, planner step, and tool dispatch
@@ -24,6 +25,7 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `tools/task_tools.py`: persistent task creation, listing, completion, cancellation, and scheduler install
 - `tools/personal.py`: macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
 - `tools/browser.py`: managed Playwright session for browser automation
+- `tools/knowledge_tools.py`: explicit knowledge and Markdown vault search tools
 - `tools/shell.py`: shell execution policy, whitelist, blacklist, and auto mode
 - `tools/python_sandbox.py`: ephemeral Python snippet execution
 - `tools/mac.py`: clipboard and `open` integration for macOS
@@ -37,9 +39,10 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 2. Ask the planner model whether to answer directly or call a tool
 3. Inject runtime context and relevant long-term memories into the turn
 4. Auto-search the local knowledge base when the request looks document- or assistant-heavy
-5. Execute tools transparently, including multi-step operator flows
-6. Feed tool results back into the conversation
-7. Stream the final user-facing answer and record usage/log events
+5. Scope knowledge and vault search through the active runtime profile when configured
+6. Execute tools transparently, including multi-step operator flows
+7. Feed tool results back into the conversation
+8. Stream the final user-facing answer and record usage/log events
 
 ## Intent and operator flow
 
@@ -57,6 +60,13 @@ Phase 2 expands the assistant in three directions:
 1. `Persistent tasks`: reminders and recurring tasks live in `tasks.db`, can be queried in natural language, and can fire via `launchd`.
 2. `Personal connectors`: ADV ARCHON can inspect Calendar, Reminders, Notes, Contacts, and create Mail drafts, always keeping user-visible confirmation for state-changing actions.
 3. `Browser automation`: a managed Playwright session allows supervised browsing, text extraction, screenshots, and guided form interaction.
+
+## Phase 3 profile-aware knowledge
+
+The current Phase 3 layer adds two local-first upgrades:
+
+1. `Profiles`: ADV ARCHON can keep a persistent active profile such as `work`, `personal`, `research`, or `coding`, and uses it as extra context when routing and answering.
+2. `Markdown vaults`: configured Markdown or Obsidian roots can be searched directly through a dedicated tool and slash command, instead of relying only on the broad knowledge base.
 
 ## Command execution policy
 

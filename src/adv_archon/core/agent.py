@@ -109,6 +109,11 @@ NOTE_KEYWORDS = {
     "notas",
     "notes",
 }
+VAULT_KEYWORDS = {
+    "markdown",
+    "obsidian",
+    "vault",
+}
 CONTACT_KEYWORDS = {
     "contacto",
     "contactos",
@@ -167,6 +172,7 @@ STOPWORDS = {
     "sus",
     "tengo",
     "todo",
+    "vault",
     "ver",
     "y",
 }
@@ -562,6 +568,7 @@ class Agent:
         wants_tasks = _contains_any(normalized, TASK_KEYWORDS)
         wants_reminders = _contains_any(normalized, REMINDER_APP_KEYWORDS)
         wants_notes = _contains_any(normalized, NOTE_KEYWORDS)
+        wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
 
@@ -614,7 +621,22 @@ class Agent:
             }
 
         if (
+            wants_vault
+            and "vault_search" in self._tools
+            and "vault_search" not in executed
+        ):
+            query = _extract_focus_query(normalized)
+            if query:
+                return {
+                    "kind": "tool",
+                    "tool_name": "vault_search",
+                    "arguments": {"query": query, "limit": 10},
+                    "step_summary": "buscar en vault markdown",
+                }
+
+        if (
             wants_notes
+            and not wants_vault
             and _looks_like_notes_lookup(normalized)
             and "notes_search" in self._tools
             and "notes_search" not in executed
@@ -796,7 +818,18 @@ def _normalize_text(text: str) -> str:
 
 
 def _contains_any(text: str, keywords: set[str]) -> bool:
-    return any(keyword in text for keyword in keywords)
+    for keyword in keywords:
+        if " " in keyword:
+            if keyword in text:
+                return True
+            continue
+        if len(keyword) <= 3:
+            if re.search(rf"(?<!\w){re.escape(keyword)}(?!\w)", text):
+                return True
+            continue
+        if keyword in text:
+            return True
+    return False
 
 
 def _looks_like_calendar_lookup(text: str) -> bool:

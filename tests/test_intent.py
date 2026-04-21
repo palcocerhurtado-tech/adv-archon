@@ -59,3 +59,30 @@ def test_intent_router_does_not_force_knowledge_for_calendar_tasks_query() -> No
 
     assert analysis.category == "assistant"
     assert analysis.needs_knowledge is False
+
+
+def test_intent_router_inherits_active_profile_when_relevant() -> None:
+    router = IntentRouter()
+    context = RuntimeContext(
+        cwd=Path("/tmp/home"),
+        now=__import__("datetime").datetime(2026, 4, 21, 9, 0),
+        git=GitContext(
+            repo_root=None,
+            branch=None,
+            dirty=False,
+            changed_files=0,
+            changed_paths=[],
+        ),
+        working_set=WorkingSet(
+            project_root=Path("/tmp/home"),
+            project_name="home",
+            markers=[],
+            top_entries=[],
+        ),
+        active_profile="work",
+    )
+
+    analysis = router.analyze("organiza mis prioridades para hoy", context)
+
+    assert analysis.category == "assistant"
+    assert analysis.profile == "work"

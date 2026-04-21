@@ -14,9 +14,11 @@ from adv_archon.core.knowledge import KnowledgeStore
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.logging import AppLogger
 from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
+from adv_archon.core.profiles import ProfileManager
 from adv_archon.core.session import SessionStore
 from adv_archon.core.tasks import TaskStore
 from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
+from adv_archon.tools.knowledge_tools import KnowledgeTools, build_knowledge_tool_specs
 from adv_archon.tools.mac import MacTools, build_mac_tool_specs
 from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
@@ -83,6 +85,11 @@ class ReplApp:
             default_cwd=project_root,
         )
         encoder = SentenceTransformerEncoder(config.memory.embedding_model)
+        self._profile_manager = ProfileManager(
+            config.paths.profile_state_file,
+            default_profile=config.profiles.default_profile,
+            definitions=config.profiles.definitions,
+        )
         self._tts = MacTextToSpeech(
             enabled=config.voice.enabled,
             voice_name=config.voice.say_voice,
@@ -113,11 +120,16 @@ class ReplApp:
         self._knowledge_store = KnowledgeStore(
             config.paths.knowledge_db,
             encoder=encoder,
-            default_roots=config.knowledge.default_roots,
+            default_roots=self._profile_manager.knowledge_roots() or config.knowledge.default_roots,
+            vault_roots=self._profile_manager.vault_roots() or config.knowledge.vault_roots,
             auto_index_on_search=config.knowledge.auto_index_on_search,
             max_files_per_root=config.knowledge.max_files_per_root,
             max_file_bytes=config.knowledge.max_file_bytes,
             logger=self._logger,
+        )
+        self._knowledge_tools = KnowledgeTools(
+            self._knowledge_store,
+            profile_manager=self._profile_manager,
         )
         self._task_store = TaskStore(
             config.paths.tasks_db,
@@ -172,6 +184,9 @@ class ReplApp:
             auto_mode=self._auto_mode,
             shell_tool=self._shell_tool,
             python_tool=self._python_tool,
+            knowledge_tools=self._knowledge_tools,
+            profile_manager=self._profile_manager,
+            on_profile_changed=self._apply_profile,
             tts=self._tts,
             stt=self._stt,
         )
@@ -180,6 +195,7 @@ class ReplApp:
             cwd=project_root,
             incognito=incognito,
             mode=self._llm.mode,
+            active_profile=self._profile_manager.active_profile,
             voice_enabled=config.voice.enabled,
         )
         if auto_requested:
@@ -235,7 +251,10 @@ class ReplApp:
         return self._runtime_context().greeting()
 
     def _runtime_context(self) -> RuntimeContext:
-        return capture_runtime_context(self._project_root)
+        return capture_runtime_context(
+            self._project_root,
+            active_profile=self._profile_manager.active_profile,
+        )
 
     def _confirm(self, question: str) -> bool:
         answer = self._prompt_session.prompt(f"{question} (y/N) ").strip().lower()
@@ -316,6 +335,18 @@ class ReplApp:
             redaction_items=event.redaction_items,
         )
 
+    def _apply_profile(self, profile_name: str) -> None:
+        profile_roots = self._profile_manager.knowledge_roots(profile_name)
+        vault_roots = self._profile_manager.vault_roots(profile_name)
+        if profile_roots:
+            self._knowledge_store.set_default_roots(profile_roots)
+        else:
+            self._knowledge_store.set_default_roots(self._config.knowledge.default_roots)
+        if vault_roots:
+            self._knowledge_store.set_vault_roots(vault_roots)
+        else:
+            self._knowledge_store.set_vault_roots(self._config.knowledge.vault_roots)
+
     def _build_agent_tools(self) -> list[ToolSpec]:
         specs: list[ToolSpec] = []
         for definition in build_shell_tool_specs(self._shell_tool):
@@ -364,6 +395,15 @@ class ReplApp:
                 )
             )
         for definition in build_browser_tool_specs(self._browser_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_knowledge_tool_specs(self._knowledge_tools):
             specs.append(
                 ToolSpec(
                     name=definition["name"],

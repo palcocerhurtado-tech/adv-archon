@@ -23,6 +23,9 @@ class MemoryRecord:
     content: str
     tags: list[str]
     source: str
+    memory_type: str
+    namespace: str
+    metadata: dict[str, Any]
     created_at: str
     updated_at: str
     score: float | None = None
@@ -72,6 +75,9 @@ class MemoryStore:
         tags: Sequence[str] | None = None,
         *,
         source: str = "manual",
+        memory_type: str = "fact",
+        namespace: str = "general",
+        metadata: dict[str, Any] | None = None,
     ) -> MemoryRecord:
         if not self._persist:
             raise PermissionError("El modo incógnito no permite escribir memoria persistente.")
@@ -80,11 +86,20 @@ class MemoryStore:
         if not clean_content:
             raise ValueError("No se puede recordar un texto vacío.")
         clean_tags = _normalize_tags(tags or [])
-        vector = self._encode_text(clean_content, clean_tags)
+        clean_memory_type = memory_type.strip() or "fact"
+        clean_namespace = namespace.strip() or "general"
+        clean_metadata = metadata or {}
+        vector = self._encode_text(
+            clean_content,
+            clean_tags,
+            memory_type=clean_memory_type,
+            namespace=clean_namespace,
+        )
         timestamp = datetime.now(UTC).isoformat()
         existing = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
+                   created_at, updated_at, embedding_json
             FROM memories
             WHERE content = ?
             """,
@@ -98,16 +113,22 @@ class MemoryStore:
                     content,
                     tags_json,
                     source,
+                    memory_type,
+                    namespace,
+                    metadata_json,
                     embedding_json,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clean_content,
                     json.dumps(clean_tags, ensure_ascii=False),
                     source,
+                    clean_memory_type,
+                    clean_namespace,
+                    json.dumps(clean_metadata, ensure_ascii=False),
                     json.dumps(vector.tolist()),
                     timestamp,
                     timestamp,
@@ -124,12 +145,16 @@ class MemoryStore:
             self._conn.execute(
                 """
                 UPDATE memories
-                SET tags_json = ?, source = ?, embedding_json = ?, updated_at = ?
+                SET tags_json = ?, source = ?, memory_type = ?, namespace = ?,
+                    metadata_json = ?, embedding_json = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
                     json.dumps(merged_tags, ensure_ascii=False),
                     source,
+                    clean_memory_type,
+                    clean_namespace,
+                    json.dumps(clean_metadata, ensure_ascii=False),
                     json.dumps(vector.tolist()),
                     timestamp,
                     memory_id,
@@ -144,13 +169,25 @@ class MemoryStore:
             self._logger.log("memory_remembered", memory_id=record.id, tags=record.tags)
         return record
 
-    def recall(self, query: str, *, limit: int = 5) -> list[MemoryRecord]:
+    def recall(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        memory_type: str | None = None,
+        namespace: str | None = None,
+    ) -> list[MemoryRecord]:
         rows = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
+                   created_at, updated_at, embedding_json
             FROM memories
+            WHERE (? IS NULL OR memory_type = ?)
+              AND (? IS NULL OR namespace = ?)
             ORDER BY updated_at DESC
             """
+            ,
+            (memory_type, memory_type, namespace, namespace),
         ).fetchall()
         if not rows:
             return []
@@ -182,6 +219,9 @@ class MemoryStore:
                     content=content,
                     tags=tags,
                     source=str(row["source"]),
+                    memory_type=str(row["memory_type"]),
+                    namespace=str(row["namespace"]),
+                    metadata=json.loads(str(row["metadata_json"])),
                     created_at=str(row["created_at"]),
                     updated_at=str(row["updated_at"]),
                     score=round(float(score + lexical_bonus), 4),
@@ -199,7 +239,8 @@ class MemoryStore:
         pattern = f"%{query_or_id.lower()}%"
         rows = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
+                   created_at, updated_at, embedding_json
             FROM memories
             WHERE lower(content) LIKE ? OR lower(tags_json) LIKE ?
             ORDER BY updated_at DESC
@@ -230,7 +271,8 @@ class MemoryStore:
     def get_by_id(self, memory_id: int) -> MemoryRecord | None:
         row = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
+                   created_at, updated_at, embedding_json
             FROM memories
             WHERE id = ?
             """,
@@ -256,7 +298,8 @@ class MemoryStore:
         )
         rows = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
+                   created_at, updated_at, embedding_json
             FROM memories
             WHERE lower(content) LIKE ?
                OR lower(content) LIKE ?
@@ -283,6 +326,9 @@ class MemoryStore:
         ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
+    def context_matches(self, query: str, *, limit: int = 8) -> list[MemoryRecord]:
+        return self.recall(query, limit=limit)
+
     def _connect(self) -> sqlite3.Connection:
         readonly = not self._persist and self._db_path.exists()
         if self._persist:
@@ -306,12 +352,18 @@ class MemoryStore:
                 content TEXT NOT NULL,
                 tags_json TEXT NOT NULL DEFAULT '[]',
                 source TEXT NOT NULL,
+                memory_type TEXT NOT NULL DEFAULT 'fact',
+                namespace TEXT NOT NULL DEFAULT 'general',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
                 embedding_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             )
             """
         )
+        _ensure_column(conn, "memories", "memory_type", "TEXT NOT NULL DEFAULT 'fact'")
+        _ensure_column(conn, "memories", "namespace", "TEXT NOT NULL DEFAULT 'general'")
+        _ensure_column(conn, "memories", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_memories_updated_at
@@ -320,9 +372,23 @@ class MemoryStore:
         )
         conn.commit()
 
-    def _encode_text(self, content: str, tags: Sequence[str]) -> np.ndarray:
+    def _encode_text(
+        self,
+        content: str,
+        tags: Sequence[str],
+        *,
+        memory_type: str = "fact",
+        namespace: str = "general",
+    ) -> np.ndarray:
         joined_tags = ", ".join(tags)
-        text = content if not joined_tags else f"{content}\nTags: {joined_tags}"
+        fragments = [
+            content,
+            f"Type: {memory_type}",
+            f"Namespace: {namespace}",
+        ]
+        if joined_tags:
+            fragments.append(f"Tags: {joined_tags}")
+        text = "\n".join(fragments)
         vector = self._encoder.encode_texts([text])[0]
         return _normalize_vector(np.asarray(vector, dtype=np.float32))
 
@@ -333,6 +399,9 @@ class MemoryStore:
             content=str(row["content"]),
             tags=json.loads(str(row["tags_json"])),
             source=str(row["source"]),
+            memory_type=str(row["memory_type"]),
+            namespace=str(row["namespace"]),
+            metadata=json.loads(str(row["metadata_json"])),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )
@@ -348,3 +417,11 @@ def _normalize_vector(vector: np.ndarray) -> np.ndarray:
     if norm == 0.0:
         return vector
     return vector / norm
+
+
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, definition: str) -> None:
+    rows = conn.execute(f"PRAGMA table_info({table})").fetchall()
+    existing = {str(row[1]) for row in rows}
+    if column in existing:
+        return
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

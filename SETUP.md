@@ -14,6 +14,7 @@ From the repository root:
 
 ```bash
 uv sync --dev
+uv run playwright install chromium
 ./scripts/install.sh
 ```
 
@@ -67,6 +68,28 @@ stt_model = "small"
 stt_language = "es"
 wake_word_enabled = false
 wake_word_keyword = "jarvis"
+
+[knowledge]
+default_roots = ["~"]
+auto_index_on_search = true
+max_files_per_root = 2000
+max_file_bytes = 2000000
+search_limit = 5
+
+[ui]
+show_context_panel = true
+operator_max_tool_steps = 8
+
+[tasks]
+notifications_enabled = true
+launch_agent_interval_minutes = 30
+default_timezone = "Europe/Madrid"
+
+[browser]
+enabled = true
+headless = true
+browser_name = "chromium"
+default_timeout_ms = 10000
 ```
 
 ## Minimal `.env`
@@ -125,6 +148,62 @@ brew install portaudio
 ```
 
 Wake-word support is optional and uses `pvporcupine` plus `PORCUPINE_ACCESS_KEY`.
+
+## Personal connectors
+
+Phase 2 adds native macOS connectors for:
+
+- Calendar
+- Reminders
+- Notes
+- Contacts
+- Mail
+
+The first real use may trigger macOS permission prompts for your terminal app.
+
+## Browser automation
+
+Browser automation uses Playwright with a persistent local profile at:
+
+```text
+~/.adv-archon/browser-profile/
+```
+
+Install the browser runtime once:
+
+```bash
+uv run playwright install chromium
+```
+
+Navigation and extraction can run directly; state-changing actions such as clicks and form fills are still confirmed interactively.
+
+## Persistent tasks
+
+Persistent reminders and scheduled tasks are stored in:
+
+```text
+~/.adv-archon/tasks.db
+```
+
+ADV ARCHON can also install a `launchd` job in:
+
+```text
+~/Library/LaunchAgents/com.adv-archon.tasks.plist
+```
+
+That scheduler runs `adv-archon tasks run-due` on a recurring interval and shows macOS notifications for due tasks.
+
+## Read-only file learning
+
+ADV ARCHON can index your files as personal context without turning that into write access.
+
+Default behavior:
+
+- read access is broad across your configured knowledge roots
+- knowledge retrieval is automatic when the request looks document-heavy or assistant-like
+- writes still stay behind confirmation gates
+
+For broader access on macOS protected folders, you may need to grant Full Disk Access to the terminal app you use.
 
 ## Fallback without `uv`
 

@@ -225,7 +225,8 @@ def _format_memory_records(records: list[MemoryRecord]) -> str:
     for record in records:
         tags = f" | tags: {', '.join(record.tags)}" if record.tags else ""
         score = f" | score: {record.score:.2f}" if record.score is not None else ""
-        lines.append(f"- [#{record.id}] {record.content}{tags}{score}")
+        descriptor = f"{record.memory_type}/{record.namespace}"
+        lines.append(f"- [#{record.id}] ({descriptor}) {record.content}{tags}{score}")
     return "\n".join(lines)
 
 

@@ -10,6 +10,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 
 cd "${PROJECT_DIR}"
-uv tool install .
+uv tool install . --reinstall
 
 echo "Installed adv-archon from ${PROJECT_DIR}"
+echo "For browser automation, run once: uv run playwright install chromium"

@@ -7,6 +7,7 @@ from pathlib import Path
 from adv_archon.core.context import RuntimeContext, capture_runtime_context
 from adv_archon.core.logging import LogEntry, read_log_entries
 from adv_archon.core.memory import MemoryRecord, MemoryStore
+from adv_archon.core.tasks import TaskRecord, TaskStore
 
 
 @dataclass(slots=True)
@@ -25,6 +26,7 @@ class DailyReport:
     context: RuntimeContext
     activity: DailyActivity
     pending_notes: list[MemoryRecord]
+    scheduled_tasks: list[TaskRecord]
 
     def render(self) -> str:
         lines = [
@@ -55,6 +57,17 @@ class DailyReport:
         lines.extend(
             [
                 "",
+                "Tareas programadas:",
+            ]
+        )
+        if self.scheduled_tasks:
+            lines.extend(_render_task_lines(self.scheduled_tasks))
+        else:
+            lines.append("- No hay tareas persistentes abiertas.")
+
+        lines.extend(
+            [
+                "",
                 "Repo actual:",
                 f"- proyecto: {self.context.working_set.project_name}",
                 f"- git: {self.context.git.summary()}",
@@ -73,16 +86,19 @@ def build_daily_report(
     project_root: Path,
     logs_dir: Path,
     memory_store: MemoryStore,
+    task_store: TaskStore | None = None,
     target_day: date | None = None,
 ) -> DailyReport:
     context = capture_runtime_context(project_root)
     entries = read_log_entries(logs_dir, day=target_day)
     pending_notes = memory_store.pending_notes(limit=5)
+    scheduled_tasks = task_store.list_tasks(limit=5) if task_store is not None else []
     return DailyReport(
         generated_at=datetime.now(),
         context=context,
         activity=_summarize_activity(entries),
         pending_notes=pending_notes,
+        scheduled_tasks=scheduled_tasks,
     )
 
 
@@ -144,4 +160,14 @@ def _render_note_lines(records: list[MemoryRecord]) -> list[str]:
     for record in records:
         tags = f" | tags: {', '.join(record.tags)}" if record.tags else ""
         lines.append(f"- [#{record.id}] {record.content}{tags}")
+    return lines
+
+
+def _render_task_lines(records: list[TaskRecord]) -> list[str]:
+    lines: list[str] = []
+    for record in records:
+        recurrence = f" | recurrencia: {record.recurrence}" if record.recurrence else ""
+        lines.append(
+            f"- [#{record.id}] {record.title} | {record.status} | {record.due_at}{recurrence}"
+        )
     return lines

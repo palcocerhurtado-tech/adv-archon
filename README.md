@@ -19,7 +19,13 @@ This repository currently includes:
 - Local and web tools: `read_file`, `list_dir`, `web_search`, `web_fetch`
 - Safe execution tools: `shell_exec`, `python_exec`, `clipboard_read`, `clipboard_write`, `open_app`
 - Runtime context awareness: cwd, git state, and project working set
-- Long-term memory backed by SQLite and local embeddings
+- Intent auto-router for chat, code, docs, web, shell, and assistant tasks
+- Structured long-term memory backed by SQLite and local embeddings
+- Local knowledge base indexed from your files in read-only mode
+- Operator-style planning with context panel and next-step visibility
+- Persistent tasks with a local SQLite scheduler and `launchd` integration
+- Personal macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
+- Managed browser automation for navigation, extraction, screenshots, and supervised form work
 - Session cost ledger and local JSON logs
 - Auto mode with confirmation before enabling
 - Optional PII redaction before cloud LLM calls
@@ -33,7 +39,8 @@ This repository currently includes:
 
 1. Install dependencies with `uv sync --dev`
 2. Copy `.env.example` values into `~/.adv-archon/.env`
-3. Run `uv run adv-archon`
+3. Install Playwright's Chromium once with `uv run playwright install chromium`
+4. Run `uv run adv-archon`
 
 ## Usage
 
@@ -71,6 +78,13 @@ Daily routine:
 
 ```bash
 adv-archon daily
+```
+
+Task scheduler utilities:
+
+```bash
+adv-archon tasks
+adv-archon tasks run-due
 ```
 
 ## Current slash commands
@@ -112,6 +126,99 @@ redact_cloud_pii = true
 ```
 
 When enabled, ADV ARCHON replaces emails, phones, IBANs, and Spanish DNI/NIE identifiers with placeholders before sending cloud prompts, then restores them in the answer.
+
+## Local knowledge and read-only learning
+
+ADV ARCHON can learn about your work and preferences by indexing your local files into a private knowledge base under `~/.adv-archon/knowledge.db`.
+
+By default it now treats your home directory as the primary read-only knowledge space and uses that context automatically when relevant.
+
+It does not gain write access from that. File modifications still require explicit confirmation through the existing shell safety policy.
+
+You can tune the knowledge scope in `~/.adv-archon/config.toml`:
+
+```toml
+[knowledge]
+default_roots = ["~"]
+auto_index_on_search = true
+max_files_per_root = 2000
+max_file_bytes = 2000000
+search_limit = 5
+
+[ui]
+show_context_panel = true
+operator_max_tool_steps = 8
+```
+
+## Personal assistant connectors
+
+ADV ARCHON can now use native macOS apps in supervised mode:
+
+- Calendar: upcoming events
+- Reminders: list and create reminders
+- Notes: search note contents
+- Contacts: search people by name, email, or phone
+- Mail: draft emails after confirmation
+
+Useful natural-language prompts:
+
+```text
+que tengo esta semana en el calendario
+```
+
+```text
+crea un recordatorio para llamar a ACME mañana a las 9
+```
+
+```text
+busca en mis notas todo lo relacionado con propuesta acme
+```
+
+```text
+prepara un borrador de correo para este cliente con seguimiento de la propuesta
+```
+
+macOS may ask your terminal for access to Calendar, Reminders, Notes, Contacts, or Mail the first time.
+
+## Browser automation
+
+ADV ARCHON can keep a managed browser session and use it through natural language. Navigation and extraction are unattended; clicks, fills, and similar state-changing actions stay behind confirmation.
+
+Examples:
+
+```text
+abre la web de openai y saca una captura de la portada
+```
+
+```text
+navega a esta pagina, extrae el texto principal y resumelo
+```
+
+```text
+abre este formulario y rellena los campos, pero no envíes nada sin avisarme
+```
+
+Playwright stores its browser profile under `~/.adv-archon/browser-profile/`.
+
+## Persistent tasks
+
+ADV ARCHON can save private scheduled tasks in `~/.adv-archon/tasks.db` and trigger them with `launchd`.
+
+Examples:
+
+```text
+recuérdame mañana a las 9 que envíe la propuesta a ACME
+```
+
+```text
+crea una tarea recurrente todos los lunes para revisar leads
+```
+
+```text
+qué tareas persistentes tengo pendientes
+```
+
+To enable background task checks, ask ADV ARCHON naturally to install the scheduler, or use the task tool from the REPL and confirm when prompted.
 
 ## Voice
 

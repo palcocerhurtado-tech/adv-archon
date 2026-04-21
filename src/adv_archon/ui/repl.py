@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import suppress
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -9,13 +10,18 @@ from adv_archon.core.agent import Agent, ToolSpec
 from adv_archon.core.config import AppConfig
 from adv_archon.core.context import RuntimeContext, capture_runtime_context
 from adv_archon.core.costs import UsageLedger
+from adv_archon.core.knowledge import KnowledgeStore
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.logging import AppLogger
 from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
 from adv_archon.core.session import SessionStore
+from adv_archon.core.tasks import TaskStore
+from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
 from adv_archon.tools.mac import MacTools, build_mac_tool_specs
+from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
+from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
 from adv_archon.ui.commands import CommandServices, handle_command
 from adv_archon.ui.render import Renderer
 from adv_archon.voice.stt import WhisperSpeechToText
@@ -76,6 +82,7 @@ class ReplApp:
             logger=self._logger,
             default_cwd=project_root,
         )
+        encoder = SentenceTransformerEncoder(config.memory.embedding_model)
         self._tts = MacTextToSpeech(
             enabled=config.voice.enabled,
             voice_name=config.voice.say_voice,
@@ -100,7 +107,41 @@ class ReplApp:
         self._memory_store = MemoryStore(
             config.paths.memory_db,
             persist=not incognito,
-            encoder=SentenceTransformerEncoder(config.memory.embedding_model),
+            encoder=encoder,
+            logger=self._logger,
+        )
+        self._knowledge_store = KnowledgeStore(
+            config.paths.knowledge_db,
+            encoder=encoder,
+            default_roots=config.knowledge.default_roots,
+            auto_index_on_search=config.knowledge.auto_index_on_search,
+            max_files_per_root=config.knowledge.max_files_per_root,
+            max_file_bytes=config.knowledge.max_file_bytes,
+            logger=self._logger,
+        )
+        self._task_store = TaskStore(
+            config.paths.tasks_db,
+            timezone_name=config.tasks.default_timezone,
+            notifications_enabled=config.tasks.notifications_enabled,
+            logger=self._logger,
+        )
+        self._task_tools = TaskTools(
+            self._task_store,
+            confirm=self._confirm,
+            allow_mutations=not incognito,
+        )
+        self._personal_tools = PersonalTools(
+            confirm=self._confirm,
+            timezone_name=config.tasks.default_timezone,
+            logger=self._logger,
+        )
+        self._browser_tools = BrowserTools(
+            profile_dir=config.paths.browser_profile_dir,
+            enabled=config.browser.enabled,
+            browser_name=config.browser.browser_name,
+            headless=config.browser.headless,
+            default_timeout_ms=config.browser.default_timeout_ms,
+            confirm=self._confirm,
             logger=self._logger,
         )
         self._agent = Agent(
@@ -109,10 +150,13 @@ class ReplApp:
             session=self._session_store,
             project_root=project_root,
             max_tool_steps=config.ui.max_tool_steps,
+            operator_max_tool_steps=config.ui.operator_max_tool_steps,
             context_provider=self._runtime_context,
             memory_store=self._memory_store,
+            knowledge_store=self._knowledge_store,
             usage_callback=self._record_usage,
             auto_recall_limit=config.memory.auto_recall_limit,
+            auto_knowledge_limit=config.knowledge.search_limit,
             extra_tools=self._build_agent_tools(),
         )
         self._command_services = CommandServices(
@@ -150,13 +194,14 @@ class ReplApp:
             try:
                 raw = self._prompt_session.prompt("> ").strip()
             except EOFError:
-                self._tts.stop()
+                self._shutdown()
                 self._renderer.show_info("")
                 return 0
             except KeyboardInterrupt:
                 if self._tts.stop():
                     self._renderer.show_info("Voz detenida.")
                     continue
+                self._shutdown()
                 self._renderer.show_info("")
                 return 0
 
@@ -174,7 +219,7 @@ class ReplApp:
                 continue
             if command_result.handled:
                 if command_result.should_exit:
-                    self._tts.stop()
+                    self._shutdown()
                     return 0
                 if command_result.injected_prompt:
                     self._process_prompt(command_result.injected_prompt)
@@ -228,6 +273,9 @@ class ReplApp:
                 prompt,
                 on_tool=self._renderer.show_tool,
                 on_chunk=on_chunk,
+                on_context=self._renderer.show_context_panel
+                if self._config.ui.show_context_panel
+                else None,
             )
         except Exception as exc:
             self._renderer.show_error(str(exc))
@@ -242,6 +290,11 @@ class ReplApp:
             self._tts.speak_async(text)
         except Exception as exc:
             self._renderer.show_error(str(exc))
+
+    def _shutdown(self) -> None:
+        self._tts.stop()
+        with suppress(Exception):
+            self._browser_tools.browser_close()
 
     def _record_usage(self, phase: str, response: object) -> None:
         from adv_archon.core.llm_types import LLMResponse
@@ -264,7 +317,7 @@ class ReplApp:
         )
 
     def _build_agent_tools(self) -> list[ToolSpec]:
-        specs = []
+        specs: list[ToolSpec] = []
         for definition in build_shell_tool_specs(self._shell_tool):
             specs.append(
                 ToolSpec(
@@ -284,6 +337,33 @@ class ReplApp:
                 )
             )
         for definition in build_mac_tool_specs(self._mac_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_task_tool_specs(self._task_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_personal_tool_specs(self._personal_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_browser_tool_specs(self._browser_tools):
             specs.append(
                 ToolSpec(
                     name=definition["name"],

@@ -27,13 +27,20 @@ class FakeEncoder:
 def test_memory_store_remember_recall_and_forget(tmp_path: Path) -> None:
     store = MemoryStore(tmp_path / "memory.db", encoder=FakeEncoder())
 
-    first = store.remember("Pablo prefiere trabajar en Python", ["language", "code"])
+    first = store.remember(
+        "Pablo prefiere trabajar en Python",
+        ["language", "code"],
+        memory_type="preference",
+        namespace="coding",
+    )
     store.remember("Responder por defecto en espanol", ["language"])
 
     recalled = store.recall("python", limit=1)
 
     assert recalled[0].id == first.id
     assert recalled[0].content == "Pablo prefiere trabajar en Python"
+    assert recalled[0].memory_type == "preference"
+    assert recalled[0].namespace == "coding"
 
     deleted = store.forget_by_ids([first.id])
 
@@ -46,3 +53,15 @@ def test_memory_store_incognito_is_read_only(tmp_path: Path) -> None:
 
     with pytest.raises(PermissionError):
         store.remember("No persistir esto")
+
+
+def test_memory_store_can_filter_by_namespace(tmp_path: Path) -> None:
+    store = MemoryStore(tmp_path / "memory.db", encoder=FakeEncoder())
+
+    store.remember("Cliente Acme prefiere entregas semanales", namespace="clients")
+    store.remember("Pablo trabaja en Python", namespace="coding")
+
+    recalled = store.recall("python", limit=5, namespace="coding")
+
+    assert len(recalled) == 1
+    assert recalled[0].namespace == "coding"

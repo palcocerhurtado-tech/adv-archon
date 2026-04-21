@@ -65,6 +65,9 @@ class PathsConfig:
     env_file: Path = field(init=False)
     history_file: Path = field(init=False)
     memory_db: Path = field(init=False)
+    knowledge_db: Path = field(init=False)
+    tasks_db: Path = field(init=False)
+    browser_profile_dir: Path = field(init=False)
     sessions_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
 
@@ -73,6 +76,9 @@ class PathsConfig:
         self.env_file = self.root / ".env"
         self.history_file = self.root / "history.txt"
         self.memory_db = self.root / "memory.db"
+        self.knowledge_db = self.root / "knowledge.db"
+        self.tasks_db = self.root / "tasks.db"
+        self.browser_profile_dir = self.root / "browser-profile"
         self.sessions_dir = self.root / "sessions"
         self.logs_dir = self.root / "logs"
 
@@ -92,6 +98,8 @@ class LLMConfig:
 class UIConfig:
     show_tool_input: bool = True
     max_tool_steps: int = 4
+    operator_max_tool_steps: int = 8
+    show_context_panel: bool = True
 
 
 @dataclass(slots=True)
@@ -102,9 +110,33 @@ class MemoryConfig:
 
 
 @dataclass(slots=True)
+class KnowledgeConfig:
+    default_roots: tuple[str, ...] = ("~",)
+    auto_index_on_search: bool = True
+    max_files_per_root: int = 2000
+    max_file_bytes: int = 2_000_000
+    search_limit: int = 5
+
+
+@dataclass(slots=True)
 class ShellConfig:
     timeout_seconds: int = 20
     whitelist_commands: tuple[str, ...] = DEFAULT_SHELL_WHITELIST
+
+
+@dataclass(slots=True)
+class TasksConfig:
+    notifications_enabled: bool = True
+    launch_agent_interval_minutes: int = 30
+    default_timezone: str = "Europe/Madrid"
+
+
+@dataclass(slots=True)
+class BrowserConfig:
+    enabled: bool = True
+    headless: bool = True
+    browser_name: str = "chromium"
+    default_timeout_ms: int = 10000
 
 
 @dataclass(slots=True)
@@ -132,7 +164,10 @@ class AppConfig:
     llm: LLMConfig
     ui: UIConfig
     memory: MemoryConfig
+    knowledge: KnowledgeConfig
     shell: ShellConfig
+    tasks: TasksConfig
+    browser: BrowserConfig
     voice: VoiceConfig
     system_prompt_path: Path
 
@@ -189,6 +224,10 @@ def load_app_config(
     ui = UIConfig(
         show_tool_input=bool(_lookup(data, "ui", "show_tool_input", default=True)),
         max_tool_steps=int(_lookup(data, "ui", "max_tool_steps", default=4)),
+        operator_max_tool_steps=int(
+            _lookup(data, "ui", "operator_max_tool_steps", default=8)
+        ),
+        show_context_panel=bool(_lookup(data, "ui", "show_context_panel", default=True)),
     )
 
     memory = MemoryConfig(
@@ -197,6 +236,25 @@ def load_app_config(
         ),
         auto_recall_limit=int(_lookup(data, "memory", "auto_recall_limit", default=3)),
         slash_recall_limit=int(_lookup(data, "memory", "slash_recall_limit", default=5)),
+    )
+    default_roots = _lookup(
+        data,
+        "knowledge",
+        "default_roots",
+        default=["~"],
+    )
+    if not isinstance(default_roots, list):
+        default_roots = ["~"]
+    knowledge = KnowledgeConfig(
+        default_roots=tuple(str(item) for item in default_roots),
+        auto_index_on_search=bool(
+            _lookup(data, "knowledge", "auto_index_on_search", default=True)
+        ),
+        max_files_per_root=int(
+            _lookup(data, "knowledge", "max_files_per_root", default=2000)
+        ),
+        max_file_bytes=int(_lookup(data, "knowledge", "max_file_bytes", default=2_000_000)),
+        search_limit=int(_lookup(data, "knowledge", "search_limit", default=5)),
     )
     whitelist = _lookup(
         data,
@@ -210,6 +268,25 @@ def load_app_config(
     shell = ShellConfig(
         timeout_seconds=int(_lookup(data, "shell", "timeout_seconds", default=20)),
         whitelist_commands=tuple(str(item) for item in whitelist),
+    )
+    tasks = TasksConfig(
+        notifications_enabled=bool(
+            _lookup(data, "tasks", "notifications_enabled", default=True)
+        ),
+        launch_agent_interval_minutes=int(
+            _lookup(data, "tasks", "launch_agent_interval_minutes", default=30)
+        ),
+        default_timezone=str(
+            _lookup(data, "tasks", "default_timezone", default="Europe/Madrid")
+        ),
+    )
+    browser = BrowserConfig(
+        enabled=bool(_lookup(data, "browser", "enabled", default=True)),
+        headless=bool(_lookup(data, "browser", "headless", default=True)),
+        browser_name=str(_lookup(data, "browser", "browser_name", default="chromium")),
+        default_timeout_ms=int(
+            _lookup(data, "browser", "default_timeout_ms", default=10000)
+        ),
     )
     voice = VoiceConfig(
         enabled=bool(_lookup(data, "voice", "enabled", default=False)),
@@ -239,7 +316,10 @@ def load_app_config(
         llm=llm,
         ui=ui,
         memory=memory,
+        knowledge=knowledge,
         shell=shell,
+        tasks=tasks,
+        browser=browser,
         voice=voice,
         system_prompt_path=system_prompt_path,
     )

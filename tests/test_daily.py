@@ -6,6 +6,7 @@ import numpy as np
 from adv_archon.core.daily import build_daily_report
 from adv_archon.core.logging import AppLogger
 from adv_archon.core.memory import MemoryStore
+from adv_archon.core.tasks import TaskStore
 
 
 class FakeEncoder:
@@ -51,11 +52,19 @@ def test_build_daily_report_summarizes_logs_and_pending_notes(tmp_path: Path) ->
         encoder=FakeEncoder(),
     )
     memory_store.remember("TODO: revisar propuesta ACME", ["todo", "note"])
+    task_store = TaskStore(
+        tmp_path / "tasks.db",
+        timezone_name="Europe/Madrid",
+        notifications_enabled=False,
+        logger=logger,
+    )
+    task_store.create_task(title="Llamar a ACME", due_text="2026-04-22 09:00")
 
     report = build_daily_report(
         project_root=project_root,
         logs_dir=logs_dir,
         memory_store=memory_store,
+        task_store=task_store,
         target_day=date.today(),
     )
 
@@ -65,3 +74,4 @@ def test_build_daily_report_summarizes_logs_and_pending_notes(tmp_path: Path) ->
     assert "llamadas LLM: 1" in rendered
     assert "comandos shell: 1" in rendered
     assert "TODO: revisar propuesta ACME" in rendered
+    assert "Llamar a ACME" in rendered

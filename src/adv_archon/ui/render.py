@@ -4,6 +4,8 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.text import Text
 
+from adv_archon.core.agent import TurnContextSnapshot
+
 
 class Renderer:
     def __init__(self, console: Console | None = None) -> None:
@@ -14,6 +16,25 @@ class Renderer:
 
     def show_tool(self, name: str, arguments: dict[str, object]) -> None:
         self.console.print(f"[bold cyan][tool:{name}][/bold cyan] {arguments}")
+
+    def show_context_panel(self, snapshot: TurnContextSnapshot) -> None:
+        lines = [
+            f"Intent: {snapshot.intent}",
+            f"Perfil: {snapshot.profile}",
+            f"Modo: {snapshot.execution_mode}",
+            f"Siguiente paso: {snapshot.next_action}",
+        ]
+        if snapshot.reasons:
+            lines.append(f"Señales: {', '.join(snapshot.reasons)}")
+        if snapshot.memory_hits:
+            lines.append("Memoria:")
+            lines.extend(f"- {item}" for item in snapshot.memory_hits)
+        if snapshot.knowledge_hits:
+            lines.append("Conocimiento local:")
+            lines.extend(f"- {item}" for item in snapshot.knowledge_hits)
+        self.console.print(
+            Panel.fit("\n".join(lines), border_style="magenta", title="Contexto")
+        )
 
     def stream_chunk(self, chunk: str) -> None:
         self.console.print(chunk, end="")

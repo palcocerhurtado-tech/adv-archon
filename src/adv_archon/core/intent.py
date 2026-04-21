@@ -87,6 +87,19 @@ ASSISTANT_KEYWORDS = {
     "notion",
     "obsidian",
 }
+KNOWLEDGE_ASSISTANT_KEYWORDS = {
+    "nota",
+    "notas",
+    "notes",
+    "notion",
+    "obsidian",
+    "archivo",
+    "archivos",
+    "fichero",
+    "ficheros",
+    "documento",
+    "documentos",
+}
 BROWSER_KEYWORDS = {
     "navega",
     "navegador",
@@ -210,8 +223,11 @@ class IntentRouter:
         )
         needs_web = category in {"web", "research"}
         needs_shell = category in {"shell", "coding"}
-        needs_knowledge = category in {"documents", "assistant", "research"} or bool(
-            PATH_HINT_RE.search(user_input)
+        needs_knowledge = (
+            category in {"documents", "research"}
+            or bool(PATH_HINT_RE.search(user_input))
+            or _contains_any(text, DOCUMENT_KEYWORDS)
+            or _contains_any(text, KNOWLEDGE_ASSISTANT_KEYWORDS)
         )
 
         return IntentAnalysis(

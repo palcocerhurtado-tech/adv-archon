@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import io
+import warnings
+from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -111,18 +114,21 @@ def _read_by_extension(path: Path) -> str:
     suffix = path.suffix.lower()
     if suffix in TEXT_EXTENSIONS:
         return path.read_text(encoding="utf-8", errors="replace")
-    if suffix == ".pdf":
-        return _read_pdf(path)
-    if suffix == ".docx":
-        return _read_docx(path)
-    if suffix == ".xlsx":
-        return _read_xlsx(path)
-    if suffix == ".pptx":
-        return _read_pptx(path)
-    if suffix in {".html", ".htm"}:
-        return _read_html(path)
-    if suffix in IMAGE_EXTENSIONS:
-        return _read_image_with_ocr(path)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
+            if suffix == ".pdf":
+                return _read_pdf(path)
+            if suffix == ".docx":
+                return _read_docx(path)
+            if suffix == ".xlsx":
+                return _read_xlsx(path)
+            if suffix == ".pptx":
+                return _read_pptx(path)
+            if suffix in {".html", ".htm"}:
+                return _read_html(path)
+            if suffix in IMAGE_EXTENSIONS:
+                return _read_image_with_ocr(path)
     return path.read_text(encoding="utf-8", errors="replace")
 
 

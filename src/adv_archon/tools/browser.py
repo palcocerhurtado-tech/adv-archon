@@ -128,7 +128,7 @@ class BrowserTools:
         if not self._enabled:
             raise RuntimeError("La automatizacion de navegador esta desactivada en config.")
         try:
-            from playwright.sync_api import sync_playwright  # type: ignore[import-not-found]
+            from playwright.sync_api import sync_playwright
         except ImportError as exc:
             raise RuntimeError(
                 "Falta `playwright`. Instala dependencias y ejecuta `playwright install chromium`."

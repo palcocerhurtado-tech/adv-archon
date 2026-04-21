@@ -1,5 +1,7 @@
 from pathlib import Path
+from unittest.mock import patch
 
+import pytest
 from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
@@ -70,3 +72,27 @@ def test_read_file_pptx(tmp_path: Path) -> None:
 
     assert "# Slide 1" in result.payload["content"]
     assert "Demo" in result.payload["content"]
+
+
+def test_read_file_suppresses_noisy_document_output(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    target = tmp_path / "brief.pdf"
+    target.write_text("fake", encoding="utf-8")
+
+    def fake_read_pdf_ok(_path: Path) -> str:
+        import sys
+
+        sys.stdout.write("ruido stdout")
+        sys.stderr.write("ruido stderr")
+        return "contenido pdf"
+
+    with patch("adv_archon.tools.files._read_pdf", side_effect=fake_read_pdf_ok):
+        result = read_file(str(target))
+
+    captured = capsys.readouterr()
+
+    assert result.payload["content"] == "contenido pdf"
+    assert captured.out == ""
+    assert captured.err == ""

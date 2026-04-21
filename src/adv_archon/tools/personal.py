@@ -2,14 +2,19 @@ from __future__ import annotations
 
 import json
 import subprocess
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
+
+from dateutil.rrule import rrulestr  # type: ignore[import-untyped]
 
 from adv_archon.core.logging import AppLogger
 from adv_archon.core.tasks import parse_due_text
 
 ConfirmCallback = Callable[[str], bool]
+RECURRING_LOOKBACK_DAYS = 3650
 
 
 @dataclass(slots=True)
@@ -30,9 +35,37 @@ class PersonalTools:
         self._timezone_name = timezone_name
         self._logger = logger
 
-    def calendar_upcoming(self, days: int = 7, limit: int = 20) -> ToolResult:
-        payload = self._run_jxa(_calendar_script(days=days, limit=limit))
-        return ToolResult(name="calendar_upcoming", payload=payload)
+    def calendar_upcoming(
+        self,
+        days: int = 7,
+        limit: int = 20,
+        start_offset_days: int = 0,
+    ) -> ToolResult:
+        timezone = ZoneInfo(self._timezone_name)
+        now = datetime.now(timezone)
+        base_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        window_start = base_start + timedelta(days=max(0, start_offset_days))
+        window_end = window_start + timedelta(days=days)
+        raw_events = _parse_calendar_rows(
+            self._run_applescript(
+                _calendar_script(days=max(days + max(0, start_offset_days), days))
+            )
+        )
+        events = _expand_calendar_events(
+            raw_events,
+            window_start=window_start,
+            window_end=window_end,
+            limit=limit,
+            timezone=timezone,
+        )
+        return ToolResult(
+            name="calendar_upcoming",
+            payload={
+                "window_start": window_start.isoformat(),
+                "window_end": window_end.isoformat(),
+                "events": events,
+            },
+        )
 
     def reminders_list(self, limit: int = 20) -> ToolResult:
         payload = self._run_jxa(_reminders_script(limit=limit))
@@ -102,6 +135,20 @@ class PersonalTools:
             self._logger.log("personal_tool", payload_keys=sorted(payload.keys()))
         return payload
 
+    def _run_applescript(self, lines: list[str]) -> str:
+        command = ["osascript"]
+        for line in lines:
+            command.extend(["-e", line])
+        completed = subprocess.run(
+            command,
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode != 0:
+            raise RuntimeError(completed.stderr.strip() or "Fallo ejecutando AppleScript.")
+        return completed.stdout.strip()
+
 
 def build_personal_tool_specs(tool: PersonalTools) -> list[dict[str, Any]]:
     return [
@@ -113,6 +160,7 @@ def build_personal_tool_specs(tool: PersonalTools) -> list[dict[str, Any]]:
                 "properties": {
                     "days": {"type": "integer"},
                     "limit": {"type": "integer"},
+                    "start_offset_days": {"type": "integer"},
                 },
                 "required": [],
             },
@@ -190,32 +238,210 @@ def build_personal_tool_specs(tool: PersonalTools) -> list[dict[str, Any]]:
     ]
 
 
-def _calendar_script(*, days: int, limit: int) -> str:
-    return f"""
-const Calendar = Application('Calendar');
-Calendar.includeStandardAdditions = true;
-const now = new Date();
-const end = new Date(now.getTime() + ({days} * 24 * 60 * 60 * 1000));
-const calendars = Calendar.calendars();
-let events = [];
-for (const cal of calendars) {{
-  const matches = cal.events.whose({{
-    startDate: {{_greaterThan: now}},
-    endDate: {{_lessThan: end}}
-  }})();
-  for (const event of matches) {{
-    events.push({{
-      calendar: cal.name(),
-      title: event.summary(),
-      start: event.startDate().toISOString(),
-      end: event.endDate().toISOString(),
-      location: event.location()
-    }});
-  }}
-}}
-events = events.sort((a, b) => a.start.localeCompare(b.start)).slice(0, {limit});
-JSON.stringify({{events}});
-"""
+def _calendar_script(*, days: int) -> list[str]:
+    return [
+        "set startDate to (current date)",
+        "set startDate to startDate - (time of startDate)",
+        f"set recurringLookbackDate to startDate - ({RECURRING_LOOKBACK_DAYS} * days)",
+        f"set endDate to startDate + ({days} * days)",
+        "on safeText(value)",
+        "if value is missing value then return \"\"",
+        "try",
+        "return value as text",
+        "on error",
+        "return \"\"",
+        "end try",
+        "end safeText",
+        "on pad2(n)",
+        "if n < 10 then return \"0\" & (n as text)",
+        "return n as text",
+        "end pad2",
+        "on localIso(d)",
+        "set y to year of d as integer",
+        "set m to my pad2(month of d as integer)",
+        "set dayNumber to my pad2(day of d as integer)",
+        "set hh to my pad2(hours of d)",
+        "set mm to my pad2(minutes of d)",
+        "set ss to my pad2(seconds of d)",
+        "return (y as text) & \"-\" & m & \"-\" & dayNumber & \"T\" & hh & \":\" & mm & \":\" & ss",
+        "end localIso",
+        "tell application \"Calendar\"",
+        "set outputLines to {}",
+        "repeat with cal in calendars",
+        "set calName to my safeText(name of cal)",
+        (
+            "set recurringCandidates to "
+            "(every event of cal whose start date >= recurringLookbackDate "
+            "and start date < endDate)"
+        ),
+        "repeat with ev in recurringCandidates",
+        "try",
+        "set evRecurrence to recurrence of ev",
+        "if evRecurrence is missing value then error number -128",
+        (
+            "set outputLines to outputLines & "
+            "((calName & tab & my safeText(summary of ev) & tab & "
+            "my localIso(start date of ev) & tab & my localIso(end date of ev) & tab & "
+            "my safeText(evRecurrence) & tab & my safeText(location of ev)) as text)"
+        ),
+        "end try",
+        "end repeat",
+        (
+            "set directCandidates to "
+            "(every event of cal whose start date < endDate and end date >= startDate)"
+        ),
+        "repeat with ev in directCandidates",
+        "try",
+        "set evRecurrence to recurrence of ev",
+        "if evRecurrence is not missing value then error number -128",
+        (
+            "set outputLines to outputLines & "
+            "((calName & tab & my safeText(summary of ev) & tab & "
+            "my localIso(start date of ev) & tab & my localIso(end date of ev) & tab & "
+            "\"\" & tab & my safeText(location of ev)) as text)"
+        ),
+        "end try",
+        "end repeat",
+        "end repeat",
+        "set AppleScript's text item delimiters to linefeed",
+        "return outputLines as text",
+        "end tell",
+    ]
+
+
+def _parse_calendar_rows(output: str) -> list[dict[str, Any]]:
+    if not output:
+        return []
+    events: list[dict[str, Any]] = []
+    for line in output.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 6:
+            continue
+        calendar, title, start, end, recurrence, location = parts[:6]
+        events.append(
+            {
+                "calendar": calendar.strip(),
+                "title": title.strip(),
+                "start": start.strip(),
+                "end": end.strip(),
+                "recurrence": recurrence.strip() or None,
+                "location": location.strip() or None,
+            }
+        )
+    return events
+
+
+def _expand_calendar_events(
+    raw_events: Sequence[object],
+    *,
+    window_start: datetime,
+    window_end: datetime,
+    limit: int,
+    timezone: ZoneInfo,
+) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+
+    for item in raw_events:
+        if not isinstance(item, dict):
+            continue
+        calendar = str(item.get("calendar") or "").strip()
+        title = str(item.get("title") or "").strip()
+        start_raw = item.get("start")
+        end_raw = item.get("end")
+        recurrence_raw = item.get("recurrence")
+        if not isinstance(start_raw, str) or not isinstance(end_raw, str):
+            continue
+        try:
+            start_dt = datetime.fromisoformat(start_raw)
+            end_dt = datetime.fromisoformat(end_raw)
+        except ValueError:
+            continue
+        if start_dt.tzinfo is None:
+            start_dt = start_dt.replace(tzinfo=timezone)
+        else:
+            start_dt = start_dt.astimezone(timezone)
+        if end_dt.tzinfo is None:
+            end_dt = end_dt.replace(tzinfo=timezone)
+        else:
+            end_dt = end_dt.astimezone(timezone)
+        duration = end_dt - start_dt
+        location_value = item.get("location")
+        location = str(location_value).strip() if isinstance(location_value, str) else None
+
+        if isinstance(recurrence_raw, str) and recurrence_raw.strip():
+            try:
+                rule = rrulestr(recurrence_raw.strip(), dtstart=start_dt)
+                occurrences = rule.between(window_start, window_end, inc=True)
+            except Exception:
+                occurrences = [start_dt] if window_start <= start_dt < window_end else []
+            for occurrence in occurrences:
+                occurrence_end = occurrence + duration
+                _append_calendar_event(
+                    expanded,
+                    seen,
+                    calendar=calendar,
+                    title=title,
+                    start_dt=occurrence.astimezone(timezone),
+                    end_dt=occurrence_end.astimezone(timezone),
+                    location=location,
+                )
+            continue
+
+        if start_dt < window_end and end_dt >= window_start:
+            _append_calendar_event(
+                expanded,
+                seen,
+                calendar=calendar,
+                title=title,
+                start_dt=start_dt,
+                end_dt=end_dt,
+                location=location,
+            )
+
+    expanded.sort(key=lambda record: str(record["start"]))
+    return expanded[:limit]
+
+
+def _append_calendar_event(
+    events: list[dict[str, Any]],
+    seen: set[tuple[str, str, str, str]],
+    *,
+    calendar: str,
+    title: str,
+    start_dt: datetime,
+    end_dt: datetime,
+    location: str | None,
+) -> None:
+    key = (
+        calendar,
+        title,
+        start_dt.isoformat(),
+        end_dt.isoformat(),
+    )
+    if key in seen:
+        return
+    seen.add(key)
+    events.append(
+        {
+            "calendar": calendar,
+            "title": title,
+            "start": start_dt.isoformat(),
+            "end": end_dt.isoformat(),
+            "location": location,
+            "all_day": _is_all_day_event(start_dt, end_dt),
+        }
+    )
+
+
+def _is_all_day_event(start_dt: datetime, end_dt: datetime) -> bool:
+    return (
+        start_dt.hour == 0
+        and start_dt.minute == 0
+        and start_dt.second == 0
+        and end_dt.hour == 23
+        and end_dt.minute == 59
+    )
 
 
 def _reminders_script(*, limit: int) -> str:

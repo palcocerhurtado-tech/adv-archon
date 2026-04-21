@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +26,152 @@ ChunkCallback = Callable[[str], None]
 ContextProvider = Callable[[], RuntimeContext]
 UsageCallback = Callable[[str, LLMResponse], None]
 ContextCallback = Callable[["TurnContextSnapshot"], None]
+CALENDAR_KEYWORDS = {
+    "calendario",
+    "calendar",
+    "agenda",
+    "evento",
+    "eventos",
+    "reunion",
+    "reuniones",
+    "meeting",
+    "meetings",
+}
+CALENDAR_CREATE_KEYWORDS = {
+    "añade",
+    "anade",
+    "agrega",
+    "crea",
+    "crear",
+    "mete",
+    "programa",
+}
+TASK_KEYWORDS = {
+    "tarea",
+    "tareas",
+    "pendiente",
+    "pendientes",
+    "recordatorio",
+    "recordatorios",
+}
+LIST_QUERY_KEYWORDS = {
+    "dime",
+    "enseña",
+    "ensena",
+    "lista",
+    "muestra",
+    "pendiente",
+    "pendientes",
+    "que",
+    "qué",
+    "revisa",
+    "tengo",
+    "ver",
+}
+SEARCH_QUERY_KEYWORDS = {
+    "busca",
+    "buscar",
+    "encuentra",
+    "localiza",
+    "muéstrame",
+    "muestrame",
+}
+MUTATION_KEYWORDS = {
+    "agrega",
+    "añade",
+    "anade",
+    "borrador",
+    "crea",
+    "crear",
+    "envia",
+    "envía",
+    "escribe",
+    "manda",
+    "prepara",
+    "programa",
+    "redacta",
+}
+MAIL_DRAFT_KEYWORDS = {
+    "borrador",
+    "correo",
+    "email",
+    "mail",
+    "mensaje",
+    "redacta",
+}
+REMINDER_APP_KEYWORDS = {
+    "reminders",
+    "recordatorios de apple",
+    "recordatorios del mac",
+}
+NOTE_KEYWORDS = {
+    "nota",
+    "notas",
+    "notes",
+}
+CONTACT_KEYWORDS = {
+    "contacto",
+    "contactos",
+    "telefono",
+    "teléfono",
+    "email",
+    "correo",
+    "mail",
+}
+BROWSER_KEYWORDS = {
+    "navega",
+    "navegador",
+    "browser",
+    "captura",
+    "screenshot",
+    "formulario",
+    "haz click",
+    "click",
+}
+STOPWORDS = {
+    "a",
+    "abre",
+    "al",
+    "busca",
+    "buscar",
+    "calendar",
+    "con",
+    "contacto",
+    "contactos",
+    "cuáles",
+    "cuales",
+    "de",
+    "del",
+    "dime",
+    "el",
+    "en",
+    "esta",
+    "este",
+    "favor",
+    "la",
+    "las",
+    "lista",
+    "lo",
+    "los",
+    "mis",
+    "muestra",
+    "nota",
+    "notas",
+    "notes",
+    "para",
+    "pendientes",
+    "qué",
+    "que",
+    "relacionado",
+    "semana",
+    "sus",
+    "tengo",
+    "todo",
+    "ver",
+    "y",
+}
+WORD_RE = re.compile(r"[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]+")
+URL_RE = re.compile(r"https?://\S+")
 
 
 @dataclass(slots=True)
@@ -292,9 +440,10 @@ class Agent:
         )
         tool_steps = 0
         context_rendered = False
+        executed_tools: list[str] = []
 
         while tool_steps < max_steps:
-            plan = self._plan(user_input, state)
+            plan = self._plan(user_input, state, executed_tools)
             if on_context is not None and not context_rendered:
                 on_context(self._build_context_snapshot(state, plan))
                 context_rendered = True
@@ -329,6 +478,7 @@ class Agent:
 
             serialized = json.dumps(payload, ensure_ascii=False, indent=2)
             self._session.append(SessionMessage(role="tool", name=tool_name, content=serialized))
+            executed_tools.append(tool_name)
             tool_steps += 1
 
         response = self._final_response(user_input, state, on_chunk=on_chunk)
@@ -366,13 +516,24 @@ class Agent:
             knowledge_hits=knowledge_hits,
         )
 
-    def _plan(self, user_input: str, state: _TurnState) -> dict[str, Any]:
+    def _plan(
+        self,
+        user_input: str,
+        state: _TurnState,
+        executed_tools: Sequence[str],
+    ) -> dict[str, Any]:
+        heuristic_plan = self._rule_based_plan(user_input, state, executed_tools)
+        if heuristic_plan is not None:
+            return heuristic_plan
         planner_prompt = (
             f"{self._system_prompt}\n\n"
             f"{self._assistant_context(user_input, state)}\n\n"
             "You are ADV ARCHON's intent router and operator planner.\n"
             "Decide whether to answer directly or call exactly one tool next.\n"
             "If the task needs multiple steps, choose the best next tool only.\n"
+            "Prefer dedicated personal-assistant tools over shell_exec whenever available.\n"
+            "Never use shell_exec for calendar, reminders, notes, contacts, email drafts, "
+            "persistent tasks, or browser automation if there is a dedicated tool for it.\n"
             "Available tools:\n"
             f"{json.dumps(self._tool_manifest(), ensure_ascii=False, indent=2)}\n\n"
             "Return JSON only with one of these shapes:\n"
@@ -387,6 +548,124 @@ class Agent:
         )
         self._record_usage("planner", response)
         return self._parse_plan(response.text)
+
+    def _rule_based_plan(
+        self,
+        user_input: str,
+        state: _TurnState,
+        executed_tools: Sequence[str],
+    ) -> dict[str, Any] | None:
+        normalized = _normalize_text(user_input)
+        executed = set(executed_tools)
+
+        wants_calendar = _contains_any(normalized, CALENDAR_KEYWORDS)
+        wants_tasks = _contains_any(normalized, TASK_KEYWORDS)
+        wants_reminders = _contains_any(normalized, REMINDER_APP_KEYWORDS)
+        wants_notes = _contains_any(normalized, NOTE_KEYWORDS)
+        wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
+        wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
+
+        if (
+            wants_calendar
+            and _looks_like_calendar_lookup(normalized)
+            and "calendar_upcoming" in self._tools
+            and "calendar_upcoming" not in executed
+        ):
+            window = _infer_calendar_window(
+                normalized,
+                now=state.runtime_context.now if state.runtime_context is not None else None,
+            )
+            return {
+                "kind": "tool",
+                "tool_name": "calendar_upcoming",
+                "arguments": {
+                    "days": window["days"],
+                    "limit": 20,
+                    "start_offset_days": window["start_offset_days"],
+                },
+                "step_summary": "revisar calendario",
+            }
+
+        if (
+            wants_tasks
+            and _looks_like_task_lookup(normalized)
+            and "task_list" in self._tools
+            and "task_list" not in executed
+            and (not wants_calendar or "calendar_upcoming" in executed)
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "task_list",
+                "arguments": {"status": "open", "limit": 20},
+                "step_summary": "consultar tareas persistentes",
+            }
+
+        if (
+            wants_reminders
+            and _looks_like_reminders_lookup(normalized)
+            and "reminders_list" in self._tools
+            and "reminders_list" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "reminders_list",
+                "arguments": {"limit": 20},
+                "step_summary": "consultar recordatorios del sistema",
+            }
+
+        if (
+            wants_notes
+            and _looks_like_notes_lookup(normalized)
+            and "notes_search" in self._tools
+            and "notes_search" not in executed
+        ):
+            query = _extract_focus_query(normalized)
+            if query:
+                return {
+                    "kind": "tool",
+                    "tool_name": "notes_search",
+                    "arguments": {"query": query, "limit": 10},
+                    "step_summary": "buscar en notas",
+                }
+
+        if (
+            wants_contacts
+            and _looks_like_contacts_lookup(normalized)
+            and "contacts_search" in self._tools
+            and "contacts_search" not in executed
+        ):
+            query = _extract_focus_query(normalized)
+            if query:
+                return {
+                    "kind": "tool",
+                    "tool_name": "contacts_search",
+                    "arguments": {"query": query, "limit": 10},
+                    "step_summary": "buscar en contactos",
+                }
+
+        if wants_browser:
+            url = _extract_url(user_input)
+            if url and "browser_open" in self._tools and "browser_open" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "browser_open",
+                    "arguments": {"url": url},
+                    "step_summary": "abrir pagina en navegador gestionado",
+                }
+            if (
+                ("captura" in normalized or "screenshot" in normalized)
+                and "browser_screenshot" in self._tools
+                and "browser_open" in executed
+                and "browser_screenshot" not in executed
+            ):
+                return {
+                    "kind": "tool",
+                    "tool_name": "browser_screenshot",
+                    "arguments": {},
+                    "step_summary": "sacar captura del navegador",
+                }
+
+        return None
 
     def _final_response(
         self,
@@ -510,3 +789,71 @@ class Agent:
     def _record_usage(self, phase: str, response: LLMResponse) -> None:
         if self._usage_callback is not None:
             self._usage_callback(phase, response)
+
+
+def _normalize_text(text: str) -> str:
+    return text.casefold()
+
+
+def _contains_any(text: str, keywords: set[str]) -> bool:
+    return any(keyword in text for keyword in keywords)
+
+
+def _looks_like_calendar_lookup(text: str) -> bool:
+    if _contains_any(text, CALENDAR_CREATE_KEYWORDS):
+        return False
+    return _contains_any(text, LIST_QUERY_KEYWORDS)
+
+
+def _looks_like_task_lookup(text: str) -> bool:
+    return _contains_any(text, LIST_QUERY_KEYWORDS) and not _contains_any(
+        text, MUTATION_KEYWORDS
+    )
+
+
+def _looks_like_reminders_lookup(text: str) -> bool:
+    return _contains_any(text, LIST_QUERY_KEYWORDS) and not _contains_any(
+        text, MUTATION_KEYWORDS
+    )
+
+
+def _looks_like_notes_lookup(text: str) -> bool:
+    return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS)
+
+
+def _looks_like_contacts_lookup(text: str) -> bool:
+    if _contains_any(text, MAIL_DRAFT_KEYWORDS) and _contains_any(text, MUTATION_KEYWORDS):
+        return False
+    return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS)
+
+
+def _infer_calendar_window(text: str, *, now: datetime | None = None) -> dict[str, int]:
+    if "hoy" in text:
+        return {"days": 1, "start_offset_days": 0}
+    if "mañana" in text or "manana" in text:
+        return {"days": 1, "start_offset_days": 1}
+    if "esta semana" in text or "this week" in text:
+        if now is None:
+            return {"days": 7, "start_offset_days": 0}
+        return {"days": max(1, 7 - now.weekday()), "start_offset_days": 0}
+    if "mes" in text:
+        return {"days": 31, "start_offset_days": 0}
+    match = re.search(r"(\d+)\s+d[ií]as", text)
+    if match is not None:
+        return {"days": max(1, int(str(match.group(1)))), "start_offset_days": 0}
+    return {"days": 7, "start_offset_days": 0}
+
+
+def _extract_focus_query(text: str) -> str:
+    words = [match.group(0) for match in WORD_RE.finditer(text)]
+    filtered = [
+        word for word in words if len(word) > 2 and word.casefold() not in STOPWORDS
+    ]
+    return " ".join(filtered[:6])
+
+
+def _extract_url(text: str) -> str | None:
+    match = URL_RE.search(text)
+    if match is None:
+        return None
+    return match.group(0)

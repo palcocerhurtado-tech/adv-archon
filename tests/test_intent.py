@@ -48,3 +48,14 @@ def test_intent_router_detects_browser_automation_query() -> None:
 
     assert analysis.needs_plan is True
     assert "keywords de navegador/automatizacion" in analysis.reasons
+
+
+def test_intent_router_does_not_force_knowledge_for_calendar_tasks_query() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze(
+        "que tengo esta semana en el calendario y qué tareas pendientes tengo"
+    )
+
+    assert analysis.category == "assistant"
+    assert analysis.needs_knowledge is False

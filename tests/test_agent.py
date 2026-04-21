@@ -50,6 +50,12 @@ def _build_agent(tmp_path: Path) -> Agent:
                 schema={},
                 fn=lambda **_kwargs: None,
             ),
+            ToolSpec(
+                name="reminder_create",
+                description="reminders",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
         ],
     )
 
@@ -153,7 +159,7 @@ def test_rule_based_plan_does_not_hijack_mail_draft_request(tmp_path: Path) -> N
     assert plan is None
 
 
-def test_rule_based_plan_does_not_hijack_reminder_creation_request(tmp_path: Path) -> None:
+def test_rule_based_plan_routes_reminder_creation_request(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
     state = _build_state(tmp_path)
 
@@ -163,7 +169,30 @@ def test_rule_based_plan_does_not_hijack_reminder_creation_request(tmp_path: Pat
         [],
     )
 
-    assert plan is None
+    assert plan is not None
+    assert plan["tool_name"] == "reminder_create"
+    assert plan["arguments"] == {
+        "title": "llamar a acme",
+        "due_text": "mañana a las 9",
+    }
+
+
+def test_rule_based_plan_routes_alarm_request(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "ponme una alarma a las 16:33",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "reminder_create"
+    assert plan["arguments"] == {
+        "title": "Alarma",
+        "due_text": "hoy a las 16:33",
+    }
 
 
 def test_rule_based_plan_for_tomorrow_uses_offset_window(tmp_path: Path) -> None:

@@ -54,6 +54,14 @@ TASK_KEYWORDS = {
     "recordatorio",
     "recordatorios",
 }
+REMINDER_CREATE_KEYWORDS = {
+    "alarma",
+    "alarm",
+    "recordatorio",
+    "recordatorios",
+    "recuerdame",
+    "recuérdame",
+}
 LIST_QUERY_KEYWORDS = {
     "dime",
     "enseña",
@@ -89,6 +97,7 @@ MUTATION_KEYWORDS = {
     "manda",
     "prepara",
     "programa",
+    "ponme",
     "redacta",
 }
 MAIL_DRAFT_KEYWORDS = {
@@ -567,10 +576,24 @@ class Agent:
         wants_calendar = _contains_any(normalized, CALENDAR_KEYWORDS)
         wants_tasks = _contains_any(normalized, TASK_KEYWORDS)
         wants_reminders = _contains_any(normalized, REMINDER_APP_KEYWORDS)
+        wants_reminder_creation = _contains_any(normalized, REMINDER_CREATE_KEYWORDS)
         wants_notes = _contains_any(normalized, NOTE_KEYWORDS)
         wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
+
+        if (
+            wants_reminder_creation
+            and _looks_like_reminder_creation(normalized)
+            and "reminder_create" in self._tools
+            and "reminder_create" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "reminder_create",
+                "arguments": _extract_reminder_create_arguments(user_input),
+                "step_summary": "crear recordatorio en macos",
+            }
 
         if (
             wants_calendar
@@ -850,6 +873,15 @@ def _looks_like_reminders_lookup(text: str) -> bool:
     )
 
 
+def _looks_like_reminder_creation(text: str) -> bool:
+    return _contains_any(text, REMINDER_CREATE_KEYWORDS) and (
+        _contains_any(text, MUTATION_KEYWORDS)
+        or "ponme" in text
+        or "recuérdame" in text
+        or "recuerdame" in text
+    )
+
+
 def _looks_like_notes_lookup(text: str) -> bool:
     return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS)
 
@@ -890,3 +922,55 @@ def _extract_url(text: str) -> str | None:
     if match is None:
         return None
     return match.group(0)
+
+
+def _extract_reminder_create_arguments(text: str) -> dict[str, Any]:
+    normalized = _normalize_text(text)
+    due_text, due_span = _extract_due_text(normalized)
+    title = _extract_reminder_title(normalized, due_span)
+    arguments: dict[str, Any] = {"title": title}
+    if due_text:
+        arguments["due_text"] = due_text
+    return arguments
+
+
+def _extract_due_text(text: str) -> tuple[str | None, tuple[int, int] | None]:
+    patterns = (
+        r"\b(pasado mañana|pasado manana|mañana|manana|hoy)\s+a\s+las\s+\d{1,2}(?::\d{2})?",
+        r"\bel\s+(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\s+a\s+las\s+\d{1,2}(?::\d{2})?",
+        r"\ba\s+las\s+\d{1,2}(?::\d{2})?",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match is None:
+            continue
+        due_text = match.group(0)
+        if due_text.startswith("a las "):
+            due_text = f"hoy {due_text}"
+        return due_text, match.span()
+    return None, None
+
+
+def _extract_reminder_title(text: str, due_span: tuple[int, int] | None) -> str:
+    working = text
+    if due_span is not None:
+        start, end = due_span
+        working = f"{working[:start]} {working[end:]}"
+    working = re.sub(
+        r"\b(ponme|crea|crear|agrega|añade|anade|programa|recuérdame|recuerdame)\b",
+        " ",
+        working,
+    )
+    working = re.sub(r"\b(una|un|mi|me)\b", " ", working)
+    working = re.sub(r"\b(alarma|alarm|recordatorio|recordatorios)\b", " ", working)
+    match = re.search(r"\bde\s+(.+)", working)
+    if match is not None:
+        candidate = match.group(1).strip(" .,:;")
+        if candidate:
+            return candidate
+    candidate = re.sub(r"\s+", " ", working).strip(" .,:;")
+    if candidate:
+        return candidate
+    if "alarma" in text or "alarm" in text:
+        return "Alarma"
+    return "Recordatorio"

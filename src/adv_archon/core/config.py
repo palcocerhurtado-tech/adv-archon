@@ -71,6 +71,8 @@ class PathsConfig:
     tasks_db: Path = field(init=False)
     browser_profile_dir: Path = field(init=False)
     profile_state_file: Path = field(init=False)
+    google_client_secret_file: Path = field(init=False)
+    google_token_file: Path = field(init=False)
     sessions_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
 
@@ -83,6 +85,8 @@ class PathsConfig:
         self.tasks_db = self.root / "tasks.db"
         self.browser_profile_dir = self.root / "browser-profile"
         self.profile_state_file = self.root / "active-profile.txt"
+        self.google_client_secret_file = self.root / "google-client-secret.json"
+        self.google_token_file = self.root / "google-token.json"
         self.sessions_dir = self.root / "sessions"
         self.logs_dir = self.root / "logs"
 
@@ -164,6 +168,20 @@ class VoiceConfig:
 
 
 @dataclass(slots=True)
+class GoogleConfig:
+    enabled: bool = True
+    client_secret_file: Path = field(
+        default_factory=lambda: Path.home() / ".adv-archon" / "google-client-secret.json"
+    )
+    token_file: Path = field(
+        default_factory=lambda: Path.home() / ".adv-archon" / "google-token.json"
+    )
+    default_calendar_id: str = "primary"
+    gmail_default_max_results: int = 10
+    drive_default_max_results: int = 10
+
+
+@dataclass(slots=True)
 class ProfilesConfig:
     default_profile: str = "general"
     definitions: dict[str, ProfileDefinition] = field(default_factory=dict)
@@ -180,6 +198,7 @@ class AppConfig:
     tasks: TasksConfig
     browser: BrowserConfig
     voice: VoiceConfig
+    google: GoogleConfig
     profiles: ProfilesConfig
     system_prompt_path: Path
 
@@ -329,6 +348,36 @@ def load_app_config(
         porcupine_access_key=os.getenv("PORCUPINE_ACCESS_KEY")
         or _lookup(data, "voice", "porcupine_access_key", default=None),
     )
+    google = GoogleConfig(
+        enabled=bool(_lookup(data, "google", "enabled", default=True)),
+        client_secret_file=Path(
+            os.getenv("GOOGLE_CLIENT_SECRET_FILE")
+            or _lookup(
+                data,
+                "google",
+                "client_secret_file",
+                default=str(paths.google_client_secret_file),
+            )
+        ).expanduser(),
+        token_file=Path(
+            os.getenv("GOOGLE_TOKEN_FILE")
+            or _lookup(
+                data,
+                "google",
+                "token_file",
+                default=str(paths.google_token_file),
+            )
+        ).expanduser(),
+        default_calendar_id=str(
+            _lookup(data, "google", "default_calendar_id", default="primary")
+        ),
+        gmail_default_max_results=int(
+            _lookup(data, "google", "gmail_default_max_results", default=10)
+        ),
+        drive_default_max_results=int(
+            _lookup(data, "google", "drive_default_max_results", default=10)
+        ),
+    )
     profiles_data = _lookup(data, "profiles", default={})
     if not isinstance(profiles_data, dict):
         profiles_data = {}
@@ -368,6 +417,7 @@ def load_app_config(
         tasks=tasks,
         browser=browser,
         voice=voice,
+        google=google,
         profiles=profiles,
         system_prompt_path=system_prompt_path,
     )

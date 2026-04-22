@@ -25,6 +25,7 @@ This repository currently includes:
 - Operator-style planning with context panel and next-step visibility
 - Persistent tasks with a local SQLite scheduler and `launchd` integration
 - Personal macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
+- Google Workspace connectors for Gmail, Google Calendar, and Drive
 - Managed browser automation for navigation, extraction, screenshots, and supervised form work
 - Persistent runtime profiles (`general`, `work`, `personal`, `research`, `coding`)
 - Dedicated Markdown/Obsidian vault search tied to the active profile
@@ -218,6 +219,47 @@ prepara un borrador de correo para este cliente con seguimiento de la propuesta
 ```
 
 macOS may ask your terminal for access to Calendar, Reminders, Notes, Contacts, or Mail the first time.
+
+## Google Workspace connectors
+
+ADV ARCHON can also use Google Workspace in supervised mode:
+
+- Gmail: search and read threads, plus draft creation with confirmation
+- Google Calendar: list events and create events with confirmation
+- Google Drive: search files and read supported text content
+
+Setup:
+
+1. Create a Google OAuth desktop client in Google Cloud.
+2. Save the JSON credentials file at:
+
+```text
+~/.adv-archon/google-client-secret.json
+```
+
+3. On first real use, ADV ARCHON will open the local OAuth flow in the browser and store the token at:
+
+```text
+~/.adv-archon/google-token.json
+```
+
+Example prompts:
+
+```text
+qué correos importantes tengo en gmail
+```
+
+```text
+qué tengo mañana en google calendar
+```
+
+```text
+busca en google drive la propuesta de acme
+```
+
+```text
+crea un evento en google calendar para mañana a las 10 con acme
+```
 
 ## Browser automation
 

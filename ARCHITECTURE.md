@@ -24,6 +24,7 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `tools/files.py`: local document readers with OCR fallback
 - `tools/task_tools.py`: persistent task creation, listing, completion, cancellation, and scheduler install
 - `tools/personal.py`: macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
+- `tools/google_workspace.py`: Google Workspace connectors for Gmail, Calendar, and Drive
 - `tools/browser.py`: managed Playwright session for browser automation
 - `tools/knowledge_tools.py`: explicit knowledge and Markdown vault search tools
 - `tools/shell.py`: shell execution policy, whitelist, blacklist, and auto mode
@@ -67,6 +68,14 @@ The current Phase 3 layer adds two local-first upgrades:
 
 1. `Profiles`: ADV ARCHON can keep a persistent active profile such as `work`, `personal`, `research`, or `coding`, and uses it as extra context when routing and answering.
 2. `Markdown vaults`: configured Markdown or Obsidian roots can be searched directly through a dedicated tool and slash command, instead of relying only on the broad knowledge base.
+
+## Next connector layer
+
+The current connector block extends the assistant into Google Workspace:
+
+1. `Gmail`: search and read threads, with draft creation behind confirmation.
+2. `Google Calendar`: list upcoming events and create events behind confirmation.
+3. `Google Drive`: search files and read supported text content from Docs and plain text files.
 
 ## Command execution policy
 

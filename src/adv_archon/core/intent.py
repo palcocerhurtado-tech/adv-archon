@@ -88,6 +88,10 @@ ASSISTANT_KEYWORDS = {
     "obsidian",
     "vault",
     "markdown",
+    "gmail",
+    "drive",
+    "google calendar",
+    "google drive",
 }
 KNOWLEDGE_ASSISTANT_KEYWORDS = {
     "nota",

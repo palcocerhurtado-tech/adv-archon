@@ -27,6 +27,24 @@ def _build_agent(tmp_path: Path) -> Agent:
                 fn=lambda **_kwargs: None,
             ),
             ToolSpec(
+                name="gcal_list_events",
+                description="google calendar",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="gmail_search",
+                description="gmail",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="drive_search",
+                description="drive",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
                 name="task_list",
                 description="tasks",
                 schema={},
@@ -192,6 +210,61 @@ def test_rule_based_plan_routes_alarm_request(tmp_path: Path) -> None:
     assert plan["arguments"] == {
         "title": "Alarma",
         "due_text": "hoy a las 16:33",
+    }
+
+
+def test_rule_based_plan_routes_google_calendar_lookup(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "que tengo mañana en google calendar",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "gcal_list_events"
+    assert plan["arguments"] == {
+        "days": 1,
+        "max_results": 20,
+        "start_offset_days": 1,
+    }
+
+
+def test_rule_based_plan_routes_gmail_search(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "busca en gmail todo lo relacionado con acme",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "gmail_search"
+    assert plan["arguments"] == {
+        "query": "acme",
+        "max_results": 10,
+    }
+
+
+def test_rule_based_plan_routes_drive_search(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "busca en google drive la propuesta acme",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "drive_search"
+    assert plan["arguments"] == {
+        "query": "propuesta acme",
+        "max_results": 10,
     }
 
 

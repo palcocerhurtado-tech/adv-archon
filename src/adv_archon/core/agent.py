@@ -64,6 +64,7 @@ REMINDER_CREATE_KEYWORDS = {
 }
 LIST_QUERY_KEYWORDS = {
     "dime",
+    "enséñame",
     "enseña",
     "ensena",
     "lista",
@@ -113,6 +114,15 @@ REMINDER_APP_KEYWORDS = {
     "recordatorios de apple",
     "recordatorios del mac",
 }
+GMAIL_KEYWORDS = {
+    "gmail",
+}
+GOOGLE_CALENDAR_KEYWORDS = {
+    "calendar de google",
+    "calendario de google",
+    "gcal",
+    "google calendar",
+}
 NOTE_KEYWORDS = {
     "nota",
     "notas",
@@ -122,6 +132,10 @@ VAULT_KEYWORDS = {
     "markdown",
     "obsidian",
     "vault",
+}
+DRIVE_KEYWORDS = {
+    "drive",
+    "google drive",
 }
 CONTACT_KEYWORDS = {
     "contacto",
@@ -159,6 +173,8 @@ STOPWORDS = {
     "dime",
     "el",
     "en",
+    "gmail",
+    "google",
     "esta",
     "este",
     "favor",
@@ -181,6 +197,7 @@ STOPWORDS = {
     "sus",
     "tengo",
     "todo",
+    "drive",
     "vault",
     "ver",
     "y",
@@ -577,10 +594,66 @@ class Agent:
         wants_tasks = _contains_any(normalized, TASK_KEYWORDS)
         wants_reminders = _contains_any(normalized, REMINDER_APP_KEYWORDS)
         wants_reminder_creation = _contains_any(normalized, REMINDER_CREATE_KEYWORDS)
+        wants_gmail = _contains_any(normalized, GMAIL_KEYWORDS)
+        wants_google_calendar = _contains_any(normalized, GOOGLE_CALENDAR_KEYWORDS)
         wants_notes = _contains_any(normalized, NOTE_KEYWORDS)
         wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
+        wants_drive = _contains_any(normalized, DRIVE_KEYWORDS)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
+
+        if (
+            wants_google_calendar
+            and _looks_like_calendar_lookup(normalized)
+            and "gcal_list_events" in self._tools
+            and "gcal_list_events" not in executed
+        ):
+            window = _infer_calendar_window(
+                normalized,
+                now=state.runtime_context.now if state.runtime_context is not None else None,
+            )
+            return {
+                "kind": "tool",
+                "tool_name": "gcal_list_events",
+                "arguments": {
+                    "days": window["days"],
+                    "max_results": 20,
+                    "start_offset_days": window["start_offset_days"],
+                },
+                "step_summary": "revisar google calendar",
+            }
+
+        if (
+            wants_gmail
+            and _looks_like_external_search(normalized)
+            and "gmail_search" in self._tools
+            and "gmail_search" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "gmail_search",
+                "arguments": {
+                    "query": _extract_focus_query(normalized),
+                    "max_results": 10,
+                },
+                "step_summary": "buscar correos en gmail",
+            }
+
+        if (
+            wants_drive
+            and _looks_like_external_search(normalized)
+            and "drive_search" in self._tools
+            and "drive_search" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "drive_search",
+                "arguments": {
+                    "query": _extract_focus_query(normalized),
+                    "max_results": 10,
+                },
+                "step_summary": "buscar archivos en google drive",
+            }
 
         if (
             wants_reminder_creation
@@ -884,6 +957,12 @@ def _looks_like_reminder_creation(text: str) -> bool:
 
 def _looks_like_notes_lookup(text: str) -> bool:
     return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS)
+
+
+def _looks_like_external_search(text: str) -> bool:
+    return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS) and not _contains_any(
+        text, MUTATION_KEYWORDS
+    )
 
 
 def _looks_like_contacts_lookup(text: str) -> bool:

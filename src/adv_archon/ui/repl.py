@@ -18,6 +18,10 @@ from adv_archon.core.profiles import ProfileManager
 from adv_archon.core.session import SessionStore
 from adv_archon.core.tasks import TaskStore
 from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
+from adv_archon.tools.google_workspace import (
+    GoogleWorkspaceTools,
+    build_google_workspace_tool_specs,
+)
 from adv_archon.tools.knowledge_tools import KnowledgeTools, build_knowledge_tool_specs
 from adv_archon.tools.mac import MacTools, build_mac_tool_specs
 from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
@@ -154,6 +158,17 @@ class ReplApp:
             headless=config.browser.headless,
             default_timeout_ms=config.browser.default_timeout_ms,
             confirm=self._confirm,
+            logger=self._logger,
+        )
+        self._google_workspace_tools = GoogleWorkspaceTools(
+            client_secret_file=config.google.client_secret_file,
+            token_file=config.google.token_file,
+            confirm=self._confirm,
+            enabled=config.google.enabled,
+            timezone_name=config.tasks.default_timezone,
+            default_calendar_id=config.google.default_calendar_id,
+            gmail_default_max_results=config.google.gmail_default_max_results,
+            drive_default_max_results=config.google.drive_default_max_results,
             logger=self._logger,
         )
         self._agent = Agent(
@@ -395,6 +410,15 @@ class ReplApp:
                 )
             )
         for definition in build_browser_tool_specs(self._browser_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_google_workspace_tool_specs(self._google_workspace_tools):
             specs.append(
                 ToolSpec(
                     name=definition["name"],

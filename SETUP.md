@@ -76,6 +76,14 @@ max_files_per_root = 2000
 max_file_bytes = 2000000
 search_limit = 5
 
+[google]
+enabled = true
+client_secret_file = "~/.adv-archon/google-client-secret.json"
+token_file = "~/.adv-archon/google-token.json"
+default_calendar_id = "primary"
+gmail_default_max_results = 10
+drive_default_max_results = 10
+
 [ui]
 show_context_panel = true
 operator_max_tool_steps = 8
@@ -160,6 +168,29 @@ Phase 2 adds native macOS connectors for:
 - Mail
 
 The first real use may trigger macOS permission prompts for your terminal app.
+
+## Google Workspace connectors
+
+To enable Gmail, Google Calendar, and Drive:
+
+1. Create a Google OAuth desktop client in Google Cloud.
+2. Save the downloaded JSON in:
+
+```text
+~/.adv-archon/google-client-secret.json
+```
+
+3. On first use, ADV ARCHON will open a local OAuth flow and persist the token in:
+
+```text
+~/.adv-archon/google-token.json
+```
+
+The default scopes cover:
+
+- Gmail read and draft creation
+- Google Calendar read and event creation
+- Google Drive read-only search and file access
 
 ## Browser automation
 

@@ -75,6 +75,23 @@ class PersonalTools:
         payload = self._run_jxa(_notes_script(query=query, limit=limit))
         return ToolResult(name="notes_search", payload=payload)
 
+    def notes_create(
+        self,
+        title: str,
+        body: str,
+        folder: str | None = None,
+    ) -> ToolResult:
+        question = (
+            "Se va a crear una nota en macOS Notes.\n"
+            f"Titulo: {title}\n"
+            f"Carpeta: {folder or 'predeterminada'}\n"
+            "¿Confirmas?"
+        )
+        if not self._confirm(question):
+            raise PermissionError("Creacion de nota cancelada por el usuario.")
+        payload = self._run_jxa(_notes_create_script(title=title, body=body, folder=folder))
+        return ToolResult(name="notes_create", payload=payload)
+
     def contacts_search(self, query: str, limit: int = 10) -> ToolResult:
         payload = self._run_jxa(_contacts_script(query=query, limit=limit))
         return ToolResult(name="contacts_search", payload=payload)
@@ -190,6 +207,20 @@ def build_personal_tool_specs(tool: PersonalTools) -> list[dict[str, Any]]:
                 "required": ["query"],
             },
             "fn": tool.notes_search,
+        },
+        {
+            "name": "notes_create",
+            "description": "Create a new note in macOS Notes after confirmation.",
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "title": {"type": "string"},
+                    "body": {"type": "string"},
+                    "folder": {"type": "string"},
+                },
+                "required": ["title", "body"],
+            },
+            "fn": tool.notes_create,
         },
         {
             "name": "contacts_search",
@@ -485,6 +516,50 @@ for (const folder of Notes.folders()) {{
 }}
 results = results.slice(0, {limit});
 JSON.stringify({{notes: results}});
+"""
+
+
+def _notes_create_script(*, title: str, body: str, folder: str | None) -> str:
+    title_json = json.dumps(title)
+    folder_json = json.dumps(folder)
+    body_json = json.dumps(body)
+    return f"""
+const Notes = Application('Notes');
+const title = {title_json};
+const bodyText = {body_json};
+const requestedFolder = {folder_json};
+
+function escapeHtml(value) {{
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}}
+
+function chooseFolder() {{
+  if (requestedFolder) {{
+    for (const folder of Notes.folders()) {{
+      if (String(folder.name()) === requestedFolder) {{
+        return folder;
+      }}
+    }}
+  }}
+  const folders = Notes.folders();
+  if (folders.length > 0) {{
+    return folders[0];
+  }}
+  throw new Error('No he encontrado una carpeta disponible en Notes.');
+}}
+
+const noteBody = '<div>' + escapeHtml(bodyText).replace(/\\n/g, '<br>') + '</div>';
+const folder = chooseFolder();
+const note = Notes.Note({{name: title, body: noteBody}});
+folder.notes.push(note);
+JSON.stringify({{
+  created: true,
+  title: note.name(),
+  folder: folder.name()
+}});
 """
 
 

@@ -124,9 +124,41 @@ GOOGLE_CALENDAR_KEYWORDS = {
     "google calendar",
 }
 NOTE_KEYWORDS = {
+    "apunte",
+    "apuntes",
     "nota",
     "notas",
     "notes",
+}
+NOTE_CREATE_KEYWORDS = {
+    "anota",
+    "anotame",
+    "anótame",
+    "apunta",
+    "apuntame",
+    "apúntame",
+    "crea una nota",
+    "crear una nota",
+    "guarda en notas",
+    "haz una nota",
+    "hazme una nota",
+    "ponlo en notas",
+    "toma apuntes",
+}
+NOTE_SOURCE_KEYWORDS = {
+    "archivo",
+    "archivos",
+    "carpeta",
+    "carpetas",
+    "desktop",
+    "documento",
+    "documentos",
+    "escritorio",
+    "fichero",
+    "ficheros",
+    "libro",
+    "libros",
+    "pdf",
 }
 VAULT_KEYWORDS = {
     "markdown",
@@ -160,6 +192,8 @@ STOPWORDS = {
     "a",
     "abre",
     "al",
+    "apunte",
+    "apuntes",
     "busca",
     "buscar",
     "calendar",
@@ -200,10 +234,17 @@ STOPWORDS = {
     "drive",
     "vault",
     "ver",
+    "escritorio",
+    "hazme",
+    "libro",
+    "sobre",
+    "unos",
     "y",
 }
 WORD_RE = re.compile(r"[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]+")
 URL_RE = re.compile(r"https?://\S+")
+QUOTED_PATH_RE = re.compile(r"""['"]((?:~|/)[^'"]+)['"]""")
+UNQUOTED_PATH_RE = re.compile(r"((?:~|/)[^\n,;]+)")
 
 
 @dataclass(slots=True)
@@ -564,6 +605,8 @@ class Agent:
             "Decide whether to answer directly or call exactly one tool next.\n"
             "If the task needs multiple steps, choose the best next tool only.\n"
             "Prefer dedicated personal-assistant tools over shell_exec whenever available.\n"
+            "For note-taking requests about local folders, books, or files, prefer "
+            "read_file, list_dir, or knowledge_search first, then create the note.\n"
             "Never use shell_exec for calendar, reminders, notes, contacts, email drafts, "
             "persistent tasks, or browser automation if there is a dedicated tool for it.\n"
             "Available tools:\n"
@@ -597,6 +640,8 @@ class Agent:
         wants_gmail = _contains_any(normalized, GMAIL_KEYWORDS)
         wants_google_calendar = _contains_any(normalized, GOOGLE_CALENDAR_KEYWORDS)
         wants_notes = _contains_any(normalized, NOTE_KEYWORDS)
+        wants_note_creation = _looks_like_note_creation(normalized)
+        wants_note_source = _looks_like_note_source_request(normalized)
         wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
         wants_drive = _contains_any(normalized, DRIVE_KEYWORDS)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
@@ -666,6 +711,71 @@ class Agent:
                 "tool_name": "reminder_create",
                 "arguments": _extract_reminder_create_arguments(user_input),
                 "step_summary": "crear recordatorio en macos",
+            }
+
+        if (
+            wants_notes
+            and wants_note_creation
+            and wants_note_source
+            and "read_file" in self._tools
+            and "read_file" not in executed
+        ):
+            hinted_path = _extract_path_hint(user_input)
+            if hinted_path is not None and _path_looks_like_file(hinted_path):
+                return {
+                    "kind": "tool",
+                    "tool_name": "read_file",
+                    "arguments": {"path": hinted_path},
+                    "step_summary": "leer material local para preparar nota",
+                }
+
+        if (
+            wants_notes
+            and wants_note_creation
+            and wants_note_source
+            and "list_dir" in self._tools
+            and "list_dir" not in executed
+        ):
+            hinted_path = _extract_path_hint(user_input)
+            if hinted_path is not None and not _path_looks_like_file(hinted_path):
+                return {
+                    "kind": "tool",
+                    "tool_name": "list_dir",
+                    "arguments": {"path": hinted_path, "depth": 2},
+                    "step_summary": "revisar carpeta local para preparar nota",
+                }
+
+        if (
+            wants_notes
+            and wants_note_creation
+            and wants_note_source
+            and "knowledge_search" in self._tools
+            and "knowledge_search" not in executed
+        ):
+            hinted_path = _extract_path_hint(user_input)
+            if hinted_path is not None:
+                return None
+            query = _extract_focus_query(normalized)
+            if query:
+                return {
+                    "kind": "tool",
+                    "tool_name": "knowledge_search",
+                    "arguments": {"query": query, "limit": 5},
+                    "step_summary": "buscar material local para preparar nota",
+                }
+
+        if (
+            wants_notes
+            and wants_note_creation
+            and not wants_note_source
+            and "notes_create" in self._tools
+            and "notes_create" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "notes_create",
+                "arguments": _extract_note_create_arguments(user_input),
+                "step_summary": "crear nota en Notes",
             }
 
         if (
@@ -959,6 +1069,20 @@ def _looks_like_notes_lookup(text: str) -> bool:
     return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS)
 
 
+def _looks_like_note_creation(text: str) -> bool:
+    if _contains_any(text, NOTE_CREATE_KEYWORDS):
+        return True
+    if _contains_any(text, {"apunte", "apuntes"}) and (
+        "hazme" in text or "haz " in text or "prepara" in text
+    ):
+        return True
+    return _contains_any(text, NOTE_KEYWORDS) and _contains_any(text, MUTATION_KEYWORDS)
+
+
+def _looks_like_note_source_request(text: str) -> bool:
+    return _contains_any(text, NOTE_SOURCE_KEYWORDS)
+
+
 def _looks_like_external_search(text: str) -> bool:
     return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS) and not _contains_any(
         text, MUTATION_KEYWORDS
@@ -1053,3 +1177,83 @@ def _extract_reminder_title(text: str, due_span: tuple[int, int] | None) -> str:
     if "alarma" in text or "alarm" in text:
         return "Alarma"
     return "Recordatorio"
+
+
+def _extract_note_create_arguments(text: str) -> dict[str, Any]:
+    title = _extract_note_title(text)
+    body = _extract_note_body(text, title)
+    arguments: dict[str, Any] = {
+        "title": title,
+        "body": body,
+    }
+    folder = _extract_notes_folder(text)
+    if folder is not None:
+        arguments["folder"] = folder
+    return arguments
+
+
+def _extract_note_title(text: str) -> str:
+    patterns = (
+        r"titulad[ao]\s+['\"]?(.+?)['\"]?(?=$|\s+que\b|\s+con\b|\s+en\b|:)",
+        r"(?:nota|apuntes?)\s+sobre\s+(.+?)(?=$|\s+que\b|\s+con\b|:)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if match is None:
+            continue
+        candidate = match.group(1).strip(" .,:;\"'")
+        if candidate:
+            return candidate
+    return "Apunte"
+
+
+def _extract_note_body(text: str, title: str) -> str:
+    colon_match = re.search(r":\s*(.+)$", text, flags=re.DOTALL)
+    if colon_match is not None:
+        candidate = colon_match.group(1).strip()
+        if candidate:
+            return candidate
+
+    diga_match = re.search(
+        r"(?:que diga|que ponga|con el texto)\s+(.+)$",
+        text,
+        flags=re.IGNORECASE | re.DOTALL,
+    )
+    if diga_match is not None:
+        candidate = diga_match.group(1).strip(" .")
+        if candidate:
+            return candidate
+
+    about_match = re.search(r"sobre\s+(.+)$", text, flags=re.IGNORECASE | re.DOTALL)
+    if about_match is not None:
+        candidate = about_match.group(1).strip(" .")
+        if candidate:
+            return f"Apuntes sobre {candidate}."
+
+    return f"Nota rápida: {title}."
+
+
+def _extract_notes_folder(text: str) -> str | None:
+    match = re.search(
+        r"en\s+la\s+carpeta\s+['\"]?(.+?)['\"]?(?=$|\s+que\b|:)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is None:
+        return None
+    candidate = match.group(1).strip(" .,:;\"'")
+    return candidate or None
+
+
+def _extract_path_hint(text: str) -> str | None:
+    quoted_match = QUOTED_PATH_RE.search(text)
+    if quoted_match is not None:
+        return quoted_match.group(1).strip()
+    unquoted_match = UNQUOTED_PATH_RE.search(text)
+    if unquoted_match is None:
+        return None
+    return unquoted_match.group(1).strip().rstrip(" .")
+
+
+def _path_looks_like_file(path: str) -> bool:
+    return Path(path).suffix != ""

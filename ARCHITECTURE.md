@@ -23,7 +23,7 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `core/session.py`: in-memory and persisted session history
 - `tools/files.py`: local document readers with OCR fallback
 - `tools/task_tools.py`: persistent task creation, listing, completion, cancellation, and scheduler install
-- `tools/personal.py`: macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
+- `tools/personal.py`: macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail, including supervised note creation
 - `tools/google_workspace.py`: Google Workspace connectors for Gmail, Calendar, and Drive
 - `tools/browser.py`: managed Playwright session for browser automation
 - `tools/knowledge_tools.py`: explicit knowledge and Markdown vault search tools
@@ -59,7 +59,7 @@ The upgraded agent now does four things before replying:
 Phase 2 expands the assistant in three directions:
 
 1. `Persistent tasks`: reminders and recurring tasks live in `tasks.db`, can be queried in natural language, and can fire via `launchd`.
-2. `Personal connectors`: ADV ARCHON can inspect Calendar, Reminders, Notes, Contacts, and create Mail drafts, always keeping user-visible confirmation for state-changing actions.
+2. `Personal connectors`: ADV ARCHON can inspect Calendar, Reminders, Notes, Contacts, and create reminders, notes, or Mail drafts, always keeping user-visible confirmation for state-changing actions.
 3. `Browser automation`: a managed Playwright session allows supervised browsing, text extraction, screenshots, and guided form interaction.
 
 ## Phase 3 profile-aware knowledge

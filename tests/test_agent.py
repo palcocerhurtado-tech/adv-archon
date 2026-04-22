@@ -57,6 +57,12 @@ def _build_agent(tmp_path: Path) -> Agent:
                 fn=lambda **_kwargs: None,
             ),
             ToolSpec(
+                name="notes_create",
+                description="notes create",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
                 name="vault_search",
                 description="vault",
                 schema={},
@@ -71,6 +77,12 @@ def _build_agent(tmp_path: Path) -> Agent:
             ToolSpec(
                 name="reminder_create",
                 description="reminders",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="knowledge_search",
+                description="knowledge",
                 schema={},
                 fn=lambda **_kwargs: None,
             ),
@@ -147,6 +159,62 @@ def test_rule_based_plan_uses_notes_connector_for_note_queries(tmp_path: Path) -
     assert plan is not None
     assert plan["tool_name"] == "notes_search"
     assert plan["arguments"]["query"] == "propuesta acme"
+
+
+def test_rule_based_plan_routes_direct_note_creation(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "crea una nota titulada Ideas ADV que diga revisar Gmail y Drive",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "notes_create"
+    assert plan["arguments"] == {
+        "title": "Ideas ADV",
+        "body": "revisar Gmail y Drive",
+    }
+
+
+def test_rule_based_plan_reads_local_file_before_note_creation(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "hazme una nota sobre ~/Desktop/libros/atomic-habits.pdf",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "read_file"
+    assert plan["arguments"] == {"path": "~/Desktop/libros/atomic-habits.pdf"}
+
+    follow_up = agent._rule_based_plan(
+        "hazme una nota sobre ~/Desktop/libros/atomic-habits.pdf",
+        state,
+        ["read_file"],
+    )
+
+    assert follow_up is None
+
+
+def test_rule_based_plan_uses_knowledge_for_desktop_note_request(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "hazme unos apuntes sobre el libro atomic habits del escritorio",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "knowledge_search"
+    assert plan["arguments"] == {"query": "atomic habits", "limit": 5}
 
 
 def test_rule_based_plan_uses_vault_search_for_obsidian_queries(tmp_path: Path) -> None:

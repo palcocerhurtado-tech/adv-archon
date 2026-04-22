@@ -342,7 +342,7 @@ class GoogleWorkspaceTools:
             if export_mime_type
             else service.files().get_media(fileId=file_id)
         )
-        from googleapiclient.http import MediaIoBaseDownload  # type: ignore[import-not-found]
+        from googleapiclient.http import MediaIoBaseDownload  # type: ignore[import-untyped]
 
         handle = io.BytesIO()
         downloader = MediaIoBaseDownload(handle, request)
@@ -357,7 +357,7 @@ class GoogleWorkspaceTools:
         cache_key = (api_name, version)
         if cache_key in self._service_cache:
             return self._service_cache[cache_key]
-        from googleapiclient.discovery import build  # type: ignore[import-not-found]
+        from googleapiclient.discovery import build  # type: ignore[import-untyped]
 
         service = build(
             api_name,
@@ -369,16 +369,16 @@ class GoogleWorkspaceTools:
         return service
 
     def _credentials(self) -> Any:
-        from google.auth.transport.requests import Request  # type: ignore[import-untyped]
-        from google.oauth2.credentials import Credentials  # type: ignore[import-untyped]
-        from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-not-found]
+        from google.auth.transport.requests import Request
+        from google.oauth2.credentials import Credentials
+        from google_auth_oauthlib.flow import InstalledAppFlow  # type: ignore[import-untyped]
 
         credentials: Any | None = None
         if self._token_file.exists():
             credentials = Credentials.from_authorized_user_file(
                 str(self._token_file),
                 GOOGLE_WORKSPACE_SCOPES,
-            )
+            )  # type: ignore[no-untyped-call]
         if credentials is not None and credentials.valid:
             return credentials
         if credentials is not None and credentials.expired and credentials.refresh_token:

@@ -196,7 +196,7 @@ ADV ARCHON can now use native macOS apps in supervised mode:
 
 - Calendar: upcoming events
 - Reminders: list and create reminders
-- Notes: search note contents
+- Notes: search contents and create notes after confirmation
 - Contacts: search people by name, email, or phone
 - Mail: draft emails after confirmation
 
@@ -212,6 +212,14 @@ crea un recordatorio para llamar a ACME mañana a las 9
 
 ```text
 busca en mis notas todo lo relacionado con propuesta acme
+```
+
+```text
+hazme una nota sobre ~/Desktop/Libros/atomic-habits.pdf
+```
+
+```text
+crea una nota titulada Ideas ADV que diga revisar Gmail y Drive
 ```
 
 ```text

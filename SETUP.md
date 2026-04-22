@@ -231,8 +231,10 @@ ADV ARCHON can index your files as personal context without turning that into wr
 Default behavior:
 
 - read access is broad across your configured knowledge roots
+- that includes your Desktop and its folders when they sit under configured roots such as `~`
 - knowledge retrieval is automatic when the request looks document-heavy or assistant-like
 - writes still stay behind confirmation gates
+- writing a note in macOS Notes also stays behind explicit confirmation
 
 For broader access on macOS protected folders, you may need to grant Full Disk Access to the terminal app you use.
 

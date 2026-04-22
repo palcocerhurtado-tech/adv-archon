@@ -47,6 +47,33 @@ def test_mail_draft_requires_confirmation() -> None:
         )
 
 
+def test_notes_create_requires_confirmation() -> None:
+    tool = PersonalTools(confirm=lambda _question: False)
+
+    with pytest.raises(PermissionError):
+        tool.notes_create("Ideas", "Revisar conectores")
+
+
+def test_notes_create_calls_jxa_when_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+    tool = PersonalTools(confirm=lambda _question: True)
+
+    def fake_run(script: str) -> dict[str, object]:
+        captured["script"] = script
+        return {"created": True, "title": "Ideas", "folder": "Notas"}
+
+    monkeypatch.setattr(tool, "_run_jxa", fake_run)
+
+    result = tool.notes_create("Ideas", "Revisar conectores", folder="Notas")
+
+    assert result.payload["created"] is True
+    assert "Ideas" in captured["script"]
+    assert "Revisar conectores" in captured["script"]
+    assert "Notas" in captured["script"]
+
+
 def test_calendar_upcoming_expands_weekly_recurrence(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

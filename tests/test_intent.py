@@ -41,6 +41,16 @@ def test_intent_router_detects_document_query() -> None:
     assert analysis.needs_knowledge is True
 
 
+def test_intent_router_marks_desktop_note_request_as_knowledge_heavy() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze(
+        "hazme unos apuntes sobre el libro atomic habits del escritorio"
+    )
+
+    assert analysis.needs_knowledge is True
+
+
 def test_intent_router_detects_browser_automation_query() -> None:
     router = IntentRouter()
 

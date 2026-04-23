@@ -68,6 +68,7 @@ class PathsConfig:
     history_file: Path = field(init=False)
     memory_db: Path = field(init=False)
     knowledge_db: Path = field(init=False)
+    web_library_db: Path = field(init=False)
     tasks_db: Path = field(init=False)
     browser_profile_dir: Path = field(init=False)
     profile_state_file: Path = field(init=False)
@@ -82,6 +83,7 @@ class PathsConfig:
         self.history_file = self.root / "history.txt"
         self.memory_db = self.root / "memory.db"
         self.knowledge_db = self.root / "knowledge.db"
+        self.web_library_db = self.root / "web-library.db"
         self.tasks_db = self.root / "tasks.db"
         self.browser_profile_dir = self.root / "browser-profile"
         self.profile_state_file = self.root / "active-profile.txt"
@@ -100,6 +102,7 @@ class LLMConfig:
     gemini_api_key: str | None = None
     temperature: float = 0.2
     redact_cloud_pii: bool = False
+    force_local_private_context: bool = True
 
 
 @dataclass(slots=True)
@@ -125,6 +128,8 @@ class KnowledgeConfig:
     max_files_per_root: int = 2000
     max_file_bytes: int = 2_000_000
     search_limit: int = 5
+    background_batch_size: int = 250
+    background_interval_minutes: int = 60
 
 
 @dataclass(slots=True)
@@ -182,6 +187,15 @@ class GoogleConfig:
 
 
 @dataclass(slots=True)
+class ResearchConfig:
+    enabled: bool = True
+    seed_queries: tuple[str, ...] = ()
+    search_results_per_query: int = 5
+    fetch_top_results: int = 2
+    launch_agent_interval_minutes: int = 180
+
+
+@dataclass(slots=True)
 class ProfilesConfig:
     default_profile: str = "general"
     definitions: dict[str, ProfileDefinition] = field(default_factory=dict)
@@ -199,6 +213,7 @@ class AppConfig:
     browser: BrowserConfig
     voice: VoiceConfig
     google: GoogleConfig
+    research: ResearchConfig
     profiles: ProfilesConfig
     system_prompt_path: Path
 
@@ -250,6 +265,9 @@ def load_app_config(
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         temperature=float(_lookup(data, "llm", "temperature", default=0.2)),
         redact_cloud_pii=bool(_lookup(data, "privacy", "redact_cloud_pii", default=False)),
+        force_local_private_context=bool(
+            _lookup(data, "privacy", "force_local_private_context", default=True)
+        ),
     )
 
     ui = UIConfig(
@@ -295,6 +313,12 @@ def load_app_config(
         ),
         max_file_bytes=int(_lookup(data, "knowledge", "max_file_bytes", default=2_000_000)),
         search_limit=int(_lookup(data, "knowledge", "search_limit", default=5)),
+        background_batch_size=int(
+            _lookup(data, "knowledge", "background_batch_size", default=250)
+        ),
+        background_interval_minutes=int(
+            _lookup(data, "knowledge", "background_interval_minutes", default=60)
+        ),
     )
     whitelist = _lookup(
         data,
@@ -378,6 +402,20 @@ def load_app_config(
             _lookup(data, "google", "drive_default_max_results", default=10)
         ),
     )
+    seed_queries = _lookup(data, "research", "seed_queries", default=[])
+    if not isinstance(seed_queries, list):
+        seed_queries = []
+    research = ResearchConfig(
+        enabled=bool(_lookup(data, "research", "enabled", default=True)),
+        seed_queries=tuple(str(item) for item in seed_queries),
+        search_results_per_query=int(
+            _lookup(data, "research", "search_results_per_query", default=5)
+        ),
+        fetch_top_results=int(_lookup(data, "research", "fetch_top_results", default=2)),
+        launch_agent_interval_minutes=int(
+            _lookup(data, "research", "launch_agent_interval_minutes", default=180)
+        ),
+    )
     profiles_data = _lookup(data, "profiles", default={})
     if not isinstance(profiles_data, dict):
         profiles_data = {}
@@ -418,6 +456,7 @@ def load_app_config(
         browser=browser,
         voice=voice,
         google=google,
+        research=research,
         profiles=profiles,
         system_prompt_path=system_prompt_path,
     )

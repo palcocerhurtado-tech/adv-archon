@@ -53,6 +53,7 @@ Example:
 ```toml
 [privacy]
 redact_cloud_pii = true
+force_local_private_context = true
 
 [shell]
 timeout_seconds = 20
@@ -75,6 +76,8 @@ auto_index_on_search = true
 max_files_per_root = 2000
 max_file_bytes = 2000000
 search_limit = 5
+background_batch_size = 250
+background_interval_minutes = 60
 
 [google]
 enabled = true
@@ -83,6 +86,13 @@ token_file = "~/.adv-archon/google-token.json"
 default_calendar_id = "primary"
 gmail_default_max_results = 10
 drive_default_max_results = 10
+
+[research]
+enabled = true
+seed_queries = ["ai consulting spain", "llm agents market"]
+search_results_per_query = 5
+fetch_top_results = 2
+launch_agent_interval_minutes = 180
 
 [ui]
 show_context_panel = true
@@ -233,8 +243,48 @@ Default behavior:
 - read access is broad across your configured knowledge roots
 - that includes your Desktop and its folders when they sit under configured roots such as `~`
 - knowledge retrieval is automatic when the request looks document-heavy or assistant-like
+- discovery keeps metadata for files even when full content cannot be embedded
 - writes still stay behind confirmation gates
 - writing a note in macOS Notes also stays behind explicit confirmation
+
+Useful maintenance commands:
+
+```bash
+adv-archon knowledge status
+adv-archon knowledge run-batch
+adv-archon knowledge install-agent
+```
+
+The optional background indexer uses:
+
+```text
+~/Library/LaunchAgents/com.adv-archon.knowledge.plist
+```
+
+## Background web research
+
+ADV ARCHON can also maintain a separate local web library under:
+
+```text
+~/.adv-archon/web-library.db
+```
+
+This store is intended for external perspective only. Your Mac knowledge base remains primary.
+
+Useful commands:
+
+```bash
+adv-archon research status
+adv-archon research run-once
+adv-archon research search "query"
+adv-archon research install-agent
+```
+
+The optional background research agent uses:
+
+```text
+~/Library/LaunchAgents/com.adv-archon.research.plist
+```
 
 For broader access on macOS protected folders, you may need to grant Full Disk Access to the terminal app you use.
 

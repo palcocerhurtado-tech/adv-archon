@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from datetime import datetime
 from pathlib import Path
 
@@ -41,6 +42,18 @@ def _build_agent(tmp_path: Path) -> Agent:
             ToolSpec(
                 name="drive_search",
                 description="drive",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="web_library_search",
+                description="web library",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="web_library_save_search",
+                description="web library save",
                 schema={},
                 fn=lambda **_kwargs: None,
             ),
@@ -336,6 +349,24 @@ def test_rule_based_plan_routes_drive_search(tmp_path: Path) -> None:
     }
 
 
+def test_rule_based_plan_routes_web_library_search(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "busca en tu biblioteca web todo lo relacionado con consultoria ia",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "web_library_search"
+    assert plan["arguments"] == {
+        "query": "consultoria",
+        "limit": 8,
+    }
+
+
 def test_rule_based_plan_for_tomorrow_uses_offset_window(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
     state = _build_state(tmp_path)
@@ -349,3 +380,45 @@ def test_rule_based_plan_for_tomorrow_uses_offset_window(tmp_path: Path) -> None
     assert plan is not None
     assert plan["tool_name"] == "calendar_upcoming"
     assert plan["arguments"] == {"days": 1, "limit": 20, "start_offset_days": 1}
+
+
+def test_force_local_private_context_for_documents_query(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = replace(
+        _build_state(tmp_path),
+        intent=IntentAnalysis(
+            category="documents",
+            profile="general",
+            needs_plan=False,
+            needs_knowledge=True,
+            needs_web=False,
+            needs_shell=False,
+            reasons=["documentos"],
+        ),
+    )
+
+    assert agent._should_force_local_for_turn(
+        "resume ~/Desktop/propuesta.pdf",
+        state,
+    ) is True
+
+
+def test_force_local_private_context_not_triggered_for_public_web_query(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = replace(
+        _build_state(tmp_path),
+        intent=IntentAnalysis(
+            category="web",
+            profile="general",
+            needs_plan=False,
+            needs_knowledge=False,
+            needs_web=True,
+            needs_shell=False,
+            reasons=["web"],
+        ),
+    )
+
+    assert agent._should_force_local_for_turn(
+        "busca tendencias de mercado de IA en europa",
+        state,
+    ) is False

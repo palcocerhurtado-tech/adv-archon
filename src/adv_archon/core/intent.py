@@ -51,6 +51,8 @@ WEB_KEYWORDS = {
     "internet",
     "web",
     "google",
+    "biblioteca web",
+    "contexto externo",
     "busca",
     "buscar",
     "mercado",
@@ -100,6 +102,7 @@ ASSISTANT_KEYWORDS = {
     "drive",
     "google calendar",
     "google drive",
+    "biblioteca web",
 }
 KNOWLEDGE_ASSISTANT_KEYWORDS = {
     "nota",

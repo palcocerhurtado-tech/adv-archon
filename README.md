@@ -22,6 +22,8 @@ This repository currently includes:
 - Intent auto-router for chat, code, docs, web, shell, and assistant tasks
 - Structured long-term memory backed by SQLite and local embeddings
 - Local knowledge base indexed from your files in read-only mode
+- Incremental file discovery with metadata coverage, pending batches, and status reporting
+- Separate local web library for external sources, freshness, and background research cycles
 - Operator-style planning with context panel and next-step visibility
 - Persistent tasks with a local SQLite scheduler and `launchd` integration
 - Personal macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
@@ -32,6 +34,7 @@ This repository currently includes:
 - Session cost ledger and local JSON logs
 - Auto mode with confirmation before enabling
 - Optional PII redaction before cloud LLM calls
+- Automatic local-only handling for turns that touch private Mac context
 - `adv-archon daily` proactive routine
 - Voice output with macOS `say`
 - Local dictation with `faster-whisper`
@@ -88,6 +91,8 @@ Task scheduler utilities:
 ```bash
 adv-archon tasks
 adv-archon tasks run-due
+adv-archon knowledge status
+adv-archon research status
 ```
 
 ## Current slash commands
@@ -128,9 +133,12 @@ Optional cloud PII redaction can be enabled in `~/.adv-archon/config.toml`:
 ```toml
 [privacy]
 redact_cloud_pii = true
+force_local_private_context = true
 ```
 
 When enabled, ADV ARCHON replaces emails, phones, IBANs, and Spanish DNI/NIE identifiers with placeholders before sending cloud prompts, then restores them in the answer.
+
+When `force_local_private_context` is enabled, turns that touch private Mac context such as local files, memory, notes, calendar, tasks, Gmail, Google Calendar, or Drive are resolved locally instead of going to the cloud model.
 
 ## Local knowledge and read-only learning
 
@@ -139,6 +147,8 @@ ADV ARCHON can learn about your work and preferences by indexing your local file
 By default it now treats your home directory as the primary read-only knowledge space and uses that context automatically when relevant.
 
 It does not gain write access from that. File modifications still require explicit confirmation through the existing shell safety policy.
+
+It now also keeps a metadata map of discovered files, so unsupported or oversized files can still exist in the knowledge graph as visible Mac context even if their full content was not embedded.
 
 You can tune the knowledge scope in `~/.adv-archon/config.toml`:
 
@@ -150,6 +160,8 @@ auto_index_on_search = true
 max_files_per_root = 2000
 max_file_bytes = 2000000
 search_limit = 5
+background_batch_size = 250
+background_interval_minutes = 60
 
 [profiles]
 default = "general"
@@ -188,6 +200,15 @@ busca en mi vault de obsidian todo lo relacionado con acme
 
 ```text
 /vault propuesta acme
+```
+
+Maintenance commands:
+
+```bash
+adv-archon knowledge status
+adv-archon knowledge run-batch
+adv-archon knowledge search "atomic habits"
+adv-archon knowledge install-agent
 ```
 
 ## Personal assistant connectors
@@ -267,6 +288,35 @@ busca en google drive la propuesta de acme
 
 ```text
 crea un evento en google calendar para mañana a las 10 con acme
+```
+
+## Local web library and background research
+
+ADV ARCHON can now keep a separate local library of external web sources in `~/.adv-archon/web-library.db`.
+
+That web library is intentionally separate from the Mac knowledge base:
+
+- your Mac files remain the primary private source of truth
+- web sources are supporting context, perspective, and external reality checks
+- everything saved from the web stays local on disk
+
+Useful commands:
+
+```bash
+adv-archon research status
+adv-archon research run-once "ai consulting spain" "llm agents market"
+adv-archon research search "consultoria ia"
+adv-archon research install-agent "ai consulting spain" "llm agents market"
+```
+
+Natural-language examples:
+
+```text
+guarda una búsqueda web sobre consultoría IA en españa
+```
+
+```text
+busca en tu biblioteca web todo lo relacionado con agentes
 ```
 
 ## Browser automation

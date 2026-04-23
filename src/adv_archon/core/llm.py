@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
 from typing import Literal
 
 from adv_archon.core.config import LLMConfig
@@ -16,13 +18,24 @@ class LLMRouter:
     def __init__(self, config: LLMConfig) -> None:
         self._config = config
         self._pii_redactor = PIIRedactor()
+        self._mode_overrides: deque[ProviderMode] = deque()
 
     @property
     def mode(self) -> ProviderMode:
+        if self._mode_overrides:
+            return self._mode_overrides[-1]
         return "local" if self._config.mode == "local" else "cloud"
 
     def set_mode(self, mode: ProviderMode) -> None:
         self._config.mode = mode
+
+    @contextmanager
+    def temporary_mode(self, mode: ProviderMode) -> Iterator[None]:
+        self._mode_overrides.append(mode)
+        try:
+            yield
+        finally:
+            self._mode_overrides.pop()
 
     def complete(
         self,

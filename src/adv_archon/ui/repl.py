@@ -17,6 +17,7 @@ from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.core.session import SessionStore
 from adv_archon.core.tasks import TaskStore
+from adv_archon.core.web_library import WebLibraryStore
 from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
 from adv_archon.tools.google_workspace import (
     GoogleWorkspaceTools,
@@ -28,6 +29,10 @@ from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
+from adv_archon.tools.web_library_tools import (
+    WebLibraryTools,
+    build_web_library_tool_specs,
+)
 from adv_archon.ui.commands import CommandServices, handle_command
 from adv_archon.ui.render import Renderer
 from adv_archon.voice.stt import WhisperSpeechToText
@@ -135,6 +140,13 @@ class ReplApp:
             self._knowledge_store,
             profile_manager=self._profile_manager,
         )
+        self._web_library_store = WebLibraryStore(
+            config.paths.web_library_db,
+            encoder=encoder,
+            persist=not incognito,
+            logger=self._logger,
+        )
+        self._web_library_tools = WebLibraryTools(self._web_library_store)
         self._task_store = TaskStore(
             config.paths.tasks_db,
             timezone_name=config.tasks.default_timezone,
@@ -184,6 +196,7 @@ class ReplApp:
             usage_callback=self._record_usage,
             auto_recall_limit=config.memory.auto_recall_limit,
             auto_knowledge_limit=config.knowledge.search_limit,
+            force_local_private_context=config.llm.force_local_private_context,
             extra_tools=self._build_agent_tools(),
         )
         self._command_services = CommandServices(
@@ -428,6 +441,15 @@ class ReplApp:
                 )
             )
         for definition in build_knowledge_tool_specs(self._knowledge_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_web_library_tool_specs(self._web_library_tools):
             specs.append(
                 ToolSpec(
                     name=definition["name"],

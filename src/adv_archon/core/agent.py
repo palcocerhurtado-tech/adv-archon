@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -169,6 +170,12 @@ DRIVE_KEYWORDS = {
     "drive",
     "google drive",
 }
+WEB_LIBRARY_KEYWORDS = {
+    "biblioteca web",
+    "contexto externo",
+    "fuentes guardadas",
+    "research library",
+}
 CONTACT_KEYWORDS = {
     "contacto",
     "contactos",
@@ -188,6 +195,16 @@ BROWSER_KEYWORDS = {
     "haz click",
     "click",
 }
+WEB_QUERY_KEYWORDS = {
+    "actualidad",
+    "busca",
+    "google",
+    "internet",
+    "mercado",
+    "noticias",
+    "tendencias",
+    "web",
+}
 STOPWORDS = {
     "a",
     "abre",
@@ -200,6 +217,7 @@ STOPWORDS = {
     "con",
     "contacto",
     "contactos",
+    "biblioteca",
     "cuáles",
     "cuales",
     "de",
@@ -229,11 +247,16 @@ STOPWORDS = {
     "relacionado",
     "semana",
     "sus",
+    "tu",
     "tengo",
     "todo",
     "drive",
+    "externo",
+    "fuentes",
+    "guardadas",
     "vault",
     "ver",
+    "web",
     "escritorio",
     "hazme",
     "libro",
@@ -296,6 +319,7 @@ class Agent:
         usage_callback: UsageCallback | None = None,
         auto_recall_limit: int = 3,
         auto_knowledge_limit: int = 5,
+        force_local_private_context: bool = True,
         extra_tools: Sequence[ToolSpec] | None = None,
     ) -> None:
         self._llm = llm
@@ -310,6 +334,7 @@ class Agent:
         self._usage_callback = usage_callback
         self._auto_recall_limit = auto_recall_limit
         self._auto_knowledge_limit = auto_knowledge_limit
+        self._force_local_private_context = force_local_private_context
         self._intent_router = IntentRouter()
         self._tools = {
             "read_file": ToolSpec(
@@ -481,6 +506,7 @@ class Agent:
     ) -> LLMResponse:
         self._session.append(SessionMessage(role="user", content=user_input))
         state = self._prepare_turn_state(user_input)
+        force_local = self._should_force_local_for_turn(user_input, state)
         if state.knowledge_hits:
             serialized_hits = json.dumps(
                 {
@@ -515,48 +541,56 @@ class Agent:
         context_rendered = False
         executed_tools: list[str] = []
 
-        while tool_steps < max_steps:
-            plan = self._plan(user_input, state, executed_tools)
-            if on_context is not None and not context_rendered:
-                on_context(self._build_context_snapshot(state, plan))
-                context_rendered = True
+        llm_mode_context = (
+            self._llm.temporary_mode("local")
+            if force_local and self._llm.mode != "local"
+            else nullcontext()
+        )
+        with llm_mode_context:
+            while tool_steps < max_steps:
+                plan = self._plan(user_input, state, executed_tools)
+                if on_context is not None and not context_rendered:
+                    on_context(self._build_context_snapshot(state, plan))
+                    context_rendered = True
 
-            if plan.get("kind") == "answer":
-                break
+                if plan.get("kind") == "answer":
+                    break
 
-            tool_name = str(plan.get("tool_name", ""))
-            arguments = plan.get("arguments", {})
-            if not isinstance(arguments, dict):
-                raise ValueError("Tool arguments must be a JSON object.")
+                tool_name = str(plan.get("tool_name", ""))
+                arguments = plan.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    raise ValueError("Tool arguments must be a JSON object.")
 
-            tool = self._tools.get(tool_name)
-            if tool is None:
-                self._session.append(
-                    SessionMessage(
-                        role="tool",
-                        name="tool_error",
-                        content=f"Unknown tool requested: {tool_name}",
+                tool = self._tools.get(tool_name)
+                if tool is None:
+                    self._session.append(
+                        SessionMessage(
+                            role="tool",
+                            name="tool_error",
+                            content=f"Unknown tool requested: {tool_name}",
+                        )
                     )
+                    break
+
+                if on_tool is not None:
+                    on_tool(tool_name, arguments)
+
+                try:
+                    result = tool.fn(**arguments)
+                    payload: dict[str, Any] = result.payload
+                except Exception as exc:
+                    payload = {"error": str(exc)}
+
+                serialized = json.dumps(payload, ensure_ascii=False, indent=2)
+                self._session.append(
+                    SessionMessage(role="tool", name=tool_name, content=serialized)
                 )
-                break
+                executed_tools.append(tool_name)
+                tool_steps += 1
 
-            if on_tool is not None:
-                on_tool(tool_name, arguments)
-
-            try:
-                result = tool.fn(**arguments)
-                payload: dict[str, Any] = result.payload
-            except Exception as exc:
-                payload = {"error": str(exc)}
-
-            serialized = json.dumps(payload, ensure_ascii=False, indent=2)
-            self._session.append(SessionMessage(role="tool", name=tool_name, content=serialized))
-            executed_tools.append(tool_name)
-            tool_steps += 1
-
-        response = self._final_response(user_input, state, on_chunk=on_chunk)
-        self._session.append(SessionMessage(role="assistant", content=response.text))
-        return response
+            response = self._final_response(user_input, state, on_chunk=on_chunk)
+            self._session.append(SessionMessage(role="assistant", content=response.text))
+            return response
 
     def _prepare_turn_state(self, user_input: str) -> _TurnState:
         runtime_context = self._context_provider() if self._context_provider is not None else None
@@ -644,8 +678,10 @@ class Agent:
         wants_note_source = _looks_like_note_source_request(normalized)
         wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
         wants_drive = _contains_any(normalized, DRIVE_KEYWORDS)
+        wants_web_library = _contains_any(normalized, WEB_LIBRARY_KEYWORDS)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
+        wants_web = _contains_any(normalized, WEB_QUERY_KEYWORDS)
 
         if (
             wants_google_calendar
@@ -666,6 +702,38 @@ class Agent:
                     "start_offset_days": window["start_offset_days"],
                 },
                 "step_summary": "revisar google calendar",
+            }
+
+        if (
+            wants_web_library
+            and _looks_like_external_search(normalized)
+            and "web_library_search" in self._tools
+            and "web_library_search" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "web_library_search",
+                "arguments": {
+                    "query": _extract_focus_query(normalized),
+                    "limit": 8,
+                },
+                "step_summary": "buscar en biblioteca web local",
+            }
+
+        if (
+            wants_web
+            and _contains_any(normalized, {"guarda", "aprende", "culturiza", "culturízate"})
+            and "web_library_save_search" in self._tools
+            and "web_library_save_search" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "web_library_save_search",
+                "arguments": {
+                    "query": _extract_focus_query(normalized),
+                    "n": 5,
+                },
+                "step_summary": "guardar nueva busqueda en biblioteca web",
             }
 
         if (
@@ -1017,6 +1085,30 @@ class Agent:
     def _record_usage(self, phase: str, response: LLMResponse) -> None:
         if self._usage_callback is not None:
             self._usage_callback(phase, response)
+
+    def _should_force_local_for_turn(self, user_input: str, state: _TurnState) -> bool:
+        if not self._force_local_private_context:
+            return False
+        normalized = _normalize_text(user_input)
+        if _extract_path_hint(user_input) is not None:
+            return True
+        if state.knowledge_hits or state.memories:
+            return True
+        if state.intent.category in {"assistant", "coding", "documents", "shell"}:
+            return True
+        private_keywords = (
+            CALENDAR_KEYWORDS
+            | TASK_KEYWORDS
+            | REMINDER_APP_KEYWORDS
+            | REMINDER_CREATE_KEYWORDS
+            | NOTE_KEYWORDS
+            | VAULT_KEYWORDS
+            | CONTACT_KEYWORDS
+            | GMAIL_KEYWORDS
+            | GOOGLE_CALENDAR_KEYWORDS
+            | DRIVE_KEYWORDS
+        )
+        return _contains_any(normalized, private_keywords)
 
 
 def _normalize_text(text: str) -> str:

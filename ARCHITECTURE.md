@@ -12,7 +12,9 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `core/llm.py`: single interface for Gemini and Ollama
 - `core/memory.py`: SQLite-backed long-term memory with local embeddings
 - `core/intent.py`: lightweight intent router for natural-language requests
-- `core/knowledge.py`: read-only local knowledge index across personal files
+- `core/knowledge.py`: read-only local knowledge index across personal files, with discovery metadata and background batch indexing
+- `core/web_library.py`: separate local store for external web knowledge, freshness, and source search
+- `core/research.py`: background web research cycles and optional `launchd` automation
 - `core/tasks.py`: persistent scheduled tasks and local `launchd` scheduler support
 - `core/costs.py`: in-session token and cost accounting
 - `core/logging.py`: local JSON session event logging
@@ -27,6 +29,7 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `tools/google_workspace.py`: Google Workspace connectors for Gmail, Calendar, and Drive
 - `tools/browser.py`: managed Playwright session for browser automation
 - `tools/knowledge_tools.py`: explicit knowledge and Markdown vault search tools
+- `tools/web_library_tools.py`: explicit local web-library search and save tools
 - `tools/shell.py`: shell execution policy, whitelist, blacklist, and auto mode
 - `tools/python_sandbox.py`: ephemeral Python snippet execution
 - `tools/mac.py`: clipboard and `open` integration for macOS
@@ -41,9 +44,10 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 3. Inject runtime context and relevant long-term memories into the turn
 4. Auto-search the local knowledge base when the request looks document- or assistant-heavy
 5. Scope knowledge and vault search through the active runtime profile when configured
-6. Execute tools transparently, including multi-step operator flows
-7. Feed tool results back into the conversation
-8. Stream the final user-facing answer and record usage/log events
+6. Force local inference for private-context turns when privacy policy says so
+7. Execute tools transparently, including multi-step operator flows
+8. Feed tool results back into the conversation
+9. Stream the final user-facing answer and record usage/log events
 
 ## Intent and operator flow
 
@@ -69,6 +73,14 @@ The current Phase 3 layer adds two local-first upgrades:
 1. `Profiles`: ADV ARCHON can keep a persistent active profile such as `work`, `personal`, `research`, or `coding`, and uses it as extra context when routing and answering.
 2. `Markdown vaults`: configured Markdown or Obsidian roots can be searched directly through a dedicated tool and slash command, instead of relying only on the broad knowledge base.
 
+## Deep local knowledge layer
+
+The current knowledge layer now separates three things:
+
+1. `Discovery map`: ADV ARCHON can keep metadata for files it has seen, even when a file is too large or not directly embeddable.
+2. `Indexed content`: supported files are embedded and searchable with semantic plus lexical ranking.
+3. `Background batches`: indexing can run in explicit batches so the assistant can progressively study a large Mac over time instead of trying to process everything in one foreground turn.
+
 ## Next connector layer
 
 The current connector block extends the assistant into Google Workspace:
@@ -76,6 +88,14 @@ The current connector block extends the assistant into Google Workspace:
 1. `Gmail`: search and read threads, with draft creation behind confirmation.
 2. `Google Calendar`: list upcoming events and create events behind confirmation.
 3. `Google Drive`: search files and read supported text content from Docs and plain text files.
+
+## Web library layer
+
+The new web layer is intentionally separate from the Mac knowledge layer:
+
+1. `Local Mac knowledge`: the primary private source of truth.
+2. `Web library`: locally stored external sources with freshness TTLs, snippets, tags, and optional embeddings.
+3. `Research cycles`: background-friendly search and fetch runs that enrich the local web library without mixing it into the file index.
 
 ## Command execution policy
 
@@ -98,6 +118,14 @@ When cloud redaction is enabled:
 2. Matching values are replaced with stable placeholders.
 3. The redacted prompt is sent to Gemini.
 4. Placeholders are restored in the returned assistant text.
+
+## Private-context local-only flow
+
+When private-context enforcement is enabled:
+
+1. ADV ARCHON inspects the turn for local paths, personal connectors, memory, or knowledge hits.
+2. If the turn touches private Mac context, the planner and final answer are resolved with the local model.
+3. Public web-only turns can still use the configured cloud provider if desired.
 
 ## Voice flow
 

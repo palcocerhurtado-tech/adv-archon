@@ -6,12 +6,28 @@ from pathlib import Path
 
 from adv_archon.core.agent import Agent, ToolSpec, _TurnState
 from adv_archon.core.context import GitContext, RuntimeContext, WorkingSet
+from adv_archon.core.evals import KnowledgeRetrievalEval
 from adv_archon.core.intent import IntentAnalysis
+from adv_archon.core.knowledge import KnowledgeRecord
+from adv_archon.core.llm_types import LLMResponse, LLMUsage
 from adv_archon.core.session import SessionStore
 
 
 class FakeLLM:
-    pass
+    mode = "local"
+
+    def temporary_mode(self, _mode: str):
+        from contextlib import nullcontext
+
+        return nullcontext()
+
+    def stream_complete(self, *_args, **_kwargs) -> LLMResponse:
+        return LLMResponse(
+            text="respuesta del modelo",
+            usage=LLMUsage(),
+            provider="fake",
+            model="fake",
+        )
 
 
 def _build_agent(tmp_path: Path) -> Agent:
@@ -133,6 +149,8 @@ def _build_state(tmp_path: Path) -> _TurnState:
         ),
         memories=[],
         knowledge_hits=[],
+        knowledge_search_result=None,
+        knowledge_eval=None,
     )
 
 
@@ -382,6 +400,36 @@ def test_rule_based_plan_for_tomorrow_uses_offset_window(tmp_path: Path) -> None
     assert plan["arguments"] == {"days": 1, "limit": 20, "start_offset_days": 1}
 
 
+def test_rule_based_plan_for_next_week_uses_next_monday_window(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "mira a ver que tengo en mi calendario la semana que entra",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "calendar_upcoming"
+    assert plan["arguments"] == {"days": 7, "limit": 20, "start_offset_days": 6}
+
+
+def test_deterministic_calendar_tool_error_does_not_ask_for_retry(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+
+    response = agent._deterministic_tool_error_response(
+        user_input="mira a ver que tengo en mi calendario la semana que entra",
+        tool_name="calendar_upcoming",
+        payload={"error": "El conector personal ha tardado demasiado y se ha cancelado."},
+    )
+
+    assert response is not None
+    assert "la semana que viene" in response.text
+    assert "¿Quieres" not in response.text
+    assert "vuelve a probar" in response.text
+
+
 def test_force_local_private_context_for_documents_query(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
     state = replace(
@@ -422,3 +470,78 @@ def test_force_local_private_context_not_triggered_for_public_web_query(tmp_path
         "busca tendencias de mercado de IA en europa",
         state,
     ) is False
+
+
+def test_build_context_snapshot_uses_sober_checkpoint_and_confidence(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = replace(
+        _build_state(tmp_path),
+        knowledge_hits=[
+            KnowledgeRecord(
+                path="/tmp/atomic-habits.md",
+                title="atomic-habits.md",
+                excerpt="Ideas clave del libro",
+                root="/tmp",
+                content_type="md",
+                updated_at="2026-04-24T08:00:00+00:00",
+                score=0.93,
+                term_coverage=0.8,
+            )
+        ],
+        knowledge_eval=KnowledgeRetrievalEval(
+            confidence="high",
+            result_count=1,
+            candidate_count=8,
+            top_score=0.93,
+            max_term_coverage=0.8,
+            avg_term_coverage=0.8,
+            rationale=("resultado local fuerte",),
+        ),
+    )
+
+    packet = agent._build_context_packet(
+        user_input="hazme unos apuntes sobre atomic habits",
+        state=state,
+        plan={"kind": "tool", "step_summary": "buscar en conocimiento local para resumir luego"},
+        tool_observations=[],
+    )
+    snapshot = agent._build_context_snapshot(packet)
+
+    assert snapshot.checkpoint == "buscar en conocimiento local para"
+    assert snapshot.confidence_hint == "conocimiento local fuerte"
+    assert snapshot.knowledge_hits
+
+
+def test_build_confidence_block_cites_local_evidence(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = replace(
+        _build_state(tmp_path),
+        knowledge_hits=[
+            KnowledgeRecord(
+                path="/tmp/roadmap-acme.md",
+                title="roadmap-acme.md",
+                excerpt="Roadmap ACME",
+                root="/tmp",
+                content_type="md",
+                updated_at="2026-04-24T08:00:00+00:00",
+                score=0.88,
+                matched_terms=("roadmap", "acme"),
+                term_coverage=1.0,
+            )
+        ],
+        knowledge_eval=KnowledgeRetrievalEval(
+            confidence="high",
+            result_count=1,
+            candidate_count=10,
+            top_score=0.88,
+            max_term_coverage=1.0,
+            avg_term_coverage=1.0,
+            rationale=("recuperacion local fuerte",),
+        ),
+    )
+
+    block = agent._build_confidence_block(state=state, tool_observations=[])
+
+    assert "Base y confianza:" in block
+    assert "roadmap-acme.md" in block
+    assert "confianza: media" in block or "confianza: alta" in block

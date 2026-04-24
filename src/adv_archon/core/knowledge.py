@@ -63,6 +63,7 @@ class KnowledgeRecord:
     indexed_at: str = ""
     status: str = INDEXED_STATUS
     matched_terms: tuple[str, ...] = ()
+    term_coverage: float = 0.0
 
 
 @dataclass(slots=True)
@@ -134,6 +135,20 @@ class KnowledgeStatus:
     deleted_files: int
     last_run: KnowledgeIndexRun | None = None
     recent_runs: list[KnowledgeIndexRun] = field(default_factory=list)
+
+
+@dataclass(slots=True)
+class KnowledgeQueryPlan:
+    original_query: str
+    query_variants: tuple[str, ...]
+    core_terms: tuple[str, ...]
+
+
+@dataclass(slots=True)
+class KnowledgeSearchResult:
+    records: list[KnowledgeRecord]
+    plan: KnowledgeQueryPlan
+    candidate_count: int = 0
 
 
 @dataclass(slots=True)
@@ -447,6 +462,21 @@ class KnowledgeStore:
         roots: Sequence[str] | None = None,
         suffixes: Sequence[str] | None = None,
     ) -> list[KnowledgeRecord]:
+        return self.search_details(
+            query,
+            limit=limit,
+            roots=roots,
+            suffixes=suffixes,
+        ).records
+
+    def search_details(
+        self,
+        query: str,
+        *,
+        limit: int = 5,
+        roots: Sequence[str] | None = None,
+        suffixes: Sequence[str] | None = None,
+    ) -> KnowledgeSearchResult:
         if roots and self._auto_index_on_search:
             self.ingest_pending_batch(roots)
         elif self.count() == 0 and self._auto_index_on_search and self._default_roots:
@@ -454,18 +484,22 @@ class KnowledgeStore:
         elif self._auto_index_on_search and self._has_pending(roots or self._default_roots):
             self.ingest_pending_batch(roots or self._default_roots)
 
-        candidate_rows = self._candidate_rows(
-            query,
+        plan = _build_query_plan(query)
+        candidate_rows = self._candidate_rows_for_plan(
+            plan,
             roots=roots,
             suffixes=suffixes,
             candidate_limit=max(limit * 25, DEFAULT_CANDIDATE_WINDOW),
         )
         if not candidate_rows:
-            return []
+            return KnowledgeSearchResult(records=[], plan=plan, candidate_count=0)
 
-        query_vector = _normalize_vector(self._encoder.encode_texts([query])[0])
-        lowered_query = query.lower()
-        terms = _tokenize_query(query)
+        query_matrix = np.vstack(
+            [
+                _normalize_vector(vector)
+                for vector in self._encoder.encode_texts(list(plan.query_variants))
+            ]
+        )
         matrix = np.vstack(
             [
                 _normalize_vector(
@@ -474,25 +508,49 @@ class KnowledgeStore:
                 for row in candidate_rows
             ]
         )
-        semantic_scores = matrix @ query_vector
+        semantic_scores = matrix @ query_matrix.T
 
         results: list[KnowledgeRecord] = []
-        for row, semantic_score in zip(candidate_rows, semantic_scores.tolist(), strict=True):
+        for row, semantic_row in zip(candidate_rows, semantic_scores.tolist(), strict=True):
+            semantic_score = max(semantic_row) if semantic_row else 0.0
             title = str(row["title"])
             excerpt = str(row["excerpt"])
             path = str(row["path"])
             relative_path = str(row["relative_path"])
             searchable = " ".join((title, excerpt, path, relative_path)).lower()
-            matched_terms = tuple(term for term in terms if term in searchable)
-            lexical_bonus = self._lexical_bonus(
-                lowered_query,
-                terms,
-                title=title,
-                excerpt=excerpt,
-                path=path,
-                relative_path=relative_path,
-                lexical_rank=_coerce_float(row["lexical_rank"]),
+            matched_terms = tuple(term for term in plan.core_terms if term in searchable)
+            term_coverage = (
+                len(matched_terms) / len(plan.core_terms) if plan.core_terms else 0.0
             )
+            lexical_bonus = max(
+                (
+                    self._lexical_bonus(
+                        variant.lower(),
+                        _tokenize_query(variant),
+                        title=title,
+                        excerpt=excerpt,
+                        path=path,
+                        relative_path=relative_path,
+                        lexical_rank=_coerce_float(row["lexical_rank"]),
+                    )
+                    for variant in plan.query_variants
+                ),
+                default=0.0,
+            )
+            phrase_bonus = max(
+                (
+                    _exact_variant_bonus(
+                        variant,
+                        title=title,
+                        excerpt=excerpt,
+                        path=path,
+                        relative_path=relative_path,
+                    )
+                    for variant in plan.query_variants
+                ),
+                default=0.0,
+            )
+            coverage_bonus = min(term_coverage, 1.0) * 0.18
             results.append(
                 KnowledgeRecord(
                     path=path,
@@ -501,7 +559,10 @@ class KnowledgeStore:
                     root=str(row["root"]),
                     content_type=str(row["content_type"]),
                     updated_at=str(row["updated_at"]),
-                    score=round(float(semantic_score + lexical_bonus), 4),
+                    score=round(
+                        float(semantic_score + lexical_bonus + phrase_bonus + coverage_bonus),
+                        4,
+                    ),
                     relative_path=relative_path,
                     suffix=str(row["suffix"]),
                     file_size=int(row["file_size"]),
@@ -509,6 +570,7 @@ class KnowledgeStore:
                     indexed_at=str(row["indexed_at"]),
                     status=INDEXED_STATUS,
                     matched_terms=matched_terms,
+                    term_coverage=round(term_coverage, 4),
                 )
             )
         results.sort(key=lambda item: (item.score or 0.0, item.updated_at), reverse=True)
@@ -516,10 +578,15 @@ class KnowledgeStore:
             self._logger.log(
                 "knowledge_searched",
                 query=query,
+                query_variants=list(plan.query_variants),
                 results=min(limit, len(results)),
                 indexed_entries=self.count(),
             )
-        return results[:limit]
+        return KnowledgeSearchResult(
+            records=results[:limit],
+            plan=plan,
+            candidate_count=len(candidate_rows),
+        )
 
     def search_vault(
         self,
@@ -682,9 +749,9 @@ class KnowledgeStore:
         )
         return result
 
-    def _candidate_rows(
+    def _candidate_rows_for_plan(
         self,
-        query: str,
+        plan: KnowledgeQueryPlan,
         *,
         roots: Sequence[str] | None,
         suffixes: Sequence[str] | None,
@@ -697,13 +764,18 @@ class KnowledgeStore:
         normalized_suffixes = [suffix.lower() for suffix in suffixes or ()]
         by_path: dict[str, sqlite3.Row] = {}
 
-        for row in self._lexical_candidate_rows(
-            query,
-            roots=resolved_roots,
-            suffixes=normalized_suffixes,
-            limit=candidate_limit,
-        ):
-            by_path[str(row["path"])] = row
+        for variant in plan.query_variants:
+            for row in self._lexical_candidate_rows(
+                variant,
+                roots=resolved_roots,
+                suffixes=normalized_suffixes,
+                limit=candidate_limit,
+            ):
+                by_path.setdefault(str(row["path"]), row)
+                if len(by_path) >= candidate_limit:
+                    break
+            if len(by_path) >= candidate_limit:
+                break
         if len(by_path) < candidate_limit:
             for row in self._recent_candidate_rows(
                 roots=resolved_roots,
@@ -1830,6 +1902,153 @@ def _iso_from_mtime(mtime: float) -> str:
 
 def _tokenize_query(query: str) -> list[str]:
     return [token for token in re.findall(r"[0-9A-Za-zÀ-ÿ_]+", query.lower()) if token]
+
+
+KNOWLEDGE_QUERY_STOPWORDS = {
+    "a",
+    "al",
+    "alguna",
+    "alguno",
+    "apunte",
+    "apuntes",
+    "archivo",
+    "archivos",
+    "book",
+    "busca",
+    "buscar",
+    "carpeta",
+    "carpetas",
+    "con",
+    "cuál",
+    "cual",
+    "cuáles",
+    "cuales",
+    "de",
+    "del",
+    "dime",
+    "document",
+    "documento",
+    "documentos",
+    "el",
+    "en",
+    "encuentra",
+    "escritorio",
+    "esta",
+    "este",
+    "favor",
+    "file",
+    "files",
+    "find",
+    "folder",
+    "hazme",
+    "la",
+    "las",
+    "leer",
+    "libro",
+    "libros",
+    "lo",
+    "los",
+    "me",
+    "mi",
+    "mis",
+    "mira",
+    "muestrame",
+    "muéstrame",
+    "nota",
+    "notas",
+    "notes",
+    "para",
+    "pdf",
+    "por",
+    "que",
+    "qué",
+    "quiero",
+    "relacionado",
+    "sobre",
+    "the",
+    "todo",
+    "todos",
+    "una",
+    "uno",
+    "unos",
+    "ver",
+}
+
+
+def _build_query_plan(query: str) -> KnowledgeQueryPlan:
+    normalized = " ".join(query.split()).strip()
+    variants: list[str] = []
+    seen: set[str] = set()
+
+    def add(candidate: str) -> None:
+        compact = " ".join(candidate.split()).strip()
+        if not compact:
+            return
+        key = compact.casefold()
+        if key in seen:
+            return
+        seen.add(key)
+        variants.append(compact)
+
+    add(normalized)
+    for match in re.finditer(r'"([^"]+)"|\'([^\']+)\'', normalized):
+        phrase = match.group(1) or match.group(2) or ""
+        add(phrase)
+
+    for raw_token in re.findall(r"[0-9A-Za-zÀ-ÿ_.-]+", normalized):
+        if "." not in raw_token:
+            continue
+        stem = Path(raw_token).stem.replace("-", " ").replace("_", " ")
+        add(stem)
+
+    core_terms = [
+        token
+        for token in _tokenize_query(normalized)
+        if len(token) > 2 and token not in KNOWLEDGE_QUERY_STOPWORDS
+    ]
+    if core_terms:
+        add(" ".join(core_terms[:8]))
+        if len(core_terms) >= 2:
+            add(" ".join(core_terms[:2]))
+            add(" ".join(core_terms[-2:]))
+        if len(core_terms) >= 3:
+            add(" ".join(core_terms[:3]))
+
+    if len(variants) > 6:
+        variants = variants[:6]
+
+    return KnowledgeQueryPlan(
+        original_query=normalized,
+        query_variants=tuple(variants or [normalized]),
+        core_terms=tuple(core_terms[:8]),
+    )
+
+
+def _exact_variant_bonus(
+    variant: str,
+    *,
+    title: str,
+    excerpt: str,
+    path: str,
+    relative_path: str,
+) -> float:
+    lowered = variant.casefold().strip()
+    if len(lowered) < 4:
+        return 0.0
+    bonus = 0.0
+    title_lower = title.casefold()
+    excerpt_lower = excerpt.casefold()
+    path_lower = path.casefold()
+    relative_lower = relative_path.casefold()
+    if lowered in title_lower:
+        bonus += 0.18
+    if lowered in relative_lower:
+        bonus += 0.14
+    if lowered in path_lower:
+        bonus += 0.10
+    if lowered in excerpt_lower:
+        bonus += 0.06
+    return bonus
 
 
 def _chunked(rows: Sequence[sqlite3.Row], *, size: int) -> Iterable[list[sqlite3.Row]]:

@@ -22,10 +22,12 @@ class Renderer:
             f"Intent: {snapshot.intent}",
             f"Perfil: {snapshot.profile}",
             f"Modo: {snapshot.execution_mode}",
-            f"Siguiente paso: {snapshot.next_action}",
+            f"Checkpoint: {snapshot.checkpoint}",
         ]
         if snapshot.reasons:
             lines.append(f"Señales: {', '.join(snapshot.reasons)}")
+        if snapshot.confidence_hint:
+            lines.append(f"Pista de confianza: {snapshot.confidence_hint}")
         if snapshot.memory_hits:
             lines.append("Memoria:")
             lines.extend(f"- {item}" for item in snapshot.memory_hits)
@@ -53,6 +55,7 @@ class Renderer:
         text.append("Commands\n", style="bold")
         text.append("/help\n")
         text.append("/exit\n")
+        text.append("/daily [brief|raw]\n")
         text.append("/mode <cloud|local>\n")
         text.append("/profile [name|status]\n")
         text.append("/auto [on|off|status]\n")

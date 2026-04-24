@@ -8,7 +8,8 @@ from pathlib import Path
 from rich.console import Console
 
 from adv_archon.core.config import AppConfig, load_app_config
-from adv_archon.core.daily import build_daily_report
+from adv_archon.core.daily import DailyBrief, DailyReport, build_daily_brief, build_daily_report
+from adv_archon.core.evals import evaluate_knowledge_retrieval
 from adv_archon.core.knowledge import KnowledgeStore, install_knowledge_launch_agent
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.logging import AppLogger
@@ -16,6 +17,8 @@ from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
 from adv_archon.core.research import install_research_launch_agent, run_research_cycle
 from adv_archon.core.tasks import TaskStore
 from adv_archon.core.web_library import WebLibraryStore
+from adv_archon.tools.google_workspace import GoogleWorkspaceTools
+from adv_archon.tools.personal import PersonalTools
 from adv_archon.ui.render import Renderer
 from adv_archon.ui.repl import ReplApp
 
@@ -62,6 +65,7 @@ def _handle_daily(
     renderer: Renderer,
     project_root: Path,
     incognito: bool,
+    daily_args: list[str],
 ) -> int:
     logger = _build_logger(
         config.paths.logs_dir,
@@ -80,13 +84,57 @@ def _handle_daily(
         notifications_enabled=config.tasks.notifications_enabled,
         logger=logger,
     )
-    report = build_daily_report(
-        project_root=project_root,
-        logs_dir=config.paths.logs_dir,
-        memory_store=memory_store,
-        task_store=task_store,
+    encoder = SentenceTransformerEncoder(config.memory.embedding_model)
+    knowledge_store = KnowledgeStore(
+        config.paths.knowledge_db,
+        encoder=encoder,
+        default_roots=config.knowledge.default_roots,
+        vault_roots=config.knowledge.vault_roots,
+        auto_index_on_search=config.knowledge.auto_index_on_search,
+        max_files_per_root=config.knowledge.max_files_per_root,
+        max_file_bytes=config.knowledge.max_file_bytes,
+        logger=logger,
     )
-    logger.log("daily_report_generated", project_root=project_root)
+    personal_tools = PersonalTools(
+        confirm=lambda _question: False,
+        timezone_name=config.tasks.default_timezone,
+        logger=logger,
+    )
+    google_tools = GoogleWorkspaceTools(
+        client_secret_file=config.google.client_secret_file,
+        token_file=config.google.token_file,
+        confirm=lambda _question: False,
+        enabled=config.google.enabled,
+        timezone_name=config.tasks.default_timezone,
+        default_calendar_id=config.google.default_calendar_id,
+        gmail_default_max_results=config.google.gmail_default_max_results,
+        drive_default_max_results=config.google.drive_default_max_results,
+        logger=logger,
+    )
+    command = daily_args[0] if daily_args else "brief"
+    report: DailyBrief | DailyReport
+    if command == "raw":
+        report = build_daily_report(
+            project_root=project_root,
+            logs_dir=config.paths.logs_dir,
+            memory_store=memory_store,
+            task_store=task_store,
+        )
+        logger.log("daily_report_generated", project_root=project_root, mode="raw")
+    elif command == "brief":
+        report = build_daily_brief(
+            project_root=project_root,
+            logs_dir=config.paths.logs_dir,
+            memory_store=memory_store,
+            task_store=task_store,
+            personal_tools=personal_tools,
+            google_tools=google_tools,
+            knowledge_store=knowledge_store,
+        )
+        logger.log("daily_report_generated", project_root=project_root, mode="brief")
+    else:
+        renderer.show_error("Uso: adv-archon daily [brief|raw]")
+        return 1
     renderer.show_info(report.render())
     return 0
 
@@ -195,14 +243,39 @@ def _handle_knowledge(
         if not query:
             renderer.show_error("Uso: adv-archon knowledge search <query>")
             return 1
-        records = store.search(query, limit=config.knowledge.search_limit)
+        search_result = store.search_details(query, limit=config.knowledge.search_limit)
+        records = search_result.records
         if not records:
             renderer.show_info("No encuentro conocimiento local relevante.")
             return 0
-        lines = ["Resultados de conocimiento local:"]
+        retrieval_eval = evaluate_knowledge_retrieval(search_result)
+        lines = [
+            "Resultados de conocimiento local:",
+            (
+                "Estrategia: "
+                f"{', '.join(search_result.plan.query_variants)} "
+                f"| candidatos: {search_result.candidate_count}"
+            ),
+        ]
+        if retrieval_eval is not None:
+            confidence_map = {"high": "alta", "medium": "media", "low": "baja"}
+            confidence_label = confidence_map.get(
+                retrieval_eval.confidence,
+                retrieval_eval.confidence,
+            )
+            lines.append(
+                "Evaluacion: "
+                f"confianza {confidence_label} "
+                f"| cobertura maxima {retrieval_eval.max_term_coverage:.0%}"
+            )
         for record in records:
             suffix = f" | {record.status}" if record.status != "indexed" else ""
             lines.append(f"- {record.title} | {record.path}{suffix}")
+            coverage = f"{record.term_coverage:.0%}" if record.term_coverage else "0%"
+            matched_terms = ", ".join(record.matched_terms) or "sin coincidencias directas"
+            lines.append(
+                f"  score={record.score} | cobertura={coverage} | matched={matched_terms}"
+            )
             lines.append(f"  {record.excerpt}")
         renderer.show_info("\n".join(lines))
         return 0
@@ -356,12 +429,13 @@ def main() -> int:
     renderer = Renderer(Console())
     project_root = Path.cwd()
 
-    if args.prompt == "daily" and not args.paths:
+    if args.prompt == "daily":
         return _handle_daily(
             config=config,
             renderer=renderer,
             project_root=project_root,
             incognito=args.incognito,
+            daily_args=args.paths,
         )
 
     if args.prompt == "tasks":

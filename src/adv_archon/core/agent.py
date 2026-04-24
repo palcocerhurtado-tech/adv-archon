@@ -10,10 +10,16 @@ from pathlib import Path
 from typing import Any
 
 from adv_archon.core.context import RuntimeContext
+from adv_archon.core.context_packets import ContextPacket, ToolObservation
+from adv_archon.core.evals import (
+    KnowledgeRetrievalEval,
+    evaluate_knowledge_retrieval,
+    summarize_response_confidence,
+)
 from adv_archon.core.intent import IntentAnalysis, IntentRouter
-from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeStore
+from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeSearchResult, KnowledgeStore
 from adv_archon.core.llm import LLMRouter
-from adv_archon.core.llm_types import LLMMessage, LLMResponse
+from adv_archon.core.llm_types import LLMMessage, LLMResponse, LLMUsage
 from adv_archon.core.memory import MemoryRecord, MemoryStore
 from adv_archon.core.session import SessionMessage, SessionStore
 from adv_archon.tools.files import list_dir, read_file
@@ -289,8 +295,9 @@ class TurnContextSnapshot:
     intent: str
     profile: str
     execution_mode: str
-    next_action: str
+    checkpoint: str
     reasons: list[str]
+    confidence_hint: str | None
     memory_hits: list[str]
     knowledge_hits: list[str]
 
@@ -301,6 +308,8 @@ class _TurnState:
     intent: IntentAnalysis
     memories: list[MemoryRecord]
     knowledge_hits: list[KnowledgeRecord]
+    knowledge_search_result: KnowledgeSearchResult | None
+    knowledge_eval: KnowledgeRetrievalEval | None
 
 
 class Agent:
@@ -540,6 +549,7 @@ class Agent:
         tool_steps = 0
         context_rendered = False
         executed_tools: list[str] = []
+        tool_observations: list[ToolObservation] = []
 
         llm_mode_context = (
             self._llm.temporary_mode("local")
@@ -550,7 +560,13 @@ class Agent:
             while tool_steps < max_steps:
                 plan = self._plan(user_input, state, executed_tools)
                 if on_context is not None and not context_rendered:
-                    on_context(self._build_context_snapshot(state, plan))
+                    packet = self._build_context_packet(
+                        user_input=user_input,
+                        state=state,
+                        plan=plan,
+                        tool_observations=tool_observations,
+                    )
+                    on_context(self._build_context_snapshot(packet))
                     context_rendered = True
 
                 if plan.get("kind") == "answer":
@@ -587,8 +603,25 @@ class Agent:
                 )
                 executed_tools.append(tool_name)
                 tool_steps += 1
+                tool_observations.append(self._summarize_tool_observation(tool_name, payload))
 
-            response = self._final_response(user_input, state, on_chunk=on_chunk)
+                deterministic_error = self._deterministic_tool_error_response(
+                    user_input=user_input,
+                    tool_name=tool_name,
+                    payload=payload,
+                )
+                if deterministic_error is not None:
+                    self._session.append(
+                        SessionMessage(role="assistant", content=deterministic_error.text)
+                    )
+                    return deterministic_error
+
+            response = self._final_response(
+                user_input,
+                state,
+                tool_observations=tool_observations,
+                on_chunk=on_chunk,
+            )
             self._session.append(SessionMessage(role="assistant", content=response.text))
             return response
 
@@ -607,20 +640,27 @@ class Agent:
                 memories = []
 
         knowledge_hits: list[KnowledgeRecord] = []
+        knowledge_search_result: KnowledgeSearchResult | None = None
         if self._knowledge_store is not None and intent.needs_knowledge:
             try:
-                knowledge_hits = self._knowledge_store.search(
+                knowledge_search_result = self._knowledge_store.search_details(
                     user_input,
                     limit=self._auto_knowledge_limit,
                 )
+                knowledge_hits = knowledge_search_result.records
             except Exception:
                 knowledge_hits = []
+                knowledge_search_result = None
+
+        knowledge_eval = evaluate_knowledge_retrieval(knowledge_search_result)
 
         return _TurnState(
             runtime_context=runtime_context,
             intent=intent,
             memories=memories,
             knowledge_hits=knowledge_hits,
+            knowledge_search_result=knowledge_search_result,
+            knowledge_eval=knowledge_eval,
         )
 
     def _plan(
@@ -632,13 +672,20 @@ class Agent:
         heuristic_plan = self._rule_based_plan(user_input, state, executed_tools)
         if heuristic_plan is not None:
             return heuristic_plan
+        packet = self._build_context_packet(
+            user_input=user_input,
+            state=state,
+            plan={"kind": "tool", "step_summary": "planificar siguiente paso"},
+            tool_observations=[],
+        )
         planner_prompt = (
             f"{self._system_prompt}\n\n"
-            f"{self._assistant_context(user_input, state)}\n\n"
+            f"{packet.render_for_model()}\n\n"
             "You are ADV ARCHON's intent router and operator planner.\n"
             "Decide whether to answer directly or call exactly one tool next.\n"
             "If the task needs multiple steps, choose the best next tool only.\n"
             "Prefer dedicated personal-assistant tools over shell_exec whenever available.\n"
+            "Keep step_summary sober, short, and operational.\n"
             "For note-taking requests about local folders, books, or files, prefer "
             "read_file, list_dir, or knowledge_search first, then create the note.\n"
             "Never use shell_exec for calendar, reminders, notes, contacts, email drafts, "
@@ -968,22 +1015,89 @@ class Agent:
         user_input: str,
         state: _TurnState,
         *,
+        tool_observations: Sequence[ToolObservation],
         on_chunk: ChunkCallback | None,
     ) -> LLMResponse:
+        packet = self._build_context_packet(
+            user_input=user_input,
+            state=state,
+            plan={"kind": "answer", "step_summary": "responder"},
+            tool_observations=tool_observations,
+        )
         final_prompt = (
             f"{self._system_prompt}\n\n"
-            f"{self._assistant_context(user_input, state)}\n"
+            f"{packet.render_for_model()}\n\n"
             "Write the final answer for the user. "
             "Use the tool results already in the conversation when relevant. "
-            "When useful, mention what context you used in one short line."
+            "When useful, mention what context you used in one short line. "
+            "Prefer grounded statements over broad claims. "
+            "If local knowledge was used, stay close to the evidence. "
+            "If a tool reported an error, explain it briefly and concretely. "
+            "Do not claim you retried unless you actually retried. "
+            "Do not ask the user whether you should retry unless the next step truly "
+            "requires their confirmation or an external permission change."
         )
         response = self._llm.stream_complete(
             self._build_messages(),
             system_prompt=final_prompt,
             on_chunk=on_chunk,
         )
+        response = self._append_confidence_block(
+            response,
+            state=state,
+            tool_observations=tool_observations,
+            on_chunk=on_chunk,
+        )
         self._record_usage("assistant", response)
         return response
+
+    def _deterministic_tool_error_response(
+        self,
+        *,
+        user_input: str,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> LLMResponse | None:
+        error = str(payload.get("error") or "").strip()
+        if not error:
+            return None
+
+        normalized = _normalize_text(user_input)
+        text: str | None = None
+
+        if tool_name == "calendar_upcoming":
+            period = _describe_calendar_period(normalized)
+            if "timeout" in error.lower() or "tardado demasiado" in error.lower():
+                text = (
+                    f"No he podido consultar tu calendario para {period} porque el conector "
+                    "ha tardado demasiado y se ha cancelado. "
+                    "Si quieres, revisa que Calendar tenga permisos de automatizacion y "
+                    "vuelve a probar."
+                )
+            else:
+                text = (
+                    f"No he podido consultar tu calendario para {period}. "
+                    f"Error: {error}"
+                )
+        elif tool_name == "reminders_list":
+            if "timeout" in error.lower() or "tardado demasiado" in error.lower():
+                text = (
+                    "No he podido consultar tus recordatorios porque el conector ha "
+                    "tardado demasiado y se ha cancelado. "
+                    "Si quieres, revisa permisos de Recordatorios y vuelve a probar."
+                )
+            else:
+                text = f"No he podido consultar tus recordatorios. Error: {error}"
+
+        if text is None:
+            return None
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="tool-error-handler",
+        )
 
     def _build_messages(self) -> list[LLMMessage]:
         return [
@@ -1023,64 +1137,250 @@ class Agent:
             return {"kind": "answer", "step_summary": "reply directly"}
         return data
 
-    def _assistant_context(self, user_input: str, state: _TurnState) -> str:
-        lines: list[str] = [
-            "Intent analysis:",
-            f"- Category: {state.intent.category}",
-            f"- Profile: {state.intent.profile}",
-            f"- Needs plan: {'yes' if state.intent.needs_plan else 'no'}",
-            f"- Needs knowledge: {'yes' if state.intent.needs_knowledge else 'no'}",
-            f"- Needs web: {'yes' if state.intent.needs_web else 'no'}",
-            f"- Needs shell: {'yes' if state.intent.needs_shell else 'no'}",
-            f"- Signals: {', '.join(state.intent.reasons)}",
-        ]
-        if state.runtime_context is not None:
-            lines.append("")
-            lines.append(state.runtime_context.prompt_block())
-        if state.memories:
-            lines.append("")
-            lines.append("Relevant long-term memory:")
-            for memory_record in state.memories:
-                descriptor = f"{memory_record.memory_type}/{memory_record.namespace}"
-                tags = (
-                    f" | tags: {', '.join(memory_record.tags)}"
-                    if memory_record.tags
-                    else ""
-                )
-                lines.append(
-                    f"- [#{memory_record.id}] ({descriptor}) "
-                    f"{memory_record.content}{tags}"
-                )
-        if state.knowledge_hits:
-            lines.append("")
-            lines.append("Local knowledge hits:")
-            for knowledge_record in state.knowledge_hits:
-                lines.append(f"- {knowledge_record.title} | {knowledge_record.path}")
-        if not state.memories and not state.knowledge_hits and state.runtime_context is None:
-            lines.append("")
-            lines.append(f"Current working directory: {self._project_root}")
-        lines.append("")
-        lines.append(f"Current user request: {user_input}")
-        return "\n".join(lines)
-
-    @staticmethod
-    def _build_context_snapshot(state: _TurnState, plan: dict[str, Any]) -> TurnContextSnapshot:
-        next_action = str(plan.get("step_summary") or plan.get("kind") or "reply directly")
-        execution_mode = "operator" if state.intent.needs_plan else "direct"
-        memory_hits = [
-            f"{record.memory_type}/{record.namespace}: {record.content}"
-            for record in state.memories[:3]
-        ]
-        knowledge_hits = [record.title for record in state.knowledge_hits[:3]]
-        return TurnContextSnapshot(
+    def _build_context_packet(
+        self,
+        *,
+        user_input: str,
+        state: _TurnState,
+        plan: dict[str, Any],
+        tool_observations: Sequence[ToolObservation],
+    ) -> ContextPacket:
+        runtime_block = (
+            state.runtime_context.prompt_block()
+            if state.runtime_context is not None
+            else f"Current working directory: {self._project_root}"
+        )
+        memory_items = tuple(
+            self._format_memory_item(record) for record in state.memories[:3]
+        )
+        knowledge_items = tuple(
+            self._format_knowledge_item(record) for record in state.knowledge_hits[:4]
+        )
+        tool_items = tuple(observation.summary for observation in tool_observations[-4:])
+        checkpoint = self._normalize_checkpoint(
+            str(plan.get("step_summary") or plan.get("kind") or "responder")
+        )
+        confidence_hint = (
+            self._render_knowledge_hint(state.knowledge_eval)
+            if state.knowledge_eval is not None
+            else None
+        )
+        return ContextPacket(
+            task=user_input,
             intent=state.intent.category,
             profile=state.intent.profile,
-            execution_mode=execution_mode,
-            next_action=next_action,
-            reasons=state.intent.reasons[:4],
-            memory_hits=memory_hits,
-            knowledge_hits=knowledge_hits,
+            execution_mode="operator" if state.intent.needs_plan else "direct",
+            checkpoint=checkpoint,
+            reasons=tuple(state.intent.reasons[:4]),
+            runtime_block=runtime_block,
+            memory_items=memory_items,
+            knowledge_items=knowledge_items,
+            tool_items=tool_items,
+            confidence_hint=confidence_hint,
         )
+
+    @staticmethod
+    def _build_context_snapshot(packet: ContextPacket) -> TurnContextSnapshot:
+        return TurnContextSnapshot(
+            intent=packet.intent,
+            profile=packet.profile,
+            execution_mode=packet.execution_mode,
+            checkpoint=packet.checkpoint,
+            reasons=list(packet.reasons),
+            confidence_hint=packet.confidence_hint,
+            memory_hits=list(packet.memory_items[:3]),
+            knowledge_hits=list(packet.knowledge_items[:3]),
+        )
+
+    @staticmethod
+    def _format_memory_item(record: MemoryRecord) -> str:
+        descriptor = f"{record.memory_type}/{record.namespace}"
+        tags = f" | tags: {', '.join(record.tags)}" if record.tags else ""
+        return f"[#{record.id}] ({descriptor}) {record.content}{tags}"
+
+    @staticmethod
+    def _format_knowledge_item(record: KnowledgeRecord) -> str:
+        score = f"{record.score:.2f}" if record.score is not None else "n/a"
+        coverage = f"{record.term_coverage:.0%}" if record.term_coverage else "0%"
+        return f"{record.title} | {record.path} | score={score} | coverage={coverage}"
+
+    @staticmethod
+    def _normalize_checkpoint(step_summary: str) -> str:
+        lowered = step_summary.strip().lower() or "responder"
+        replacements = {
+            "reply directly": "responder",
+            "reply": "responder",
+            "answer": "responder",
+        }
+        lowered = replacements.get(lowered, lowered)
+        words = lowered.split()
+        if len(words) > 5:
+            lowered = " ".join(words[:5])
+        return lowered
+
+    @staticmethod
+    def _render_knowledge_hint(
+        knowledge_eval: KnowledgeRetrievalEval | None,
+    ) -> str | None:
+        if knowledge_eval is None:
+            return None
+        mapping = {
+            "high": "conocimiento local fuerte",
+            "medium": "conocimiento local razonable",
+            "low": "conocimiento local debil",
+        }
+        return mapping.get(knowledge_eval.confidence)
+
+    def _summarize_tool_observation(
+        self,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> ToolObservation:
+        error = str(payload.get("error") or "").strip()
+        if error:
+            return ToolObservation(
+                name=tool_name,
+                summary=f"{tool_name}: error - {error}",
+                success=False,
+            )
+
+        if tool_name == "read_file":
+            path = str(payload.get("path") or "archivo")
+            return ToolObservation(
+                name=tool_name,
+                summary=f"archivo leido: {path}",
+                success=True,
+                citations=(path,),
+            )
+        if tool_name == "list_dir":
+            path = str(payload.get("path") or "directorio")
+            entries = payload.get("entries")
+            count = len(entries) if isinstance(entries, list) else 0
+            return ToolObservation(
+                name=tool_name,
+                summary=f"directorio listado: {path} ({count} entradas)",
+                success=True,
+                citations=(path,),
+            )
+
+        for key in (
+            "results",
+            "messages",
+            "events",
+            "reminders",
+            "tasks",
+            "notes",
+            "contacts",
+            "items",
+        ):
+            raw_items = payload.get(key)
+            if isinstance(raw_items, list):
+                summary, citations = self._summarize_list_tool(tool_name, raw_items)
+                return ToolObservation(
+                    name=tool_name,
+                    summary=summary,
+                    success=True,
+                    citations=citations,
+                )
+
+        return ToolObservation(
+            name=tool_name,
+            summary=f"{tool_name}: completado",
+            success=True,
+        )
+
+    @staticmethod
+    def _summarize_list_tool(
+        tool_name: str,
+        items: list[Any],
+    ) -> tuple[str, tuple[str, ...]]:
+        count = len(items)
+        if not items:
+            return (f"{tool_name}: sin resultados", ())
+
+        citations: list[str] = []
+        first = items[0]
+        if isinstance(first, dict):
+            title = str(
+                first.get("title")
+                or first.get("summary")
+                or first.get("subject")
+                or first.get("name")
+                or first.get("folder")
+                or "resultado"
+            )
+            reference = str(
+                first.get("path")
+                or first.get("webViewLink")
+                or first.get("url")
+                or first.get("from")
+                or title
+            )
+            citations.append(f"{title} | {reference}")
+            return (f"{tool_name}: {count} resultados, primero {title}", tuple(citations))
+
+        first_text = str(first)
+        citations.append(first_text)
+        return (f"{tool_name}: {count} resultados, primero {first_text}", tuple(citations))
+
+    def _append_confidence_block(
+        self,
+        response: LLMResponse,
+        *,
+        state: _TurnState,
+        tool_observations: Sequence[ToolObservation],
+        on_chunk: ChunkCallback | None,
+    ) -> LLMResponse:
+        block = self._build_confidence_block(state=state, tool_observations=tool_observations)
+        if not block:
+            return response
+        if on_chunk is not None:
+            on_chunk(block)
+        return LLMResponse(
+            text=f"{response.text}{block}",
+            usage=response.usage,
+            provider=response.provider,
+            model=response.model,
+            redaction_applied=response.redaction_applied,
+            redaction_items=response.redaction_items,
+        )
+
+    def _build_confidence_block(
+        self,
+        *,
+        state: _TurnState,
+        tool_observations: Sequence[ToolObservation],
+    ) -> str:
+        successful_tools = sum(1 for observation in tool_observations if observation.success)
+        failed_tools = sum(1 for observation in tool_observations if not observation.success)
+        confidence = summarize_response_confidence(
+            knowledge_eval=state.knowledge_eval,
+            successful_tools=successful_tools,
+            failed_tools=failed_tools,
+            used_local_knowledge=bool(state.knowledge_hits),
+        )
+        citations: list[str] = []
+        for record in state.knowledge_hits[:2]:
+            citations.append(f"conocimiento local: {record.title} | {record.path}")
+        for observation in tool_observations:
+            if not observation.success:
+                continue
+            citations.extend(f"{observation.name}: {item}" for item in observation.citations[:1])
+            if len(citations) >= 4:
+                break
+
+        if not citations and confidence.level == "baja":
+            return ""
+
+        lines = ["", "", "Base y confianza:"]
+        if citations:
+            lines.extend(f"- {citation}" for citation in citations[:4])
+        else:
+            lines.append("- sin evidencia local explicita")
+        lines.append(f"- confianza: {confidence.level}")
+        if confidence.rationale:
+            lines.append(f"- motivo: {'; '.join(confidence.rationale[:3])}")
+        return "\n".join(lines)
 
     def _record_usage(self, phase: str, response: LLMResponse) -> None:
         if self._usage_callback is not None:
@@ -1192,6 +1492,16 @@ def _infer_calendar_window(text: str, *, now: datetime | None = None) -> dict[st
         return {"days": 1, "start_offset_days": 0}
     if "mañana" in text or "manana" in text:
         return {"days": 1, "start_offset_days": 1}
+    if (
+        "semana que viene" in text
+        or "semana que entra" in text
+        or "proxima semana" in text
+        or "próxima semana" in text
+        or "next week" in text
+    ):
+        if now is None:
+            return {"days": 7, "start_offset_days": 7}
+        return {"days": 7, "start_offset_days": 7 - now.weekday()}
     if "esta semana" in text or "this week" in text:
         if now is None:
             return {"days": 7, "start_offset_days": 0}
@@ -1202,6 +1512,26 @@ def _infer_calendar_window(text: str, *, now: datetime | None = None) -> dict[st
     if match is not None:
         return {"days": max(1, int(str(match.group(1)))), "start_offset_days": 0}
     return {"days": 7, "start_offset_days": 0}
+
+
+def _describe_calendar_period(text: str) -> str:
+    if "hoy" in text:
+        return "hoy"
+    if "mañana" in text or "manana" in text:
+        return "mañana"
+    if (
+        "semana que viene" in text
+        or "semana que entra" in text
+        or "proxima semana" in text
+        or "próxima semana" in text
+        or "next week" in text
+    ):
+        return "la semana que viene"
+    if "esta semana" in text or "this week" in text:
+        return "esta semana"
+    if "mes" in text:
+        return "este mes"
+    return "ese periodo"
 
 
 def _extract_focus_query(text: str) -> str:

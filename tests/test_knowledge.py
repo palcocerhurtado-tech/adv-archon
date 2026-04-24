@@ -2,6 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
+from adv_archon.core.evals import evaluate_knowledge_retrieval
 from adv_archon.core.knowledge import KnowledgeStore
 from adv_archon.tools.knowledge_tools import KnowledgeTools
 
@@ -93,6 +94,65 @@ def test_knowledge_store_search_reranks_lexically_and_returns_metadata(tmp_path:
     assert results[0].modified_at
     assert results[0].indexed_at
     assert "roadmap" in results[0].matched_terms
+    assert results[0].term_coverage > 0
+
+
+def test_knowledge_store_search_uses_focus_variants_for_noisy_queries(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "atomic-habits.md").write_text(
+        "Ideas clave y habitos atomicos aplicados a trabajo profundo.",
+        encoding="utf-8",
+    )
+    (docs / "apuntes-escritorio-libro.md").write_text(
+        "Resumen general del escritorio sin referencias concretas al libro buscado.",
+        encoding="utf-8",
+    )
+
+    store = KnowledgeStore(
+        tmp_path / "knowledge.db",
+        encoder=FlatEncoder(),
+        default_roots=[str(docs)],
+        auto_index_on_search=False,
+        max_files_per_root=10,
+    )
+
+    store.run_once([docs])
+    search = store.search_details(
+        "hazme unos apuntes sobre el libro atomic habits del escritorio",
+        limit=2,
+        roots=[str(docs)],
+    )
+
+    assert search.records[0].title == "atomic-habits.md"
+    assert "atomic habits" in search.plan.query_variants
+    assert "atomic" in search.records[0].matched_terms
+    assert search.records[0].term_coverage >= 0.5
+
+
+def test_knowledge_retrieval_eval_scores_strong_local_match(tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "acme-roadmap.md").write_text(
+        "Roadmap ACME con hitos y prioridades claras.",
+        encoding="utf-8",
+    )
+
+    store = KnowledgeStore(
+        tmp_path / "knowledge.db",
+        encoder=FakeEncoder(),
+        default_roots=[str(docs)],
+        auto_index_on_search=False,
+        max_files_per_root=10,
+    )
+
+    store.run_once([docs])
+    search = store.search_details("roadmap acme", limit=3, roots=[str(docs)])
+    retrieval_eval = evaluate_knowledge_retrieval(search)
+
+    assert retrieval_eval is not None
+    assert retrieval_eval.confidence in {"high", "medium"}
+    assert retrieval_eval.max_term_coverage > 0
 
 
 def test_knowledge_store_search_vault_filters_markdown_and_handles_deleted_files(
@@ -160,6 +220,9 @@ def test_knowledge_tools_expose_discover_ingest_and_status(tmp_path: Path) -> No
     assert status["recent_runs"]
     assert search["status"]["indexed_files"] == 1
     assert len(search["results"]) == 1
+    assert search["strategy"]["hybrid_retrieval"] is True
+    assert "acme" in search["strategy"]["query_variants"]
+    assert search["results"][0]["term_coverage"] > 0
 
 
 def test_knowledge_store_uses_sqlite_wal_mode_for_persistent_db(tmp_path: Path) -> None:

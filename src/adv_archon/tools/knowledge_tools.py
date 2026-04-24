@@ -35,12 +35,13 @@ class KnowledgeTools:
         suffixes: list[str] | None = None,
     ) -> ToolResult:
         selected_roots = self._knowledge_roots(roots)
-        records = self._store.search(
+        search_result = self._store.search_details(
             query,
             limit=limit,
             roots=selected_roots,
             suffixes=suffixes,
         )
+        records = search_result.records
         status = self._store.status(selected_roots, limit_runs=1)
         return ToolResult(
             name="knowledge_search",
@@ -49,6 +50,12 @@ class KnowledgeTools:
                 "profile": self._active_profile(),
                 "roots": selected_roots or [],
                 "suffixes": list(suffixes or []),
+                "strategy": {
+                    "query_variants": list(search_result.plan.query_variants),
+                    "core_terms": list(search_result.plan.core_terms),
+                    "candidate_count": search_result.candidate_count,
+                    "hybrid_retrieval": True,
+                },
                 "status": _status_payload(status),
                 "results": [
                     {
@@ -64,6 +71,7 @@ class KnowledgeTools:
                         "indexed_at": record.indexed_at,
                         "score": record.score,
                         "matched_terms": list(record.matched_terms),
+                        "term_coverage": record.term_coverage,
                     }
                     for record in records
                 ],
@@ -77,7 +85,13 @@ class KnowledgeTools:
         roots: list[str] | None = None,
     ) -> ToolResult:
         selected_roots = self._vault_roots(roots)
-        records = self._store.search_vault(query, limit=limit, roots=selected_roots or None)
+        search_result = self._store.search_details(
+            query,
+            limit=limit,
+            roots=selected_roots or None,
+            suffixes=(".md", ".markdown"),
+        )
+        records = search_result.records
         status = self._store.status(selected_roots, limit_runs=1)
         return ToolResult(
             name="vault_search",
@@ -85,6 +99,12 @@ class KnowledgeTools:
                 "query": query,
                 "profile": self._active_profile(),
                 "roots": selected_roots or [],
+                "strategy": {
+                    "query_variants": list(search_result.plan.query_variants),
+                    "core_terms": list(search_result.plan.core_terms),
+                    "candidate_count": search_result.candidate_count,
+                    "hybrid_retrieval": True,
+                },
                 "status": _status_payload(status),
                 "results": [
                     {
@@ -100,6 +120,7 @@ class KnowledgeTools:
                         "indexed_at": record.indexed_at,
                         "score": record.score,
                         "matched_terms": list(record.matched_terms),
+                        "term_coverage": record.term_coverage,
                     }
                     for record in records
                 ],

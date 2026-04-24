@@ -291,6 +291,14 @@ class AgentTurnResult:
 
 
 @dataclass(slots=True)
+class AgentTurnInspection:
+    intent: str
+    profile: str
+    knowledge_eval: KnowledgeRetrievalEval | None
+    local_knowledge_hits: tuple[str, ...]
+
+
+@dataclass(slots=True)
 class TurnContextSnapshot:
     intent: str
     profile: str
@@ -489,6 +497,15 @@ class Agent:
             on_context=on_context,
         )
         return AgentTurnResult(reply=response.text, usage=response)
+
+    def inspect_turn(self, user_input: str) -> AgentTurnInspection:
+        state = self._prepare_turn_state(user_input)
+        return AgentTurnInspection(
+            intent=state.intent.category,
+            profile=state.intent.profile,
+            knowledge_eval=state.knowledge_eval,
+            local_knowledge_hits=tuple(record.title for record in state.knowledge_hits[:5]),
+        )
 
     def stream_final_response(
         self,

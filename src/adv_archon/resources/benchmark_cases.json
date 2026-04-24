@@ -1,0 +1,31 @@
+[
+  {
+    "case_id": "readme-summary",
+    "prompt": "resume {cwd}/README.md y apoyate en tu conocimiento local",
+    "expected_facts": ["adv archon", "terminal"],
+    "expected_citation_hints": ["README.md"],
+    "require_local_knowledge": true,
+    "require_confidence_block": true,
+    "pass_threshold": 0.7,
+    "tags": ["docs", "local", "grounding"]
+  },
+  {
+    "case_id": "benchmark-search",
+    "prompt": "busca en tu conocimiento local todo lo relacionado con benchmark",
+    "expected_facts": ["benchmark"],
+    "require_local_knowledge": true,
+    "require_confidence_block": true,
+    "pass_threshold": 0.7,
+    "tags": ["knowledge", "benchmark"]
+  },
+  {
+    "case_id": "architecture-brief",
+    "prompt": "explica en pocas lineas la arquitectura de {cwd}/ARCHITECTURE.md usando tu conocimiento local",
+    "expected_facts": ["adv archon", "arquitectura"],
+    "expected_citation_hints": ["ARCHITECTURE.md"],
+    "require_local_knowledge": true,
+    "require_confidence_block": true,
+    "pass_threshold": 0.7,
+    "tags": ["architecture", "local"]
+  }
+]

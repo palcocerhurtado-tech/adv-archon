@@ -67,9 +67,11 @@ class PathsConfig:
     env_file: Path = field(init=False)
     history_file: Path = field(init=False)
     memory_db: Path = field(init=False)
+    evals_db: Path = field(init=False)
     knowledge_db: Path = field(init=False)
     web_library_db: Path = field(init=False)
     tasks_db: Path = field(init=False)
+    benchmark_cases_file: Path = field(init=False)
     browser_profile_dir: Path = field(init=False)
     profile_state_file: Path = field(init=False)
     google_client_secret_file: Path = field(init=False)
@@ -82,9 +84,11 @@ class PathsConfig:
         self.env_file = self.root / ".env"
         self.history_file = self.root / "history.txt"
         self.memory_db = self.root / "memory.db"
+        self.evals_db = self.root / "evals.db"
         self.knowledge_db = self.root / "knowledge.db"
         self.web_library_db = self.root / "web-library.db"
         self.tasks_db = self.root / "tasks.db"
+        self.benchmark_cases_file = self.root / "benchmark-cases.json"
         self.browser_profile_dir = self.root / "browser-profile"
         self.profile_state_file = self.root / "active-profile.txt"
         self.google_client_secret_file = self.root / "google-client-secret.json"
@@ -196,6 +200,13 @@ class ResearchConfig:
 
 
 @dataclass(slots=True)
+class BenchmarkConfig:
+    default_suite: str = "archon-internal"
+    default_benchmark: str = "real-cases"
+    max_cases: int = 12
+
+
+@dataclass(slots=True)
 class ProfilesConfig:
     default_profile: str = "general"
     definitions: dict[str, ProfileDefinition] = field(default_factory=dict)
@@ -214,6 +225,7 @@ class AppConfig:
     voice: VoiceConfig
     google: GoogleConfig
     research: ResearchConfig
+    benchmark: BenchmarkConfig
     profiles: ProfilesConfig
     system_prompt_path: Path
 
@@ -416,6 +428,15 @@ def load_app_config(
             _lookup(data, "research", "launch_agent_interval_minutes", default=180)
         ),
     )
+    benchmark = BenchmarkConfig(
+        default_suite=str(
+            _lookup(data, "benchmark", "default_suite", default="archon-internal")
+        ),
+        default_benchmark=str(
+            _lookup(data, "benchmark", "default_benchmark", default="real-cases")
+        ),
+        max_cases=int(_lookup(data, "benchmark", "max_cases", default=12)),
+    )
     profiles_data = _lookup(data, "profiles", default={})
     if not isinstance(profiles_data, dict):
         profiles_data = {}
@@ -457,6 +478,7 @@ def load_app_config(
         voice=voice,
         google=google,
         research=research,
+        benchmark=benchmark,
         profiles=profiles,
         system_prompt_path=system_prompt_path,
     )

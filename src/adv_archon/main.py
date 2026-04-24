@@ -1,14 +1,26 @@
 from __future__ import annotations
 
 import argparse
+import io
+import json
 import shutil
-from datetime import datetime
+import subprocess
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 from rich.console import Console
 
+from adv_archon.core.benchmark import (
+    BenchmarkCase,
+    BenchmarkEvidence,
+    BenchmarkExecutor,
+    BenchmarkSummary,
+    run_benchmarks,
+)
 from adv_archon.core.config import AppConfig, load_app_config
 from adv_archon.core.daily import DailyBrief, DailyReport, build_daily_brief, build_daily_report
+from adv_archon.core.eval_store import EvalStore
 from adv_archon.core.evals import evaluate_knowledge_retrieval
 from adv_archon.core.knowledge import KnowledgeStore, install_knowledge_launch_agent
 from adv_archon.core.llm import LLMRouter
@@ -400,6 +412,297 @@ def _handle_research(
     return 1
 
 
+def _handle_benchmark(
+    *,
+    config: AppConfig,
+    renderer: Renderer,
+    project_root: Path,
+    incognito: bool,
+    benchmark_args: list[str],
+) -> int:
+    store = EvalStore(config.paths.evals_db)
+    command = benchmark_args[0] if benchmark_args else "status"
+
+    if command == "init":
+        target = config.paths.benchmark_cases_file
+        if target.exists():
+            renderer.show_info(f"Ya existe un fichero de casos en {target}")
+            return 0
+        target.write_text(
+            _bundled_benchmark_cases_path().read_text(encoding="utf-8"),
+            encoding="utf-8",
+        )
+        renderer.show_info(f"Casos de benchmark inicializados en {target}")
+        return 0
+
+    if command == "status":
+        recent = store.list_recent_runs(limit=5)
+        aggregate = store.summarize_metrics(suite=config.benchmark.default_suite)
+        renderer.show_info(_render_benchmark_status(recent, aggregate))
+        return 0
+
+    if command == "run":
+        cases_path = _resolve_benchmark_cases_path(config=config, benchmark_args=benchmark_args[1:])
+        cases = _load_benchmark_cases(
+            cases_path,
+            cwd=project_root,
+            home=Path.home(),
+            max_cases=config.benchmark.max_cases,
+        )
+        if not cases:
+            renderer.show_error("No hay casos de benchmark para ejecutar.")
+            return 1
+
+        run = store.register_run(
+            suite=config.benchmark.default_suite,
+            benchmark=config.benchmark.default_benchmark,
+            model=_benchmark_model_label(config),
+            status="running",
+            started_at=datetime.now(UTC).isoformat(),
+            git_sha=_git_sha(project_root),
+            metadata={
+                "cases_path": str(cases_path),
+                "case_count": len(cases),
+                "cwd": str(project_root),
+            },
+        )
+        try:
+            summary = run_benchmarks(
+                cases,
+                executor=_build_benchmark_executor(
+                    config=config,
+                    system_prompt=load_system_prompt(config.system_prompt_path),
+                    project_root=project_root,
+                    incognito=incognito,
+                ),
+            )
+            for result in summary.results:
+                usage = result.usage
+                store.register_case(
+                    run_id=run.id,
+                    case_key=result.case.case_id,
+                    status="error" if result.error else ("passed" if result.passed else "failed"),
+                    score=result.overall_score,
+                    latency_ms=round(result.duration_seconds * 1000, 2),
+                    prompt_tokens=usage.prompt_tokens if usage is not None else 0,
+                    completion_tokens=usage.completion_tokens if usage is not None else 0,
+                    total_tokens=usage.total_tokens if usage is not None else 0,
+                    estimated_cost_usd=usage.estimated_cost_usd if usage is not None else 0.0,
+                    error_message=result.error,
+                    metadata={
+                        "prompt": result.case.prompt,
+                        "tags": list(result.case.tags),
+                        "grounding": _metric_payload(result.grounding),
+                        "local_knowledge": _metric_payload(result.local_knowledge),
+                        "confidence_citations": _metric_payload(
+                            result.confidence_citations
+                        ),
+                        "citations": list(result.citations),
+                        "provider": result.provider,
+                        "model": result.model,
+                    },
+                )
+            store.update_run(
+                run.id,
+                status="completed",
+                completed_at=datetime.now(UTC).isoformat(),
+                notes=f"{summary.passed_cases}/{summary.total_cases} casos pasados",
+                metadata={
+                    "cases_path": str(cases_path),
+                    "case_count": len(cases),
+                    "pass_rate": summary.pass_rate,
+                    "average_score": summary.average_score,
+                    "cwd": str(project_root),
+                },
+            )
+        except Exception as exc:
+            store.update_run(
+                run.id,
+                status="error",
+                completed_at=datetime.now(UTC).isoformat(),
+                notes=str(exc),
+            )
+            raise
+
+        renderer.show_info(
+            _render_benchmark_summary(summary, run_id=run.id, cases_path=cases_path)
+        )
+        return 0
+
+    renderer.show_error("Uso: adv-archon benchmark [status|init|run [cases.json]]")
+    return 1
+
+
+def _build_benchmark_executor(
+    *,
+    config: AppConfig,
+    system_prompt: str,
+    project_root: Path,
+    incognito: bool,
+) -> BenchmarkExecutor:
+    def executor(case: BenchmarkCase) -> BenchmarkEvidence:
+        quiet_renderer = Renderer(
+            Console(file=io.StringIO(), force_terminal=False, no_color=True)
+        )
+        app = ReplApp(
+            config=config,
+            llm=LLMRouter(config.llm),
+            project_root=project_root,
+            system_prompt=system_prompt,
+            renderer=quiet_renderer,
+            incognito=incognito,
+        )
+        try:
+            inspection = app._agent.inspect_turn(case.prompt)
+            result = app._agent.run_turn(case.prompt)
+            return BenchmarkEvidence(
+                response_text=result.reply,
+                knowledge_eval=inspection.knowledge_eval,
+                used_local_knowledge=bool(inspection.local_knowledge_hits),
+                local_knowledge_hits=inspection.local_knowledge_hits,
+                provider=result.usage.provider,
+                model=result.usage.model,
+                usage=result.usage.usage,
+            )
+        finally:
+            app._shutdown()
+
+    return executor
+
+
+def _resolve_benchmark_cases_path(
+    *,
+    config: AppConfig,
+    benchmark_args: list[str],
+) -> Path:
+    if benchmark_args:
+        return Path(benchmark_args[0]).expanduser()
+    if config.paths.benchmark_cases_file.exists():
+        return config.paths.benchmark_cases_file
+    return _bundled_benchmark_cases_path()
+
+
+def _bundled_benchmark_cases_path() -> Path:
+    return Path(__file__).resolve().parent / "resources" / "benchmark_cases.json"
+
+
+def _load_benchmark_cases(
+    cases_path: Path,
+    *,
+    cwd: Path,
+    home: Path,
+    max_cases: int,
+) -> list[BenchmarkCase]:
+    raw = json.loads(cases_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, list):
+        raise ValueError("El fichero de casos debe contener una lista JSON.")
+    replacements = {"{cwd}": str(cwd), "{home}": str(home)}
+    cases: list[BenchmarkCase] = []
+    for item in raw[: max(1, max_cases)]:
+        if not isinstance(item, dict):
+            continue
+        prompt = str(item.get("prompt", ""))
+        for placeholder, value in replacements.items():
+            prompt = prompt.replace(placeholder, value)
+        cases.append(
+            BenchmarkCase(
+                case_id=str(item.get("case_id", f"case-{len(cases) + 1}")),
+                prompt=prompt,
+                expected_facts=tuple(str(value) for value in item.get("expected_facts", [])),
+                forbidden_facts=tuple(
+                    str(value) for value in item.get("forbidden_facts", [])
+                ),
+                expected_citation_hints=tuple(
+                    str(value) for value in item.get("expected_citation_hints", [])
+                ),
+                require_local_knowledge=bool(item.get("require_local_knowledge", False)),
+                require_confidence_block=bool(item.get("require_confidence_block", False)),
+                pass_threshold=float(item.get("pass_threshold", 0.7)),
+                tags=tuple(str(value) for value in item.get("tags", [])),
+            )
+        )
+    return cases
+
+
+def _benchmark_model_label(config: AppConfig) -> str:
+    if config.llm.mode == "local":
+        return f"ollama/{config.llm.ollama_model}"
+    return f"gemini/{config.llm.gemini_model}"
+
+
+def _git_sha(project_root: Path) -> str | None:
+    completed = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        cwd=project_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode != 0:
+        return None
+    return completed.stdout.strip() or None
+
+
+def _metric_payload(metric: Any) -> dict[str, Any]:
+    return {
+        "name": getattr(metric, "name", ""),
+        "score": getattr(metric, "score", 0.0),
+        "passed": bool(getattr(metric, "passed", False)),
+        "details": list(getattr(metric, "details", ()) or ()),
+    }
+
+
+def _render_benchmark_status(recent: list[Any], aggregate: Any) -> str:
+    pass_rate = aggregate.pass_rate if aggregate.pass_rate is not None else "n/a"
+    avg_score = aggregate.avg_score if aggregate.avg_score is not None else "n/a"
+    avg_latency = aggregate.avg_latency_ms if aggregate.avg_latency_ms is not None else "n/a"
+    lines = [
+        "Estado de benchmarks internos:",
+        f"- runs: {aggregate.run_count} | casos: {aggregate.case_count} | pass rate: {pass_rate}",
+        f"- score medio: {avg_score} | latencia media ms: {avg_latency}",
+    ]
+    if recent:
+        lines.append("Runs recientes:")
+        for item in recent:
+            lines.append(
+                f"- [#{item.run.id}] {item.run.suite}/{item.run.benchmark} "
+                f"| {item.run.model} | {item.run.status} | pass rate {item.pass_rate}"
+            )
+    else:
+        lines.append("- no hay runs guardados todavia")
+    return "\n".join(lines)
+
+
+def _render_benchmark_summary(
+    summary: BenchmarkSummary,
+    *,
+    run_id: int,
+    cases_path: Path,
+) -> str:
+    lines = [
+        f"Benchmark interno completado | run #{run_id}",
+        f"- casos: {summary.total_cases}",
+        f"- pasados: {summary.passed_cases}",
+        f"- fallidos: {summary.failed_cases}",
+        f"- pass rate: {summary.pass_rate:.0%}",
+        f"- score medio: {summary.average_score:.2f}",
+        f"- grounding medio: {summary.average_grounding:.2f}",
+        f"- conocimiento local medio: {summary.average_local_knowledge:.2f}",
+        f"- citas/confianza medio: {summary.average_confidence_citations:.2f}",
+        f"- duracion total s: {summary.total_duration_seconds:.2f}",
+        f"- casos usados: {cases_path}",
+    ]
+    failures = [result for result in summary.results if not result.passed][:3]
+    if failures:
+        lines.append("Casos a revisar:")
+        for result in failures:
+            lines.append(
+                f"- {result.case.case_id} | score {result.overall_score:.2f} "
+                f"| error: {result.error or 'sin error'}"
+            )
+    return "\n".join(lines)
+
+
 def _format_knowledge_index_result(result: object) -> str:
     from adv_archon.core.knowledge import KnowledgeIndexResult
 
@@ -459,6 +762,15 @@ def main() -> int:
             renderer=renderer,
             research_args=args.paths,
             incognito=args.incognito,
+        )
+
+    if args.prompt == "benchmark":
+        return _handle_benchmark(
+            config=config,
+            renderer=renderer,
+            project_root=project_root,
+            incognito=args.incognito,
+            benchmark_args=args.paths,
         )
 
     system_prompt = load_system_prompt(config.system_prompt_path)

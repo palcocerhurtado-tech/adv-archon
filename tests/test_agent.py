@@ -545,3 +545,39 @@ def test_build_confidence_block_cites_local_evidence(tmp_path: Path) -> None:
     assert "Base y confianza:" in block
     assert "roadmap-acme.md" in block
     assert "confianza: media" in block or "confianza: alta" in block
+
+
+def test_inspect_turn_exposes_local_knowledge_signals(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = replace(
+        _build_state(tmp_path),
+        knowledge_hits=[
+            KnowledgeRecord(
+                path="/tmp/roadmap-acme.md",
+                title="roadmap-acme.md",
+                excerpt="Roadmap ACME",
+                root="/tmp",
+                content_type="md",
+                updated_at="2026-04-24T08:00:00+00:00",
+                score=0.88,
+                term_coverage=1.0,
+            )
+        ],
+        knowledge_eval=KnowledgeRetrievalEval(
+            confidence="high",
+            result_count=1,
+            candidate_count=10,
+            top_score=0.88,
+            max_term_coverage=1.0,
+            avg_term_coverage=1.0,
+            rationale=("recuperacion local fuerte",),
+        ),
+    )
+
+    agent._prepare_turn_state = lambda _user_input: state  # type: ignore[method-assign]
+    inspection = agent.inspect_turn("resume el roadmap acme")
+
+    assert inspection.intent == "assistant"
+    assert inspection.profile == "general"
+    assert inspection.knowledge_eval is not None
+    assert inspection.local_knowledge_hits == ("roadmap-acme.md",)

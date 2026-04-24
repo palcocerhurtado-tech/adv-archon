@@ -63,7 +63,7 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-adv_archon = ["py.typed", "resources/*.md"]
+adv_archon = ["py.typed", "resources/*.md", "resources/*.json"]
 
 [tool.ruff]
 line-length = 100

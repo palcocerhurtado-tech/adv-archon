@@ -8,13 +8,21 @@ from adv_archon.core.agent import TurnContextSnapshot
 
 
 class Renderer:
-    def __init__(self, console: Console | None = None) -> None:
+    def __init__(
+        self,
+        console: Console | None = None,
+        *,
+        show_tool_input: bool = False,
+    ) -> None:
         self.console = console or Console()
+        self._show_tool_input = show_tool_input
 
     def show_banner(self, greeting: str) -> None:
         self.console.print(Panel.fit(greeting, border_style="cyan"))
 
     def show_tool(self, name: str, arguments: dict[str, object]) -> None:
+        if not self._show_tool_input:
+            return
         self.console.print(f"[bold cyan][tool:{name}][/bold cyan] {arguments}")
 
     def show_context_panel(self, snapshot: TurnContextSnapshot) -> None:

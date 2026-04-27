@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from adv_archon.ui.commands import CommandServices, handle_command
 from adv_archon.voice.stt import TranscriptionResult
 
@@ -45,6 +47,22 @@ class FakeUsageLedger:
 
 
 class FakeMemory:
+    pass
+
+
+class FakeTaskStore:
+    pass
+
+
+class FakePersonalTools:
+    pass
+
+
+class FakeGoogleWorkspaceTools:
+    pass
+
+
+class FakeKnowledgeStore:
     pass
 
 
@@ -127,9 +145,15 @@ def build_services() -> CommandServices:
         llm=FakeLLM(),
         renderer=FakeRenderer(),
         memory=FakeMemory(),
+        task_store=FakeTaskStore(),
+        personal_tools=FakePersonalTools(),
+        google_workspace_tools=FakeGoogleWorkspaceTools(),
+        knowledge_store=FakeKnowledgeStore(),
         usage_ledger=FakeUsageLedger(),
         logger=FakeLogger(),
         context_provider=lambda: None,
+        project_root=Path("/tmp/project"),
+        logs_dir=Path("/tmp/logs"),
         confirm=lambda prompt: True,
         recall_limit=5,
         incognito=False,
@@ -181,3 +205,30 @@ def test_vault_command_renders_results() -> None:
 
     assert result.handled is True
     assert "acme.md" in services.renderer.infos[-1]
+
+
+def test_daily_command_renders_brief(monkeypatch) -> None:
+    services = build_services()
+
+    class FakeReport:
+        def render(self) -> str:
+            return "ADV ARCHON daily brief"
+
+    monkeypatch.setattr(
+        "adv_archon.ui.commands.build_daily_brief",
+        lambda **_kwargs: FakeReport(),
+    )
+
+    result = handle_command("/daily", services=services)
+
+    assert result.handled is True
+    assert services.renderer.infos[-1] == "ADV ARCHON daily brief"
+
+
+def test_daily_command_rejects_invalid_mode() -> None:
+    services = build_services()
+
+    result = handle_command("/daily raro", services=services)
+
+    assert result.handled is True
+    assert services.renderer.errors[-1] == "Uso: /daily [brief|raw]"

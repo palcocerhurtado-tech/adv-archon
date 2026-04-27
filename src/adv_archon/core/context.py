@@ -116,7 +116,7 @@ def _capture_git_context(cwd: Path) -> GitContext:
             changed_files=0,
             changed_paths=[],
         )
-    repo_root = Path(repo_root_text.strip()).resolve()
+    repo_root = Path(repo_root_text).resolve()
     branch_text = _run_git(cwd, "branch", "--show-current")
     status_text = _run_git(cwd, "status", "--porcelain")
     changed_files = 0
@@ -125,10 +125,10 @@ def _capture_git_context(cwd: Path) -> GitContext:
         status_lines = [line for line in status_text.splitlines() if line.strip()]
         changed_files = len(status_lines)
         for line in status_lines[:10]:
-            changed_paths.append(line[3:].strip())
+            changed_paths.append(line[3:])
     return GitContext(
         repo_root=repo_root,
-        branch=(branch_text or "").strip() or None,
+        branch=(branch_text or "") or None,
         dirty=changed_files > 0,
         changed_files=changed_files,
         changed_paths=changed_paths,
@@ -144,7 +144,7 @@ def _run_git(cwd: Path, *args: str) -> str | None:
     )
     if completed.returncode != 0:
         return None
-    return completed.stdout.strip()
+    return completed.stdout.rstrip("\r\n")
 
 
 def _find_project_root(cwd: Path) -> Path | None:

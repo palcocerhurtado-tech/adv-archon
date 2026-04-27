@@ -7,12 +7,17 @@ from typing import cast
 
 from adv_archon.core.context import RuntimeContext
 from adv_archon.core.costs import UsageLedger
+from adv_archon.core.daily import DailyBrief, DailyReport, build_daily_brief, build_daily_report
+from adv_archon.core.knowledge import KnowledgeStore
 from adv_archon.core.llm import LLMRouter, ProviderMode
 from adv_archon.core.logging import AppLogger
 from adv_archon.core.memory import MemoryRecord, MemoryStore
 from adv_archon.core.profiles import ProfileManager
+from adv_archon.core.tasks import TaskStore
 from adv_archon.tools.files import read_file
+from adv_archon.tools.google_workspace import GoogleWorkspaceTools
 from adv_archon.tools.knowledge_tools import KnowledgeTools
+from adv_archon.tools.personal import PersonalTools
 from adv_archon.tools.python_sandbox import PythonSandboxTool
 from adv_archon.tools.shell import AutoModeManager, ShellTool, format_shell_result
 from adv_archon.tools.web import web_search
@@ -33,9 +38,15 @@ class CommandServices:
     llm: LLMRouter
     renderer: Renderer
     memory: MemoryStore
+    task_store: TaskStore
+    personal_tools: PersonalTools
+    google_workspace_tools: GoogleWorkspaceTools
+    knowledge_store: KnowledgeStore
     usage_ledger: UsageLedger
     logger: AppLogger
     context_provider: Callable[[], RuntimeContext]
+    project_root: Path
+    logs_dir: Path
     confirm: Callable[[str], bool]
     recall_limit: int
     incognito: bool
@@ -62,6 +73,35 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
 
     if command == "/exit":
         return CommandResult(handled=True, should_exit=True)
+
+    if command == "/daily":
+        daily_mode = argument if argument else "brief"
+        report: DailyBrief | DailyReport
+        if daily_mode == "brief":
+            report = build_daily_brief(
+                project_root=services.project_root,
+                logs_dir=services.logs_dir,
+                memory_store=services.memory,
+                task_store=services.task_store,
+                personal_tools=services.personal_tools,
+                google_tools=services.google_workspace_tools,
+                knowledge_store=services.knowledge_store,
+            )
+            services.logger.log("slash_daily", mode="brief")
+            services.renderer.show_info(report.render())
+            return CommandResult(handled=True)
+        if daily_mode == "raw":
+            report = build_daily_report(
+                project_root=services.project_root,
+                logs_dir=services.logs_dir,
+                memory_store=services.memory,
+                task_store=services.task_store,
+            )
+            services.logger.log("slash_daily", mode="raw")
+            services.renderer.show_info(report.render())
+            return CommandResult(handled=True)
+        services.renderer.show_error("Uso: /daily [brief|raw]")
+        return CommandResult(handled=True)
 
     if command == "/mode":
         if argument not in {"cloud", "local"}:

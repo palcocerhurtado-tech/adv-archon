@@ -137,6 +137,19 @@ BROWSER_KEYWORDS = {
     "screenshot",
     "haz click",
 }
+CAPABILITY_QUERY_PHRASES = {
+    "que puedes hacer",
+    "qué puedes hacer",
+    "que sabes hacer",
+    "qué sabes hacer",
+    "en que me puedes ayudar",
+    "en qué me puedes ayudar",
+    "en que puedes ayudarme",
+    "en qué puedes ayudarme",
+    "como me puedes ayudar",
+    "cómo me puedes ayudar",
+    "what can you do",
+}
 PLAN_KEYWORDS = {
     "plan",
     "organiza",
@@ -191,6 +204,17 @@ class IntentRouter:
     def analyze(self, user_input: str, context: RuntimeContext | None = None) -> IntentAnalysis:
         text = user_input.lower().strip()
         reasons: list[str] = []
+
+        if looks_like_capability_query(text):
+            return IntentAnalysis(
+                category="chat",
+                profile="general",
+                needs_plan=False,
+                needs_knowledge=False,
+                needs_web=False,
+                needs_shell=False,
+                reasons=["consulta sobre capacidades del agente"],
+            )
 
         category_scores = {
             "chat": 0,
@@ -306,3 +330,8 @@ def _contains_any(text: str, words: set[str]) -> bool:
         if word in text:
             return True
     return False
+
+
+def looks_like_capability_query(text: str) -> bool:
+    lowered = text.lower().strip()
+    return any(phrase in lowered for phrase in CAPABILITY_QUERY_PHRASES)

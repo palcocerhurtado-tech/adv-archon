@@ -103,6 +103,7 @@ class LLMConfig:
     gemini_model: str = "gemini-2.5-flash"
     ollama_model: str = "llama3.1:8b"
     ollama_base_url: str = "http://127.0.0.1:11434"
+    ollama_timeout_seconds: int = 180
     gemini_api_key: str | None = None
     temperature: float = 0.2
     redact_cloud_pii: bool = False
@@ -111,7 +112,7 @@ class LLMConfig:
 
 @dataclass(slots=True)
 class UIConfig:
-    show_tool_input: bool = True
+    show_tool_input: bool = False
     max_tool_steps: int = 4
     operator_max_tool_steps: int = 8
     show_context_panel: bool = True
@@ -274,6 +275,10 @@ def load_app_config(
         or _lookup(data, "llm", "ollama_model", default="llama3.1:8b"),
         ollama_base_url=os.getenv("ADV_ARCHON_OLLAMA_BASE_URL")
         or _lookup(data, "llm", "ollama_base_url", default="http://127.0.0.1:11434"),
+        ollama_timeout_seconds=int(
+            os.getenv("ADV_ARCHON_OLLAMA_TIMEOUT_SECONDS")
+            or _lookup(data, "llm", "ollama_timeout_seconds", default=180)
+        ),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         temperature=float(_lookup(data, "llm", "temperature", default=0.2)),
         redact_cloud_pii=bool(_lookup(data, "privacy", "redact_cloud_pii", default=False)),
@@ -283,7 +288,7 @@ def load_app_config(
     )
 
     ui = UIConfig(
-        show_tool_input=bool(_lookup(data, "ui", "show_tool_input", default=True)),
+        show_tool_input=bool(_lookup(data, "ui", "show_tool_input", default=False)),
         max_tool_steps=int(_lookup(data, "ui", "max_tool_steps", default=4)),
         operator_max_tool_steps=int(
             _lookup(data, "ui", "operator_max_tool_steps", default=8)

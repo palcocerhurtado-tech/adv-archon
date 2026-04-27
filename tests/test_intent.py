@@ -96,3 +96,32 @@ def test_intent_router_inherits_active_profile_when_relevant() -> None:
 
     assert analysis.category == "assistant"
     assert analysis.profile == "work"
+
+
+def test_intent_router_keeps_capability_query_general_inside_repo() -> None:
+    router = IntentRouter()
+    context = RuntimeContext(
+        cwd=Path("/tmp/demo"),
+        now=__import__("datetime").datetime(2026, 4, 26, 14, 41),
+        git=GitContext(
+            repo_root=Path("/tmp/demo"),
+            branch="main",
+            dirty=True,
+            changed_files=31,
+            changed_paths=["src/app.py"],
+        ),
+        working_set=WorkingSet(
+            project_root=Path("/tmp/demo"),
+            project_name="demo",
+            markers=["pyproject.toml"],
+            top_entries=["src/", "README.md"],
+        ),
+        active_profile="coding",
+    )
+
+    analysis = router.analyze("que puedes hacer ?", context)
+
+    assert analysis.category == "chat"
+    assert analysis.profile == "general"
+    assert analysis.needs_plan is False
+    assert analysis.needs_shell is False

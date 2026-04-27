@@ -15,6 +15,7 @@ from adv_archon.core.tasks import parse_due_text
 
 ConfirmCallback = Callable[[str], bool]
 RECURRING_LOOKBACK_DAYS = 3650
+PERSONAL_CONNECTOR_TIMEOUT_SECONDS = 12
 
 
 @dataclass(slots=True)
@@ -133,12 +134,18 @@ class PersonalTools:
         return ToolResult(name="mail_draft", payload=payload)
 
     def _run_jxa(self, script: str) -> dict[str, Any]:
-        completed = subprocess.run(
-            ["osascript", "-l", "JavaScript", "-e", script],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                ["osascript", "-l", "JavaScript", "-e", script],
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PERSONAL_CONNECTOR_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "El conector personal ha tardado demasiado y se ha cancelado."
+            ) from exc
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or "Fallo ejecutando conector personal.")
         output = completed.stdout.strip() or "{}"
@@ -156,12 +163,18 @@ class PersonalTools:
         command = ["osascript"]
         for line in lines:
             command.extend(["-e", line])
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            check=False,
-        )
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=PERSONAL_CONNECTOR_TIMEOUT_SECONDS,
+            )
+        except subprocess.TimeoutExpired as exc:
+            raise RuntimeError(
+                "El conector personal ha tardado demasiado y se ha cancelado."
+            ) from exc
         if completed.returncode != 0:
             raise RuntimeError(completed.stderr.strip() or "Fallo ejecutando AppleScript.")
         return completed.stdout.strip()
@@ -297,6 +310,7 @@ def _calendar_script(*, days: int) -> list[str]:
         "return (y as text) & \"-\" & m & \"-\" & dayNumber & \"T\" & hh & \":\" & mm & \":\" & ss",
         "end localIso",
         "tell application \"Calendar\"",
+        "if not running then launch",
         "set outputLines to {}",
         "repeat with cal in calendars",
         "set calName to my safeText(name of cal)",

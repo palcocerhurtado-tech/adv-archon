@@ -16,13 +16,13 @@ from adv_archon.core.evals import (
     evaluate_knowledge_retrieval,
     summarize_response_confidence,
 )
-from adv_archon.core.intent import IntentAnalysis, IntentRouter
+from adv_archon.core.intent import IntentAnalysis, IntentRouter, looks_like_capability_query
 from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeSearchResult, KnowledgeStore
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage, LLMResponse, LLMUsage
 from adv_archon.core.memory import MemoryRecord, MemoryStore
 from adv_archon.core.session import SessionMessage, SessionStore
-from adv_archon.tools.files import list_dir, read_file
+from adv_archon.tools.files import find_local, list_dir, read_file
 from adv_archon.tools.knowledge_tools import KnowledgeTools
 from adv_archon.tools.memory_tools import MemoryTools
 from adv_archon.tools.web import web_fetch, web_search
@@ -366,6 +366,7 @@ class Agent:
                         "path": {"type": "string"},
                         "start_line": {"type": "integer"},
                         "end_line": {"type": "integer"},
+                        "preview": {"type": "boolean"},
                     },
                     "required": ["path"],
                 },
@@ -383,6 +384,25 @@ class Agent:
                     "required": ["path"],
                 },
                 fn=list_dir,
+            ),
+            "find_local": ToolSpec(
+                name="find_local",
+                description=(
+                    "Find local files or folders by natural-language name, optionally "
+                    "inside a hinted folder such as Desktop or a named directory."
+                ),
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "path": {"type": "string"},
+                        "folder_hint": {"type": "string"},
+                        "kind": {"type": "string"},
+                        "max_results": {"type": "integer"},
+                    },
+                    "required": ["query"],
+                },
+                fn=find_local,
             ),
             "web_search": ToolSpec(
                 name="web_search",
@@ -532,6 +552,14 @@ class Agent:
     ) -> LLMResponse:
         self._session.append(SessionMessage(role="user", content=user_input))
         state = self._prepare_turn_state(user_input)
+        deterministic_meta = self._deterministic_meta_response(
+            user_input=user_input,
+            state=state,
+            on_context=on_context,
+        )
+        if deterministic_meta is not None:
+            self._session.append(SessionMessage(role="assistant", content=deterministic_meta.text))
+            return deterministic_meta
         force_local = self._should_force_local_for_turn(user_input, state)
         if state.knowledge_hits:
             serialized_hits = json.dumps(
@@ -633,6 +661,29 @@ class Agent:
                     )
                     return deterministic_error
 
+                document_response = self._deterministic_document_response(
+                    user_input=user_input,
+                    tool_name=tool_name,
+                    payload=payload,
+                    on_chunk=on_chunk,
+                )
+                if document_response is not None:
+                    self._session.append(
+                        SessionMessage(role="assistant", content=document_response.text)
+                    )
+                    return document_response
+
+                related_response = self._deterministic_related_documents_response(
+                    user_input=user_input,
+                    tool_name=tool_name,
+                    payload=payload,
+                )
+                if related_response is not None:
+                    self._session.append(
+                        SessionMessage(role="assistant", content=related_response.text)
+                    )
+                    return related_response
+
             response = self._final_response(
                 user_input,
                 state,
@@ -645,9 +696,15 @@ class Agent:
     def _prepare_turn_state(self, user_input: str) -> _TurnState:
         runtime_context = self._context_provider() if self._context_provider is not None else None
         intent = self._intent_router.analyze(user_input, runtime_context)
+        normalized = _normalize_text(user_input)
+        skip_heavy_context = _should_skip_heavy_context(normalized, user_input)
 
         memories: list[MemoryRecord] = []
-        if self._memory_store is not None and self._memory_store.count() > 0:
+        if (
+            not skip_heavy_context
+            and self._memory_store is not None
+            and self._memory_store.count() > 0
+        ):
             try:
                 memories = self._memory_store.context_matches(
                     user_input,
@@ -658,7 +715,11 @@ class Agent:
 
         knowledge_hits: list[KnowledgeRecord] = []
         knowledge_search_result: KnowledgeSearchResult | None = None
-        if self._knowledge_store is not None and intent.needs_knowledge:
+        if (
+            not skip_heavy_context
+            and self._knowledge_store is not None
+            and intent.needs_knowledge
+        ):
             try:
                 knowledge_search_result = self._knowledge_store.search_details(
                     user_input,
@@ -746,6 +807,127 @@ class Agent:
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
         wants_web = _contains_any(normalized, WEB_QUERY_KEYWORDS)
+        wants_local_file_search = _looks_like_local_file_search_request(normalized)
+        wants_related_local_documents = _looks_like_related_local_documents_request(normalized)
+        wants_web_document_compare = _looks_like_web_grounded_document_compare_request(
+            normalized
+        )
+
+        if (
+            wants_web_document_compare
+            and "web_search" in self._tools
+            and "web_search" not in executed
+        ):
+            query = _extract_web_grounded_compare_query(user_input)
+            if query:
+                return {
+                    "kind": "tool",
+                    "tool_name": "web_search",
+                    "arguments": {"query": query, "n": 5},
+                    "step_summary": "buscar fuentes web fiables",
+                }
+
+        if (
+            wants_web_document_compare
+            and "web_search" in executed
+            and "web_fetch" in self._tools
+        ):
+            payload = self._latest_tool_payload("web_search")
+            fetched_payloads = self._tool_payloads("web_fetch")
+            fetched_urls = {
+                str(item.get("url") or "").strip()
+                for item in fetched_payloads
+                if isinstance(item, dict) and str(item.get("url") or "").strip()
+            }
+            successful_fetches = sum(
+                1
+                for item in fetched_payloads
+                if isinstance(item, dict)
+                and not str(item.get("error") or "").strip()
+                and str(item.get("text") or "").strip()
+            )
+            next_url = None
+            if successful_fetches < 2 and len(fetched_urls) < 3:
+                next_url = _select_next_search_url(payload, exclude_urls=fetched_urls)
+            if next_url is not None:
+                return {
+                    "kind": "tool",
+                    "tool_name": "web_fetch",
+                    "arguments": {"url": next_url},
+                    "step_summary": "leer otra fuente web",
+                }
+
+        if (
+            wants_related_local_documents
+            and "list_dir" in self._tools
+            and "list_dir" not in executed
+        ):
+            recent_folder = self._latest_read_file_parent()
+            if recent_folder is not None:
+                return {
+                    "kind": "tool",
+                    "tool_name": "list_dir",
+                    "arguments": {"path": recent_folder, "depth": 2},
+                    "step_summary": "buscar documentos relacionados en carpeta",
+                }
+
+        if (
+            _looks_like_direct_file_request(normalized, user_input)
+            and "read_file" in self._tools
+            and "read_file" not in executed
+        ):
+            hinted_path = _extract_path_hint(user_input)
+            if hinted_path is not None:
+                read_arguments: dict[str, Any] = {"path": hinted_path}
+                if _looks_like_document_summary_request(normalized, user_input):
+                    read_arguments["preview"] = True
+                return {
+                    "kind": "tool",
+                    "tool_name": "read_file",
+                    "arguments": read_arguments,
+                    "step_summary": "leer adjunto local",
+                }
+
+        if (
+            wants_local_file_search
+            and "find_local" in self._tools
+            and "find_local" not in executed
+        ):
+            search_query = _extract_local_search_query(user_input)
+            if search_query:
+                search_arguments: dict[str, Any] = {
+                    "query": search_query,
+                    "kind": "file",
+                    "max_results": 5,
+                }
+                folder_hint = _extract_folder_hint(user_input)
+                if folder_hint is not None:
+                    search_arguments["folder_hint"] = folder_hint
+                return {
+                    "kind": "tool",
+                    "tool_name": "find_local",
+                    "arguments": search_arguments,
+                    "step_summary": "localizar archivo local",
+                }
+
+        if (
+            wants_local_file_search
+            and "find_local" in executed
+            and "read_file" in self._tools
+            and "read_file" not in executed
+        ):
+            payload = self._latest_tool_payload("find_local")
+            matched_path = _select_first_file_match_path(payload)
+            if matched_path is not None:
+                matched_read_arguments: dict[str, Any] = {"path": matched_path}
+                if _looks_like_document_summary_request(normalized, user_input):
+                    matched_read_arguments["preview"] = True
+                return {
+                    "kind": "tool",
+                    "tool_name": "read_file",
+                    "arguments": matched_read_arguments,
+                    "step_summary": "leer archivo localizado",
+                }
 
         if (
             wants_google_calendar
@@ -844,6 +1026,24 @@ class Agent:
                 "arguments": _extract_reminder_create_arguments(user_input),
                 "step_summary": "crear recordatorio en macos",
             }
+
+        if (
+            wants_notes
+            and wants_note_creation
+            and wants_note_source
+            and "notes_create" in self._tools
+            and "notes_create" not in executed
+        ):
+            recent_note_arguments = self._build_note_create_arguments_from_recent_context(
+                user_input
+            )
+            if recent_note_arguments is not None:
+                return {
+                    "kind": "tool",
+                    "tool_name": "notes_create",
+                    "arguments": recent_note_arguments,
+                    "step_summary": "crear nota con resumen reciente",
+                }
 
         if (
             wants_notes
@@ -1068,6 +1268,220 @@ class Agent:
         self._record_usage("assistant", response)
         return response
 
+    def _deterministic_meta_response(
+        self,
+        *,
+        user_input: str,
+        state: _TurnState,
+        on_context: ContextCallback | None,
+    ) -> LLMResponse | None:
+        if not looks_like_capability_query(user_input):
+            return None
+
+        if on_context is not None:
+            packet = self._build_context_packet(
+                user_input=user_input,
+                state=state,
+                plan={"kind": "answer", "step_summary": "explicar capacidades"},
+                tool_observations=[],
+            )
+            on_context(self._build_context_snapshot(packet))
+
+        tool_names = set(self._tools)
+        sections: list[str] = []
+
+        if {"read_file", "list_dir"} & tool_names:
+            sections.append("leer archivos, carpetas y documentos locales")
+        if {
+            "knowledge_search",
+            "vault_search",
+            "notes_search",
+            "remember",
+            "recall",
+        } & tool_names:
+            sections.append("buscar en tu conocimiento local, notas y memoria")
+        if {
+            "calendar_upcoming",
+            "reminders_list",
+            "reminder_create",
+            "task_list",
+            "notes_create",
+            "contacts_search",
+        } & tool_names:
+            sections.append("ayudarte con calendario, recordatorios, notas, contactos y tareas")
+        if {"gmail_search", "gcal_list_events", "drive_search"} & tool_names:
+            sections.append("revisar Gmail, Google Calendar y Drive")
+        if {
+            "web_search",
+            "web_fetch",
+            "web_library_search",
+            "web_library_save_search",
+        } & tool_names:
+            sections.append("buscar en la web y guardar contexto externo útil")
+        if {
+            "shell_exec",
+            "python_exec",
+            "open_app",
+            "clipboard_read",
+            "clipboard_write",
+        } & tool_names:
+            sections.append(
+                "ejecutar comandos, abrir apps y trabajar con el portapapeles "
+                "bajo tus reglas de seguridad"
+            )
+        if {
+            "browser_open",
+            "browser_click",
+            "browser_fill",
+            "browser_extract",
+            "browser_screenshot",
+        } & tool_names:
+            sections.append("automatizar páginas web, rellenar formularios y sacar capturas")
+
+        bullets = "\n".join(f"- {item}" for item in sections)
+        text = "Puedo ayudarte con esto ahora mismo:\n"
+        if bullets:
+            text += f"{bullets}\n"
+        else:
+            text += "- conversar contigo y ayudarte a organizar el siguiente paso\n"
+
+        runtime_context = state.runtime_context
+        if runtime_context is not None and runtime_context.git.repo_root is not None:
+            repo_name = (
+                runtime_context.working_set.project_name
+                or runtime_context.git.repo_root.name
+            )
+            changed = runtime_context.git.changed_files
+            text += (
+                f"\nEn este repo tambien puedo revisar la arquitectura, resumir cambios, "
+                f"detectar riesgos y proponerte un plan. Ahora mismo estoy viendo `{repo_name}`"
+            )
+            if changed:
+                text += f" con {changed} cambios."
+            else:
+                text += "."
+
+        text += (
+            "\n\nPrueba, por ejemplo:\n"
+            "- `resume este repo y dime los riesgos principales`\n"
+            "- `que tengo manana en el calendario`\n"
+            "- `busca en mis notas todo lo relacionado con Acme`\n"
+            "- `abre una pagina y saca una captura`"
+        )
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="capability-handler",
+        )
+
+    def _deterministic_document_response(
+        self,
+        *,
+        user_input: str,
+        tool_name: str,
+        payload: dict[str, Any],
+        on_chunk: ChunkCallback | None,
+    ) -> LLMResponse | None:
+        if tool_name != "read_file":
+            return None
+
+        normalized = _normalize_text(user_input)
+        if not _looks_like_document_summary_request(normalized, user_input):
+            return None
+
+        content = str(payload.get("content") or "").strip()
+        if not content:
+            return None
+
+        path = str(payload.get("path") or "")
+        excerpt, truncated = _build_document_excerpt(content)
+        guidance = (
+            "Eres ADV ARCHON resumiendo un documento local. "
+            "Responde en español peninsular, con un resumen claro y útil. "
+            "Prioriza ideas principales, tesis, estructura y posibles hallazgos prácticos. "
+            "No inventes nada que no esté en el texto. "
+            "Si el usuario parece querer evaluación, añade un bloque corto de observaciones."
+        )
+        prompt = (
+            f"Solicitud original: {user_input}\n"
+            f"Ruta del documento: {path or 'desconocida'}\n"
+            f"Texto extraído ({len(content)} caracteres):\n{excerpt}\n\n"
+            "Devuélveme:\n"
+            "1. Un resumen breve.\n"
+            "2. Tres a cinco ideas clave.\n"
+            "3. Si aplica, una observación final útil en una sola línea."
+        )
+        response = self._llm.stream_complete(
+            [LLMMessage(role="user", content=prompt)],
+            system_prompt=guidance,
+            on_chunk=on_chunk,
+        )
+        if truncated:
+            note = (
+                "\n\nNota: resumen generado a partir de los fragmentos más relevantes "
+                "del texto extraído."
+            )
+            if on_chunk is not None:
+                on_chunk(note)
+            response = LLMResponse(
+                text=response.text + note,
+                usage=response.usage,
+                provider=response.provider,
+                model=response.model,
+                redaction_applied=response.redaction_applied,
+                redaction_items=response.redaction_items,
+            )
+        self._record_usage("assistant_document", response)
+        return response
+
+    def _deterministic_related_documents_response(
+        self,
+        *,
+        user_input: str,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> LLMResponse | None:
+        if tool_name != "list_dir":
+            return None
+
+        normalized = _normalize_text(user_input)
+        if not _looks_like_related_local_documents_request(normalized):
+            return None
+
+        entries = payload.get("entries")
+        folder_path = str(payload.get("path") or "").strip()
+        current_path = self._latest_read_file_path()
+        if not isinstance(entries, list) or not folder_path or not current_path:
+            return None
+
+        suggestions = _rank_related_local_entries(
+            entries,
+            current_path=current_path,
+        )
+        if not suggestions:
+            text = (
+                f"No he encontrado otros documentos claros en `{folder_path}` aparte del "
+                "que acabamos de usar. Si quieres, puedo ampliar la búsqueda a más carpetas."
+            )
+        else:
+            bullets = "\n".join(f"- {item}" for item in suggestions[:6])
+            text = (
+                f"He encontrado estos documentos en `{folder_path}` que parecen los más "
+                "cercanos a este libro por carpeta, tipo de archivo y nombre:\n"
+                f"{bullets}\n\n"
+                "Si quieres, te resumo uno, comparo dos o te hago un ranking más fino "
+                "leyendo los más prometedores."
+            )
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="related-documents-handler",
+        )
+
     def _deterministic_tool_error_response(
         self,
         *,
@@ -1279,6 +1693,24 @@ class Agent:
                 success=True,
                 citations=(path,),
             )
+        if tool_name == "find_local":
+            matches = payload.get("matches")
+            if isinstance(matches, list):
+                summary, citations = self._summarize_list_tool(tool_name, matches)
+                return ToolObservation(
+                    name=tool_name,
+                    summary=summary,
+                    success=True,
+                    citations=citations,
+                )
+        if tool_name == "web_fetch":
+            url = str(payload.get("url") or "fuente web")
+            return ToolObservation(
+                name=tool_name,
+                summary=f"fuente web leida: {url}",
+                success=bool(str(payload.get("text") or "").strip()),
+                citations=(url,),
+            )
 
         for key in (
             "results",
@@ -1316,6 +1748,20 @@ class Agent:
             return (f"{tool_name}: sin resultados", ())
 
         citations: list[str] = []
+        if tool_name == "web_search":
+            for item in items[:3]:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "resultado web")
+                url = str(item.get("url") or title)
+                citations.append(f"{title} | {url}")
+            if citations:
+                first_title = citations[0].split(" | ", 1)[0]
+                return (
+                    f"{tool_name}: {count} resultados, primero {first_title}",
+                    tuple(citations),
+                )
+
         first = items[0]
         if isinstance(first, dict):
             title = str(
@@ -1370,10 +1816,19 @@ class Agent:
     ) -> str:
         successful_tools = sum(1 for observation in tool_observations if observation.success)
         failed_tools = sum(1 for observation in tool_observations if not observation.success)
+        web_evidence_count = sum(
+            len(observation.citations)
+            for observation in tool_observations
+            if observation.success and observation.name in {"web_search", "web_fetch"}
+        )
+        effective_successful_tools = successful_tools + (1 if web_evidence_count >= 2 else 0)
+        effective_failed_tools = failed_tools
+        if web_evidence_count >= 2 and failed_tools > 0:
+            effective_failed_tools = max(0, failed_tools - 1)
         confidence = summarize_response_confidence(
             knowledge_eval=state.knowledge_eval,
-            successful_tools=successful_tools,
-            failed_tools=failed_tools,
+            successful_tools=effective_successful_tools,
+            failed_tools=effective_failed_tools,
             used_local_knowledge=bool(state.knowledge_hits),
         )
         citations: list[str] = []
@@ -1382,7 +1837,10 @@ class Agent:
         for observation in tool_observations:
             if not observation.success:
                 continue
-            citations.extend(f"{observation.name}: {item}" for item in observation.citations[:1])
+            limit = 3 if observation.name == "web_search" else 1
+            citations.extend(
+                f"{observation.name}: {item}" for item in observation.citations[:limit]
+            )
             if len(citations) >= 4:
                 break
 
@@ -1402,6 +1860,81 @@ class Agent:
     def _record_usage(self, phase: str, response: LLMResponse) -> None:
         if self._usage_callback is not None:
             self._usage_callback(phase, response)
+
+    def _latest_tool_payload(self, tool_name: str) -> dict[str, Any] | None:
+        for message in reversed(self._session.messages):
+            if message.role != "tool" or message.name != tool_name:
+                continue
+            try:
+                payload = json.loads(message.content)
+            except json.JSONDecodeError:
+                return None
+            if isinstance(payload, dict):
+                return payload
+            return None
+        return None
+
+    def _tool_payloads(self, tool_name: str) -> list[dict[str, Any]]:
+        payloads: list[dict[str, Any]] = []
+        for message in self._session.messages:
+            if message.role != "tool" or message.name != tool_name:
+                continue
+            try:
+                payload = json.loads(message.content)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                payloads.append(payload)
+        return payloads
+
+    def _latest_assistant_text(self) -> str | None:
+        for message in reversed(self._session.messages):
+            if message.role != "assistant":
+                continue
+            content = message.content.strip()
+            if content:
+                return content
+        return None
+
+    def _latest_read_file_path(self) -> str | None:
+        payload = self._latest_tool_payload("read_file")
+        if not isinstance(payload, dict):
+            return None
+        path = str(payload.get("path") or "").strip()
+        return path or None
+
+    def _latest_read_file_parent(self) -> str | None:
+        path = self._latest_read_file_path()
+        if not path:
+            return None
+        return str(Path(path).parent)
+
+    def _build_note_create_arguments_from_recent_context(
+        self,
+        user_input: str,
+    ) -> dict[str, Any] | None:
+        payload = self._latest_tool_payload("read_file")
+        summary_text = self._latest_assistant_text()
+        if payload is None or not summary_text:
+            return None
+
+        path = str(payload.get("path") or "").strip()
+        if not path:
+            return None
+
+        body = _sanitize_note_body(summary_text)
+        if not body:
+            return None
+
+        title = _build_recent_note_title(path)
+        arguments: dict[str, Any] = {
+            "title": title,
+            "body": body,
+        }
+        folder = _extract_notes_folder(user_input)
+        if folder is not None:
+            arguments["folder"] = folder
+        return arguments
 
     def _should_force_local_for_turn(self, user_input: str, state: _TurnState) -> bool:
         if not self._force_local_private_context:
@@ -1492,6 +2025,212 @@ def _looks_like_note_source_request(text: str) -> bool:
     return _contains_any(text, NOTE_SOURCE_KEYWORDS)
 
 
+def _looks_like_direct_file_request(text: str, raw_text: str) -> bool:
+    hinted_path = _extract_path_hint(raw_text)
+    if hinted_path is None or not _path_looks_like_file(hinted_path):
+        return False
+    file_action_keywords = {
+        "adjunto",
+        "adjuntos",
+        "analiza",
+        "analizar",
+        "archivo",
+        "compara",
+        "comparar",
+        "documento",
+        "explica",
+        "explicar",
+        "extrae",
+        "lee",
+        "leer",
+        "pdf",
+        "resumen",
+        "resume",
+        "resumelo",
+        "resúmelo",
+        "revisa",
+        "revisar",
+        "summarize",
+        "summary",
+    }
+    if _contains_any(text, file_action_keywords):
+        return True
+    return any(
+        phrase in text
+        for phrase in (
+            "este archivo",
+            "este documento",
+            "este pdf",
+            "estos archivos",
+            "estos documentos",
+        )
+    )
+
+
+def _looks_like_local_file_search_request(text: str) -> bool:
+    if _looks_like_web_grounded_document_compare_request(text):
+        return False
+    if not _contains_any(text, SEARCH_QUERY_KEYWORDS):
+        return False
+    if not _contains_any(
+        text,
+        {
+            "archivo",
+            "archivos",
+            "carpeta",
+            "carpetas",
+            "documento",
+            "documentos",
+            "fichero",
+            "ficheros",
+            "libro",
+            "libros",
+            "pdf",
+        },
+    ):
+        return False
+    return _contains_any(
+        text,
+        {
+            "resume",
+            "resumen",
+            "resumelo",
+            "resúmelo",
+            "analiza",
+            "explica",
+            "10 lineas",
+            "10 líneas",
+        },
+    ) or "busca" in text
+
+
+def _should_skip_heavy_context(text: str, raw_text: str) -> bool:
+    return (
+        _looks_like_direct_file_request(text, raw_text)
+        or _looks_like_local_file_search_request(text)
+        or _looks_like_related_local_documents_request(text)
+        or _looks_like_web_grounded_document_compare_request(text)
+        or _looks_like_recent_document_note_request(text)
+    )
+
+
+def _looks_like_recent_document_note_request(text: str) -> bool:
+    if not _looks_like_note_creation(text):
+        return False
+    if not _contains_any(text, NOTE_SOURCE_KEYWORDS):
+        return False
+    return any(
+        phrase in text
+        for phrase in (
+            "este archivo",
+            "este documento",
+            "este libro",
+            "este pdf",
+            "estos apuntes",
+            "este resumen",
+        )
+    )
+
+
+def _looks_like_related_local_documents_request(text: str) -> bool:
+    if not _contains_any(text, SEARCH_QUERY_KEYWORDS):
+        return False
+    if not _contains_any(text, {"otro", "otros", "parecido", "parecidos", "similar", "similares"}):
+        return False
+    return _contains_any(
+        text,
+        {
+            "archivo",
+            "archivos",
+            "documento",
+            "documentos",
+            "libro",
+            "libros",
+            "pdf",
+            "este",
+            "esta",
+        },
+    )
+
+
+def _looks_like_web_grounded_document_compare_request(text: str) -> bool:
+    if not _contains_any(text, SEARCH_QUERY_KEYWORDS):
+        return False
+    if not _contains_any(
+        text,
+        {
+            "compara",
+            "comparalo",
+            "compáralo",
+            "contrasta",
+            "fuente",
+            "fuentes",
+            "fiable",
+            "fiables",
+        },
+    ):
+        return False
+    return any(
+        phrase in text
+        for phrase in (
+            "este libro",
+            "este documento",
+            "este pdf",
+            "con este libro",
+            "con este documento",
+            "con este pdf",
+        )
+    )
+
+
+def _looks_like_document_summary_request(text: str, raw_text: str) -> bool:
+    if not (
+        _looks_like_direct_file_request(text, raw_text)
+        or _looks_like_local_file_search_request(text)
+        or _contains_any(
+            text,
+            {
+                "archivo",
+                "documento",
+                "libro",
+                "libros",
+                "pdf",
+                "texto",
+            },
+        )
+    ):
+        return False
+    summary_keywords = {
+        "analiza",
+        "analizar",
+        "explica",
+        "explicar",
+        "ideas clave",
+        "lee",
+        "leer",
+        "resume",
+        "resumen",
+        "resumelo",
+        "resúmelo",
+        "summary",
+        "summarize",
+    }
+    return _contains_any(text, summary_keywords)
+
+
+def _build_document_excerpt(content: str, *, max_chars: int = 6000) -> tuple[str, bool]:
+    compact = content.strip()
+    if len(compact) <= max_chars:
+        return compact, False
+
+    head_size = int(max_chars * 0.65)
+    tail_size = max_chars - head_size
+    head = compact[:head_size].rstrip()
+    tail = compact[-tail_size:].lstrip()
+    excerpt = f"{head}\n\n[... contenido intermedio omitido para agilizar el resumen ...]\n\n{tail}"
+    return excerpt, True
+
+
 def _looks_like_external_search(text: str) -> bool:
     return _contains_any(text, SEARCH_QUERY_KEYWORDS | LIST_QUERY_KEYWORDS) and not _contains_any(
         text, MUTATION_KEYWORDS
@@ -1557,6 +2296,73 @@ def _extract_focus_query(text: str) -> str:
         word for word in words if len(word) > 2 and word.casefold() not in STOPWORDS
     ]
     return " ".join(filtered[:6])
+
+
+def _extract_web_grounded_compare_query(text: str) -> str:
+    stripped = re.sub(
+        r"\bcomp[áa]ralo\s+con\s+este\s+(?:libro|documento|pdf)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"\bcompara\s+con\s+este\s+(?:libro|documento|pdf)\b",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"\ben\s+fuentes?\s+fiables\b",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(r"\bqu[eé]\s+es\b", " ", stripped, flags=re.IGNORECASE)
+    stripped = re.sub(r"\s+", " ", stripped).strip(" .,:;")
+    return _extract_focus_query(_normalize_text(stripped))
+
+
+def _extract_folder_hint(text: str) -> str | None:
+    match = re.search(
+        r"(?:dentro de|en)\s+la\s+carpeta\s+['\"]?(.+?)['\"]?(?=$|\s+y\b|\s+ahi\b|\s+ahí\b|,)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is not None:
+        candidate = match.group(1).strip(" .,:;\"'")
+        if candidate:
+            return candidate
+
+    quoted = [str(item) for item in re.findall(r"""['"]([^'"]+)['"]""", text)]
+    if len(quoted) >= 2:
+        return quoted[0].strip()
+    return None
+
+
+def _extract_local_search_query(text: str) -> str:
+    quoted = [
+        str(item).strip()
+        for item in re.findall(r"""['"]([^'"]+)['"]""", text)
+        if str(item).strip()
+    ]
+    folder_hint = _extract_folder_hint(text)
+    if quoted:
+        for candidate in reversed(quoted):
+            if folder_hint is not None and candidate.casefold() == folder_hint.casefold():
+                continue
+            return candidate
+
+    match = re.search(
+        r"(?:libro|archivo|fichero|documento|pdf)\s+(?:llamado\s+|titulado\s+)?(.+?)(?=$|,|\s+y\b|\s+hazme\b|\s+resume\b|\s+resumen\b)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if match is not None:
+        candidate = match.group(1).strip(" .,:;\"'")
+        if candidate:
+            return candidate
+
+    return _extract_focus_query(_normalize_text(text))
 
 
 def _extract_url(text: str) -> str | None:
@@ -1672,6 +2478,21 @@ def _extract_note_body(text: str, title: str) -> str:
     return f"Nota rápida: {title}."
 
 
+def _sanitize_note_body(text: str) -> str:
+    cleaned = text.strip()
+    marker = "\n\nBase y confianza:"
+    if marker in cleaned:
+        cleaned = cleaned.split(marker, 1)[0].rstrip()
+    return cleaned
+
+
+def _build_recent_note_title(path: str) -> str:
+    stem = Path(path).stem.replace("_", " ").strip()
+    if stem:
+        return f"Resumen de {stem}"
+    return "Resumen del documento"
+
+
 def _extract_notes_folder(text: str) -> str | None:
     match = re.search(
         r"en\s+la\s+carpeta\s+['\"]?(.+?)['\"]?(?=$|\s+que\b|:)",
@@ -1696,3 +2517,112 @@ def _extract_path_hint(text: str) -> str | None:
 
 def _path_looks_like_file(path: str) -> bool:
     return Path(path).suffix != ""
+
+
+def _select_first_file_match_path(payload: dict[str, Any] | None) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    matches = payload.get("matches")
+    if not isinstance(matches, list):
+        return None
+    for item in matches:
+        if not isinstance(item, dict):
+            continue
+        if item.get("is_dir") is True:
+            continue
+        path = str(item.get("path") or "").strip()
+        if path:
+            return path
+    return None
+
+
+def _select_first_search_url(payload: dict[str, Any] | None) -> str | None:
+    return _select_next_search_url(payload, exclude_urls=set())
+
+
+def _select_next_search_url(
+    payload: dict[str, Any] | None,
+    *,
+    exclude_urls: set[str],
+) -> str | None:
+    if not isinstance(payload, dict):
+        return None
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return None
+    ranked: list[tuple[int, str]] = []
+    for index, item in enumerate(results):
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        if not url or url in exclude_urls:
+            continue
+        ranked.append((_web_result_priority(url, index=index), url))
+    ranked.sort(key=lambda item: (-item[0], item[1]))
+    if ranked:
+        return ranked[0][1]
+    return None
+
+
+def _web_result_priority(url: str, *, index: int) -> int:
+    lowered = url.casefold()
+    score = max(0, 10 - index)
+    trusted_domains = (
+        "britannica.com",
+        "encyclopedia.com",
+        "sacred-texts.com",
+        "archive.org",
+        "bibleodyssey.org",
+        "jewishencyclopedia.com",
+    )
+    if any(domain in lowered for domain in trusted_domains):
+        score += 8
+    if (
+        ".edu/" in lowered
+        or ".gov/" in lowered
+        or lowered.endswith(".edu")
+        or lowered.endswith(".gov")
+    ):
+        score += 6
+    if "wikipedia.org" in lowered:
+        score -= 4
+    if any(
+        token in lowered
+        for token in ("youtube.com", "tiktok.com", "instagram.com", "facebook.com")
+    ):
+        score -= 6
+    return score
+
+
+def _rank_related_local_entries(entries: list[Any], *, current_path: str) -> list[str]:
+    current = Path(current_path)
+    current_name = current.name.casefold()
+    current_tokens = set(_name_tokens(current.stem))
+    candidates: list[tuple[int, str]] = []
+    for raw_entry in entries:
+        if not isinstance(raw_entry, str) or raw_entry.endswith("/"):
+            continue
+        entry_path = Path(raw_entry)
+        if entry_path.name.casefold() == current_name:
+            continue
+        if entry_path.suffix.lower() not in {".pdf", ".epub", ".docx", ".txt", ".md"}:
+            continue
+        entry_tokens = set(_name_tokens(entry_path.stem))
+        overlap = len(current_tokens & entry_tokens)
+        score = overlap
+        if entry_path.suffix.lower() == current.suffix.lower():
+            score += 2
+        if score <= 0 and current.parent.name.casefold() in {"la grasa", "grasa"}:
+            score = 1
+        candidates.append((score, raw_entry))
+
+    candidates.sort(key=lambda item: (-item[0], item[1].casefold()))
+    return [item for _score, item in candidates]
+
+
+def _name_tokens(text: str) -> list[str]:
+    return [
+        token
+        for token in re.findall(r"[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]+", text.casefold())
+        if len(token) > 2
+    ]

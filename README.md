@@ -35,7 +35,7 @@ This repository currently includes:
 - Auto mode with confirmation before enabling
 - Optional PII redaction before cloud LLM calls
 - Automatic local-only handling for turns that touch private Mac context
-- `adv-archon daily` proactive routine
+- `adv-archon daily` serious daily brief that combines agenda, tasks, Gmail, Drive, Notes, and local knowledge
 - Voice output with macOS `say`
 - Local dictation with `faster-whisper`
 - Optional wake-word startup flow with `--listen`
@@ -84,6 +84,7 @@ Daily routine:
 
 ```bash
 adv-archon daily
+adv-archon daily raw
 ```
 
 Task scheduler utilities:
@@ -99,6 +100,7 @@ adv-archon research status
 
 - `/help`
 - `/exit`
+- `/daily [brief|raw]`
 - `/mode <cloud|local>`
 - `/profile [name|status]`
 - `/read <path>`
@@ -139,6 +141,18 @@ force_local_private_context = true
 When enabled, ADV ARCHON replaces emails, phones, IBANs, and Spanish DNI/NIE identifiers with placeholders before sending cloud prompts, then restores them in the answer.
 
 When `force_local_private_context` is enabled, turns that touch private Mac context such as local files, memory, notes, calendar, tasks, Gmail, Google Calendar, or Drive are resolved locally instead of going to the cloud model.
+
+## Daily brief
+
+`adv-archon daily` now renders a read-only daily brief that pulls from:
+
+- local ARCHON activity logs
+- persistent tasks and memory
+- macOS Calendar, Reminders, and Notes
+- Gmail, Google Calendar, and Drive
+- local knowledge status and project-relevant knowledge hits
+
+If a source is unavailable because of missing permissions, missing OAuth, or a temporary connector problem, the brief still renders and marks that source as degraded instead of failing the whole command.
 
 ## Local knowledge and read-only learning
 

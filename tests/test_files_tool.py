@@ -6,7 +6,7 @@ from docx import Document
 from openpyxl import Workbook
 from pptx import Presentation
 
-from adv_archon.tools.files import list_dir, read_file
+from adv_archon.tools.files import find_local, list_dir, read_file
 
 
 def test_read_file_text(tmp_path: Path) -> None:
@@ -81,7 +81,7 @@ def test_read_file_suppresses_noisy_document_output(
     target = tmp_path / "brief.pdf"
     target.write_text("fake", encoding="utf-8")
 
-    def fake_read_pdf_ok(_path: Path) -> str:
+    def fake_read_pdf_ok(_path: Path, *, preview: bool = False) -> str:
         import sys
 
         sys.stdout.write("ruido stdout")
@@ -96,3 +96,40 @@ def test_read_file_suppresses_noisy_document_output(
     assert result.payload["content"] == "contenido pdf"
     assert captured.out == ""
     assert captured.err == ""
+
+
+def test_read_file_preview_clips_large_text(tmp_path: Path) -> None:
+    target = tmp_path / "large.txt"
+    target.write_text(("intro " * 5000) + ("cierre " * 2000), encoding="utf-8")
+
+    result = read_file(str(target), preview=True)
+
+    assert result.payload["preview"] is True
+    assert "[... contenido intermedio omitido para agilizar la lectura ...]" in result.payload[
+        "content"
+    ]
+
+
+def test_find_local_resolves_folder_hint_and_book_title(tmp_path: Path) -> None:
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    grasa = desktop / "LA GRASA"
+    grasa.mkdir()
+    target = grasa / "La Clavicula de Salomon.pdf"
+    target.write_text("contenido", encoding="utf-8")
+
+    with patch(
+        "adv_archon.tools.files.COMMON_SEARCH_ROOTS",
+        (desktop, tmp_path / "Documents", tmp_path / "Downloads", tmp_path),
+    ):
+        result = find_local(
+            query="la clavicula de salomon",
+            folder_hint="la grasa",
+            kind="file",
+            max_results=5,
+        )
+
+    matches = result.payload["matches"]
+    assert matches
+    assert matches[0]["path"] == str(target)
+    assert matches[0]["is_dir"] is False

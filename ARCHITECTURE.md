@@ -20,7 +20,7 @@ ADV ARCHON is a lightweight terminal-native agent with a small internal dispatch
 - `core/logging.py`: local JSON session event logging
 - `core/profiles.py`: persistent runtime profiles and profile-scoped roots
 - `core/privacy.py`: optional placeholder-based PII redaction for cloud LLM calls
-- `core/daily.py`: proactive daily summary routine from context, logs, memory, and git state
+- `core/daily.py`: raw daily summary plus a multi-source daily brief across agenda, tasks, Gmail, Drive, Notes, and local knowledge
 - `core/agent.py`: agent loop, planner step, and tool dispatch
 - `core/session.py`: in-memory and persisted session history
 - `tools/files.py`: local document readers with OCR fallback
@@ -96,6 +96,14 @@ The new web layer is intentionally separate from the Mac knowledge layer:
 1. `Local Mac knowledge`: the primary private source of truth.
 2. `Web library`: locally stored external sources with freshness TTLs, snippets, tags, and optional embeddings.
 3. `Research cycles`: background-friendly search and fetch runs that enrich the local web library without mixing it into the file index.
+
+## Daily brief layer
+
+The current daily surface now has two modes:
+
+1. `daily brief`: the default read-only briefing that merges local activity, tasks, Calendar, Reminders, Notes, Gmail, Google Calendar, Drive, and local knowledge status.
+2. `daily raw`: the older low-level operational report that focuses on logs, memory, tasks, and git context.
+3. `Graceful degradation`: connector failures and missing permissions are reported per source instead of aborting the whole brief.
 
 ## Command execution policy
 

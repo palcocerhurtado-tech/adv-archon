@@ -127,6 +127,17 @@ Long-term memory uses `sentence-transformers` with the `all-MiniLM-L6-v2` model.
 
 The first memory operation may download the model once into the local cache if it is not present yet.
 
+## Daily brief prerequisites
+
+The richer `adv-archon daily` brief uses whichever of these sources you have configured and permitted:
+
+- macOS Calendar, Reminders, and Notes permissions for the terminal app you use
+- Google OAuth credentials in `~/.adv-archon/google-client-secret.json`
+- a valid Google token in `~/.adv-archon/google-token.json`
+- local knowledge indexing enabled if you want knowledge status and contextual hits
+
+If a source is unavailable, the brief still renders and marks that source as degraded.
+
 ## Document support and OCR
 
 Block 3 adds structured readers for:

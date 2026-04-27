@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from subprocess import TimeoutExpired
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -152,6 +153,7 @@ def test_calendar_script_uses_long_recurrence_lookback() -> None:
     assert any(
         f"({RECURRING_LOOKBACK_DAYS} * days)" in line for line in script_lines
     )
+    assert "if not running then launch" in script_lines
 
 
 def test_expand_calendar_events_handles_recurring_and_one_off() -> None:
@@ -185,3 +187,15 @@ def test_expand_calendar_events_handles_recurring_and_one_off() -> None:
     assert events[0]["start"].startswith("2026-04-21T08:30:00")
     assert events[1]["start"].startswith("2026-04-22T08:30:00")
     assert events[2]["title"] == "Día de San Jorge"
+
+
+def test_notes_search_times_out_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    tool = PersonalTools(confirm=lambda _question: True)
+
+    def fake_run(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise TimeoutExpired(cmd=["osascript"], timeout=12)
+
+    monkeypatch.setattr("adv_archon.tools.personal.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError):
+        tool.notes_search("acme", limit=3)

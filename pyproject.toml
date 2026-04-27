@@ -14,7 +14,7 @@ authors = [
 ]
 dependencies = [
   "dateparser>=1.2.2",
-  "duckduckgo-search>=8.1.1",
+  "ddgs>=9.6.1",
   "faster-whisper>=1.1.1",
   "google-api-python-client>=2.169.0",
   "google-auth-oauthlib>=1.2.2",
@@ -47,6 +47,9 @@ dev = [
   "pytest-asyncio>=1.0.0",
   "ruff>=0.11.7",
 ]
+desktop = [
+  "PySide6>=6.8.0",
+]
 wakeword = [
   "pvporcupine>=3.0.5",
 ]
@@ -54,6 +57,7 @@ wakeword = [
 [project.scripts]
 adv-archon = "adv_archon.main:main"
 adv = "adv_archon.main:main"
+adv-archon-desktop = "adv_archon.main:desktop_main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

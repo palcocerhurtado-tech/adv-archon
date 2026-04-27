@@ -333,11 +333,15 @@ class MemoryStore:
         readonly = not self._persist and self._db_path.exists()
         if self._persist:
             self._db_path.parent.mkdir(parents=True, exist_ok=True)
-            conn = sqlite3.connect(self._db_path)
+            conn = sqlite3.connect(self._db_path, check_same_thread=False)
         elif readonly:
-            conn = sqlite3.connect(f"file:{self._db_path}?mode=ro", uri=True)
+            conn = sqlite3.connect(
+                f"file:{self._db_path}?mode=ro",
+                uri=True,
+                check_same_thread=False,
+            )
         else:
-            conn = sqlite3.connect(":memory:")
+            conn = sqlite3.connect(":memory:", check_same_thread=False)
         conn.row_factory = sqlite3.Row
         if not readonly:
             self._ensure_schema(conn)

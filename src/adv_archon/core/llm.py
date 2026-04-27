@@ -109,6 +109,7 @@ class LLMRouter:
             base_url=self._config.ollama_base_url,
             model=self._config.ollama_model,
             temperature=self._config.temperature,
+            timeout=float(self._config.ollama_timeout_seconds),
         )
 
     def _provider_name_model(self) -> tuple[str, str]:

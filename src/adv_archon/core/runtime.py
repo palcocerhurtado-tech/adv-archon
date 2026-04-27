@@ -1,0 +1,390 @@
+from __future__ import annotations
+
+from collections.abc import Callable, Sequence
+from contextlib import suppress
+from pathlib import Path
+
+from adv_archon.core.agent import Agent, ToolSpec, TurnContextSnapshot
+from adv_archon.core.attachments import format_prompt_with_attachments
+from adv_archon.core.config import AppConfig
+from adv_archon.core.context import RuntimeContext, capture_runtime_context
+from adv_archon.core.costs import UsageLedger
+from adv_archon.core.knowledge import KnowledgeIndexResult, KnowledgeStore
+from adv_archon.core.llm import LLMRouter
+from adv_archon.core.llm_types import LLMResponse
+from adv_archon.core.logging import AppLogger
+from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
+from adv_archon.core.profiles import ProfileManager
+from adv_archon.core.session import SessionStore
+from adv_archon.core.tasks import TaskStore
+from adv_archon.core.web_library import WebLibraryStore
+from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
+from adv_archon.tools.google_workspace import (
+    GoogleWorkspaceTools,
+    build_google_workspace_tool_specs,
+)
+from adv_archon.tools.knowledge_tools import KnowledgeTools, build_knowledge_tool_specs
+from adv_archon.tools.mac import MacTools, build_mac_tool_specs
+from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
+from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
+from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
+from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
+from adv_archon.tools.web_library_tools import (
+    WebLibraryTools,
+    build_web_library_tool_specs,
+)
+from adv_archon.ui.commands import CommandServices
+from adv_archon.ui.render import Renderer
+from adv_archon.voice.stt import WhisperSpeechToText
+from adv_archon.voice.tts import MacTextToSpeech
+
+ConfirmCallback = Callable[[str], bool]
+
+
+class ArchonRuntime:
+    def __init__(
+        self,
+        *,
+        config: AppConfig,
+        llm: LLMRouter,
+        project_root: Path,
+        system_prompt: str,
+        confirm: ConfirmCallback,
+        incognito: bool = False,
+    ) -> None:
+        self.config = config
+        self.llm = llm
+        self.project_root = project_root
+        self.system_prompt = system_prompt
+        self.incognito = incognito
+        self.confirm = confirm
+
+        self.session_store = SessionStore(config.paths.sessions_dir, persist=not incognito)
+        self.logger = AppLogger(
+            config.paths.logs_dir,
+            session_id=self.session_store.session_id,
+            persist=not incognito,
+        )
+        self.usage_ledger = UsageLedger()
+        self.auto_mode = AutoModeManager()
+        self.shell_policy = ShellPolicy(
+            whitelist_commands=config.shell.whitelist_commands,
+            timeout_seconds=config.shell.timeout_seconds,
+        )
+        self.shell_tool = ShellTool(
+            policy=self.shell_policy,
+            auto_mode=self.auto_mode,
+            confirm=confirm,
+            logger=self.logger,
+            default_cwd=project_root,
+        )
+        self.python_tool = PythonSandboxTool(
+            confirm=confirm,
+            logger=self.logger,
+            default_cwd=project_root,
+        )
+        self.mac_tools = MacTools(
+            confirm=confirm,
+            auto_mode=self.auto_mode,
+            shell_policy=self.shell_policy,
+            logger=self.logger,
+            default_cwd=project_root,
+        )
+
+        encoder = SentenceTransformerEncoder(config.memory.embedding_model)
+        self.profile_manager = ProfileManager(
+            config.paths.profile_state_file,
+            default_profile=config.profiles.default_profile,
+            definitions=config.profiles.definitions,
+        )
+        self.tts = MacTextToSpeech(
+            enabled=config.voice.enabled,
+            voice_name=config.voice.say_voice,
+            rate_wpm=config.voice.rate_wpm,
+            logger=self.logger,
+        )
+        self.stt = WhisperSpeechToText(
+            model_name=config.voice.stt_model,
+            language=config.voice.stt_language,
+            device=config.voice.stt_device,
+            compute_type=config.voice.stt_compute_type,
+            sample_rate=config.voice.sample_rate,
+            max_record_seconds=config.voice.max_record_seconds,
+            silence_seconds=config.voice.silence_seconds,
+            silence_threshold=config.voice.silence_threshold,
+            wake_word_enabled=config.voice.wake_word_enabled,
+            wake_word_keyword=config.voice.wake_word_keyword,
+            wake_word_timeout_seconds=config.voice.wake_word_timeout_seconds,
+            porcupine_access_key=config.voice.porcupine_access_key,
+            logger=self.logger,
+        )
+        self.memory_store = MemoryStore(
+            config.paths.memory_db,
+            persist=not incognito,
+            encoder=encoder,
+            logger=self.logger,
+        )
+        self.knowledge_store = KnowledgeStore(
+            config.paths.knowledge_db,
+            encoder=encoder,
+            default_roots=self.profile_manager.knowledge_roots() or config.knowledge.default_roots,
+            vault_roots=self.profile_manager.vault_roots() or config.knowledge.vault_roots,
+            auto_index_on_search=config.knowledge.auto_index_on_search,
+            max_files_per_root=config.knowledge.max_files_per_root,
+            max_file_bytes=config.knowledge.max_file_bytes,
+            logger=self.logger,
+        )
+        self.knowledge_tools = KnowledgeTools(
+            self.knowledge_store,
+            profile_manager=self.profile_manager,
+        )
+        self.web_library_store = WebLibraryStore(
+            config.paths.web_library_db,
+            encoder=encoder,
+            persist=not incognito,
+            logger=self.logger,
+        )
+        self.web_library_tools = WebLibraryTools(self.web_library_store)
+        self.task_store = TaskStore(
+            config.paths.tasks_db,
+            timezone_name=config.tasks.default_timezone,
+            notifications_enabled=config.tasks.notifications_enabled,
+            logger=self.logger,
+        )
+        self.task_tools = TaskTools(
+            self.task_store,
+            confirm=confirm,
+            allow_mutations=not incognito,
+        )
+        self.personal_tools = PersonalTools(
+            confirm=confirm,
+            timezone_name=config.tasks.default_timezone,
+            logger=self.logger,
+        )
+        self.browser_tools = BrowserTools(
+            profile_dir=config.paths.browser_profile_dir,
+            enabled=config.browser.enabled,
+            browser_name=config.browser.browser_name,
+            headless=config.browser.headless,
+            default_timeout_ms=config.browser.default_timeout_ms,
+            confirm=confirm,
+            logger=self.logger,
+        )
+        self.google_workspace_tools = GoogleWorkspaceTools(
+            client_secret_file=config.google.client_secret_file,
+            token_file=config.google.token_file,
+            confirm=confirm,
+            enabled=config.google.enabled,
+            timezone_name=config.tasks.default_timezone,
+            default_calendar_id=config.google.default_calendar_id,
+            gmail_default_max_results=config.google.gmail_default_max_results,
+            drive_default_max_results=config.google.drive_default_max_results,
+            logger=self.logger,
+        )
+        self.agent = Agent(
+            llm=llm,
+            system_prompt=system_prompt,
+            session=self.session_store,
+            project_root=project_root,
+            max_tool_steps=config.ui.max_tool_steps,
+            operator_max_tool_steps=config.ui.operator_max_tool_steps,
+            context_provider=self.runtime_context,
+            memory_store=self.memory_store,
+            knowledge_store=self.knowledge_store,
+            usage_callback=self.record_usage,
+            auto_recall_limit=config.memory.auto_recall_limit,
+            auto_knowledge_limit=config.knowledge.search_limit,
+            force_local_private_context=config.llm.force_local_private_context,
+            extra_tools=self.build_agent_tools(),
+        )
+        self.logger.log(
+            "session_started",
+            cwd=project_root,
+            incognito=incognito,
+            mode=self.llm.mode,
+            active_profile=self.profile_manager.active_profile,
+            voice_enabled=config.voice.enabled,
+        )
+
+    def greeting(self) -> str:
+        return self.runtime_context().greeting()
+
+    def runtime_context(self) -> RuntimeContext:
+        return capture_runtime_context(
+            self.project_root,
+            active_profile=self.profile_manager.active_profile,
+        )
+
+    def send_prompt(
+        self,
+        prompt: str,
+        *,
+        attachments: Sequence[Path | str] | None = None,
+        on_tool: Callable[[str, dict[str, object]], None] | None = None,
+        on_chunk: Callable[[str], None] | None = None,
+        on_context: Callable[[TurnContextSnapshot], None] | None = None,
+    ) -> LLMResponse:
+        final_prompt = format_prompt_with_attachments(prompt, attachments or ())
+        return self.agent.stream_final_response(
+            final_prompt,
+            on_tool=on_tool,
+            on_chunk=on_chunk,
+            on_context=on_context,
+        )
+
+    def import_paths_to_knowledge(
+        self,
+        paths: Sequence[Path | str],
+        *,
+        refresh: bool = True,
+    ) -> KnowledgeIndexResult:
+        return self.knowledge_store.index_paths(paths, refresh=refresh)
+
+    def build_command_services(self, renderer: Renderer) -> CommandServices:
+        return CommandServices(
+            llm=self.llm,
+            renderer=renderer,
+            memory=self.memory_store,
+            task_store=self.task_store,
+            personal_tools=self.personal_tools,
+            google_workspace_tools=self.google_workspace_tools,
+            knowledge_store=self.knowledge_store,
+            usage_ledger=self.usage_ledger,
+            logger=self.logger,
+            context_provider=self.runtime_context,
+            project_root=self.project_root,
+            logs_dir=self.config.paths.logs_dir,
+            confirm=self.confirm,
+            recall_limit=self.config.memory.slash_recall_limit,
+            incognito=self.incognito,
+            auto_mode=self.auto_mode,
+            shell_tool=self.shell_tool,
+            python_tool=self.python_tool,
+            knowledge_tools=self.knowledge_tools,
+            profile_manager=self.profile_manager,
+            on_profile_changed=self.apply_profile,
+            tts=self.tts,
+            stt=self.stt,
+        )
+
+    def apply_profile(self, profile_name: str) -> None:
+        profile_roots = self.profile_manager.knowledge_roots(profile_name)
+        vault_roots = self.profile_manager.vault_roots(profile_name)
+        if profile_roots:
+            self.knowledge_store.set_default_roots(profile_roots)
+        else:
+            self.knowledge_store.set_default_roots(self.config.knowledge.default_roots)
+        if vault_roots:
+            self.knowledge_store.set_vault_roots(vault_roots)
+        else:
+            self.knowledge_store.set_vault_roots(self.config.knowledge.vault_roots)
+
+    def shutdown(self) -> None:
+        self.tts.stop()
+        with suppress(Exception):
+            self.browser_tools.browser_close()
+
+    def record_usage(self, phase: str, response: object) -> None:
+        from adv_archon.core.llm_types import LLMResponse
+
+        llm_response = response
+        if not isinstance(llm_response, LLMResponse):
+            return
+        event = self.usage_ledger.record(phase, llm_response)
+        self.logger.log(
+            "llm_call",
+            phase=event.phase,
+            provider=event.provider,
+            model=event.model,
+            prompt_tokens=event.prompt_tokens,
+            completion_tokens=event.completion_tokens,
+            total_tokens=event.total_tokens,
+            estimated_cost_usd=event.estimated_cost_usd,
+            redaction_applied=event.redaction_applied,
+            redaction_items=event.redaction_items,
+        )
+
+    def build_agent_tools(self) -> list[ToolSpec]:
+        specs: list[ToolSpec] = []
+        for definition in build_shell_tool_specs(self.shell_tool):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_python_tool_specs(self.python_tool):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_mac_tool_specs(self.mac_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_task_tool_specs(self.task_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_personal_tool_specs(self.personal_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_browser_tool_specs(self.browser_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_google_workspace_tool_specs(self.google_workspace_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_knowledge_tool_specs(self.knowledge_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in build_web_library_tool_specs(self.web_library_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        return specs

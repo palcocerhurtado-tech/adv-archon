@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import io
+import os
+import re
+import unicodedata
 import warnings
 from contextlib import redirect_stderr, redirect_stdout
 from dataclasses import dataclass
@@ -43,6 +46,16 @@ IMAGE_EXTENSIONS = {
     ".gif",
     ".webp",
 }
+COMMON_SEARCH_ROOTS = (
+    Path.home() / "Desktop",
+    Path.home() / "Documents",
+    Path.home() / "Downloads",
+    Path.home(),
+)
+WORD_RE = re.compile(r"[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]+")
+PREVIEW_CHAR_LIMIT = 18000
+PDF_PREVIEW_PAGE_LIMIT = 12
+PDF_TABLE_PREVIEW_PAGE_LIMIT = 4
 
 
 @dataclass(slots=True)
@@ -51,14 +64,19 @@ class ToolResult:
     payload: dict[str, Any]
 
 
-def read_file(path: str, start_line: int | None = None, end_line: int | None = None) -> ToolResult:
+def read_file(
+    path: str,
+    start_line: int | None = None,
+    end_line: int | None = None,
+    preview: bool = False,
+) -> ToolResult:
     target = Path(path).expanduser().resolve()
     if not target.exists():
         raise FileNotFoundError(f"Path not found: {target}")
     if target.is_dir():
         raise IsADirectoryError(f"Expected file, got directory: {target}")
 
-    text = _read_by_extension(target)
+    text = _read_by_extension(target, preview=preview)
 
     lines = text.splitlines()
     start_index = max((start_line or 1) - 1, 0)
@@ -71,6 +89,7 @@ def read_file(path: str, start_line: int | None = None, end_line: int | None = N
             "path": str(target),
             "start_line": start_line or 1,
             "end_line": end_index,
+            "preview": preview,
             "content": "\n".join(clipped),
         },
     )
@@ -94,6 +113,32 @@ def list_dir(path: str, depth: int = 1) -> ToolResult:
     )
 
 
+def find_local(
+    query: str,
+    path: str | None = None,
+    folder_hint: str | None = None,
+    kind: str = "file",
+    max_results: int = 10,
+) -> ToolResult:
+    roots = _candidate_search_roots(path=path, folder_hint=folder_hint)
+    matches = _search_local_entries(
+        query=query,
+        roots=roots,
+        kind=kind,
+        max_results=max_results,
+    )
+    return ToolResult(
+        name="find_local",
+        payload={
+            "query": query,
+            "path": path,
+            "folder_hint": folder_hint,
+            "kind": kind,
+            "matches": matches,
+        },
+    )
+
+
 def _walk(path: Path, *, depth: int, prefix: str = "") -> list[str]:
     if depth < 0:
         return []
@@ -110,45 +155,211 @@ def _walk(path: Path, *, depth: int, prefix: str = "") -> list[str]:
     return entries
 
 
-def _read_by_extension(path: Path) -> str:
+def _candidate_search_roots(*, path: str | None, folder_hint: str | None) -> list[Path]:
+    if path:
+        target = Path(path).expanduser().resolve()
+        return [target] if target.exists() else []
+
+    if folder_hint:
+        resolved = _resolve_folder_hint(folder_hint)
+        if resolved:
+            return resolved
+
+    roots: list[Path] = []
+    seen: set[Path] = set()
+    for candidate in COMMON_SEARCH_ROOTS:
+        if candidate.exists() and candidate not in seen:
+            roots.append(candidate)
+            seen.add(candidate)
+    return roots
+
+
+def _resolve_folder_hint(folder_hint: str) -> list[Path]:
+    normalized_hint = _normalize_name(folder_hint)
+    tokens = _tokens_for_match(folder_hint)
+    matches: list[tuple[int, Path]] = []
+
+    for root in COMMON_SEARCH_ROOTS:
+        if not root.exists():
+            continue
+        try:
+            iterator = os.walk(root)
+            for current_root, dirnames, _filenames in iterator:
+                current_path = Path(current_root)
+                dirnames[:] = [
+                    name
+                    for name in dirnames
+                    if name not in IGNORED_DIRS and _depth_from(root, current_path / name) <= 5
+                ]
+                if current_path == root:
+                    continue
+                candidate_name = _normalize_name(current_path.name)
+                score = _score_name_match(
+                    candidate_name,
+                    normalized_hint=normalized_hint,
+                    tokens=tokens,
+                )
+                if score > 0:
+                    matches.append((score, current_path))
+        except OSError:
+            continue
+
+    matches.sort(key=lambda item: (-item[0], len(str(item[1]))))
+    return [path for _score, path in matches[:5]]
+
+
+def _search_local_entries(
+    *,
+    query: str,
+    roots: list[Path],
+    kind: str,
+    max_results: int,
+) -> list[dict[str, Any]]:
+    normalized_query = _normalize_name(query)
+    tokens = _tokens_for_match(query)
+    matches: list[tuple[int, Path]] = []
+
+    for root in roots:
+        if not root.exists():
+            continue
+        try:
+            for current_root, dirnames, filenames in os.walk(root):
+                current_path = Path(current_root)
+                dirnames[:] = [
+                    name
+                    for name in dirnames
+                    if name not in IGNORED_DIRS and _depth_from(root, current_path / name) <= 8
+                ]
+                if kind in {"any", "dir"}:
+                    for dirname in dirnames:
+                        candidate = current_path / dirname
+                        score = _score_name_match(
+                            _normalize_name(dirname),
+                            normalized_hint=normalized_query,
+                            tokens=tokens,
+                        )
+                        if score > 0:
+                            matches.append((score, candidate))
+                if kind in {"any", "file"}:
+                    for filename in filenames:
+                        candidate = current_path / filename
+                        score = _score_name_match(
+                            _normalize_name(candidate.stem),
+                            normalized_hint=normalized_query,
+                            tokens=tokens,
+                        )
+                        if score > 0:
+                            matches.append((score, candidate))
+        except OSError:
+            continue
+
+    matches.sort(key=lambda item: (-item[0], len(str(item[1]))))
+    seen: set[Path] = set()
+    results: list[dict[str, Any]] = []
+    for score, match in matches:
+        if match in seen:
+            continue
+        seen.add(match)
+        results.append(
+            {
+                "path": str(match),
+                "name": match.name,
+                "is_dir": match.is_dir(),
+                "score": score,
+            }
+        )
+        if len(results) >= max_results:
+            break
+    return results
+
+
+def _score_name_match(candidate_name: str, *, normalized_hint: str, tokens: list[str]) -> int:
+    score = 0
+    if normalized_hint and normalized_hint in candidate_name:
+        score += 10
+    if tokens and all(token in candidate_name for token in tokens):
+        score += 8
+    score += sum(1 for token in tokens if token in candidate_name)
+    return score
+
+
+def _tokens_for_match(text: str) -> list[str]:
+    return [
+        _normalize_name(match.group(0))
+        for match in WORD_RE.finditer(text)
+        if len(match.group(0)) > 2
+    ]
+
+
+def _normalize_name(text: str) -> str:
+    lowered = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(ch for ch in lowered if not unicodedata.combining(ch))
+
+
+def _depth_from(root: Path, candidate: Path) -> int:
+    try:
+        return len(candidate.relative_to(root).parts)
+    except ValueError:
+        return 99
+
+
+def _read_by_extension(path: Path, *, preview: bool = False) -> str:
     suffix = path.suffix.lower()
     if suffix in TEXT_EXTENSIONS:
-        return path.read_text(encoding="utf-8", errors="replace")
+        text = path.read_text(encoding="utf-8", errors="replace")
+        return _clip_preview_text(text) if preview else text
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         with redirect_stdout(io.StringIO()), redirect_stderr(io.StringIO()):
             if suffix == ".pdf":
-                return _read_pdf(path)
+                return _read_pdf(path, preview=preview)
             if suffix == ".docx":
-                return _read_docx(path)
+                text = _read_docx(path)
+                return _clip_preview_text(text) if preview else text
             if suffix == ".xlsx":
-                return _read_xlsx(path)
+                text = _read_xlsx(path)
+                return _clip_preview_text(text) if preview else text
             if suffix == ".pptx":
-                return _read_pptx(path)
+                text = _read_pptx(path)
+                return _clip_preview_text(text) if preview else text
             if suffix in {".html", ".htm"}:
-                return _read_html(path)
+                text = _read_html(path)
+                return _clip_preview_text(text) if preview else text
             if suffix in IMAGE_EXTENSIONS:
-                return _read_image_with_ocr(path)
-    return path.read_text(encoding="utf-8", errors="replace")
+                text = _read_image_with_ocr(path)
+                return _clip_preview_text(text) if preview else text
+    text = path.read_text(encoding="utf-8", errors="replace")
+    return _clip_preview_text(text) if preview else text
 
 
-def _read_pdf(path: Path) -> str:
+def _read_pdf(path: Path, *, preview: bool = False) -> str:
     reader = PdfReader(str(path))
     fragments: list[str] = []
-    for page in reader.pages:
+    page_limit = PDF_PREVIEW_PAGE_LIMIT if preview else None
+    char_target = PREVIEW_CHAR_LIMIT if preview else None
+    total_chars = 0
+    for page_index, page in enumerate(reader.pages, start=1):
+        if page_limit is not None and page_index > page_limit:
+            break
         extracted = page.extract_text() or ""
         if extracted.strip():
             fragments.append(extracted)
+            total_chars += len(extracted)
+            if char_target is not None and total_chars >= char_target:
+                break
 
-    table_text = _read_pdf_tables(path)
+    table_text = _read_pdf_tables(
+        path,
+        page_limit=PDF_TABLE_PREVIEW_PAGE_LIMIT if preview else None,
+    )
     if table_text:
         fragments.append(table_text)
 
     combined = "\n\n".join(fragment for fragment in fragments if fragment.strip())
     if combined.strip():
-        return combined
+        return _clip_preview_text(combined) if preview else combined
 
-    ocr_text = _ocr_pdf(path)
+    ocr_text = _ocr_pdf(path, preview=preview)
     if ocr_text:
         return ocr_text
 
@@ -158,11 +369,13 @@ def _read_pdf(path: Path) -> str:
     )
 
 
-def _read_pdf_tables(path: Path) -> str:
+def _read_pdf_tables(path: Path, *, page_limit: int | None = None) -> str:
     fragments: list[str] = []
     try:
         with pdfplumber.open(path) as pdf:
             for page_index, page in enumerate(pdf.pages, start=1):
+                if page_limit is not None and page_index > page_limit:
+                    break
                 tables = page.extract_tables()
                 for table_index, table in enumerate(tables, start=1):
                     fragments.append(f"Page {page_index}, table {table_index}:")
@@ -178,17 +391,25 @@ def _read_pdf_tables(path: Path) -> str:
     return "\n".join(fragments)
 
 
-def _ocr_pdf(path: Path) -> str:
+def _ocr_pdf(path: Path, *, preview: bool = False) -> str:
     try:
         images = convert_from_path(str(path))
     except Exception:
         return ""
     fragments: list[str] = []
-    for image in images:
+    page_limit = PDF_PREVIEW_PAGE_LIMIT if preview else None
+    total_chars = 0
+    for page_index, image in enumerate(images, start=1):
+        if page_limit is not None and page_index > page_limit:
+            break
         text = pytesseract.image_to_string(image)
         if text.strip():
             fragments.append(text)
-    return "\n\n".join(fragments)
+            total_chars += len(text)
+            if preview and total_chars >= PREVIEW_CHAR_LIMIT:
+                break
+    combined = "\n\n".join(fragments)
+    return _clip_preview_text(combined) if preview else combined
 
 
 def _read_docx(path: Path) -> str:
@@ -240,3 +461,16 @@ def _read_image_with_ocr(path: Path) -> str:
     if extracted.strip():
         return extracted
     return "No he podido extraer texto mediante OCR."
+
+
+def _clip_preview_text(text: str, *, max_chars: int = PREVIEW_CHAR_LIMIT) -> str:
+    compact = text.strip()
+    if len(compact) <= max_chars:
+        return compact
+    head_size = int(max_chars * 0.7)
+    tail_size = max_chars - head_size
+    head = compact[:head_size].rstrip()
+    tail = compact[-tail_size:].lstrip()
+    return (
+        f"{head}\n\n[... contenido intermedio omitido para agilizar la lectura ...]\n\n{tail}"
+    )

@@ -11,6 +11,7 @@ from typing import Any
 
 from rich.console import Console
 
+from adv_archon.core.attachments import format_prompt_with_attachments
 from adv_archon.core.benchmark import (
     BenchmarkCase,
     BenchmarkEvidence,
@@ -29,6 +30,7 @@ from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
 from adv_archon.core.research import install_research_launch_agent, run_research_cycle
 from adv_archon.core.tasks import TaskStore
 from adv_archon.core.web_library import WebLibraryStore
+from adv_archon.desktop.app import launch_desktop_app
 from adv_archon.tools.google_workspace import GoogleWorkspaceTools
 from adv_archon.tools.personal import PersonalTools
 from adv_archon.ui.render import Renderer
@@ -64,6 +66,20 @@ def build_parser() -> argparse.ArgumentParser:
 
 def load_system_prompt(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def desktop_main() -> int:
+    config = load_app_config()
+    llm = LLMRouter(config.llm)
+    project_root = Path.cwd()
+    system_prompt = load_system_prompt(config.system_prompt_path)
+    return launch_desktop_app(
+        config=config,
+        llm=llm,
+        project_root=project_root,
+        system_prompt=system_prompt,
+        incognito=False,
+    )
 
 
 def _build_logger(config_root: Path, *, prefix: str, persist: bool) -> AppLogger:
@@ -542,7 +558,8 @@ def _build_benchmark_executor(
 ) -> BenchmarkExecutor:
     def executor(case: BenchmarkCase) -> BenchmarkEvidence:
         quiet_renderer = Renderer(
-            Console(file=io.StringIO(), force_terminal=False, no_color=True)
+            Console(file=io.StringIO(), force_terminal=False, no_color=True),
+            show_tool_input=False,
         )
         app = ReplApp(
             config=config,
@@ -729,7 +746,7 @@ def main() -> int:
 
     config = load_app_config(mode_override=args.mode, system_prompt_override=args.system_prompt)
     llm = LLMRouter(config.llm)
-    renderer = Renderer(Console())
+    renderer = Renderer(Console(), show_tool_input=config.ui.show_tool_input)
     project_root = Path.cwd()
 
     if args.prompt == "daily":
@@ -775,6 +792,15 @@ def main() -> int:
 
     system_prompt = load_system_prompt(config.system_prompt_path)
 
+    if args.prompt == "desktop":
+        return launch_desktop_app(
+            config=config,
+            llm=llm,
+            project_root=project_root,
+            system_prompt=system_prompt,
+            incognito=args.incognito,
+        )
+
     app = ReplApp(
         config=config,
         llm=llm,
@@ -787,10 +813,7 @@ def main() -> int:
     )
 
     if args.prompt:
-        prompt = args.prompt
-        if args.paths:
-            referenced = "\n".join(f"- {Path(path).expanduser()}" for path in args.paths)
-            prompt = f"{prompt}\n\nReferenced paths:\n{referenced}\n\nOpen them if useful."
+        prompt = format_prompt_with_attachments(args.prompt, args.paths, label="Referenced paths")
         return app.ask_once(prompt)
 
     return app.run()

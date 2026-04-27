@@ -81,6 +81,9 @@ def summarize_response_confidence(
     if successful_tools > 0:
         score += 2
         rationale.append(f"{successful_tools} tools utiles")
+    if successful_tools >= 2:
+        score += 1
+        rationale.append("varias fuentes o herramientas utiles")
     if failed_tools > 0:
         score -= 1
         rationale.append(f"{failed_tools} tools con error")

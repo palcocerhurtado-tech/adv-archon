@@ -48,6 +48,19 @@ class FakeAgent:
         return self.response
 
 
+class FakeRuntime:
+    def __init__(self, response: LLMResponse) -> None:
+        self.response = response
+        self.prompts: list[str] = []
+
+    def send_prompt(self, prompt: str, **kwargs) -> LLMResponse:
+        self.prompts.append(prompt)
+        on_context = kwargs.get("on_context")
+        if on_context is not None:
+            on_context("contexto")
+        return self.response
+
+
 def test_process_prompt_renders_non_streamed_response() -> None:
     app = ReplApp.__new__(ReplApp)
     app._renderer = FakeRenderer()
@@ -92,3 +105,30 @@ def test_process_prompt_hides_tool_input_when_disabled() -> None:
 
     assert result is True
     assert app._renderer.tools == []
+
+
+def test_process_prompt_strips_accidental_adv_wrapper() -> None:
+    app = ReplApp.__new__(ReplApp)
+    app._renderer = FakeRenderer()
+    runtime = FakeRuntime(
+        LLMResponse(
+            text="He guardado el recuerdo.",
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="memory-capture-handler",
+        )
+    )
+    app._runtime = runtime
+    app._config = SimpleNamespace(
+        ui=SimpleNamespace(show_context_panel=True, show_tool_input=False)
+    )
+    app._maybe_speak = lambda _text: None
+
+    result = app._process_prompt(
+        'adv "recuerda que ahora estoy investigando grimorios, simbolismo y textos esotéricos"'
+    )
+
+    assert result is True
+    assert runtime.prompts == [
+        "recuerda que ahora estoy investigando grimorios, simbolismo y textos esotéricos"
+    ]

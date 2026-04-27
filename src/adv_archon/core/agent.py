@@ -1275,6 +1275,20 @@ class Agent:
         state: _TurnState,
         on_context: ContextCallback | None,
     ) -> LLMResponse | None:
+        if _looks_like_memory_capture_query(user_input):
+            return self._deterministic_memory_capture_response(
+                user_input=user_input,
+                state=state,
+                on_context=on_context,
+            )
+
+        if _looks_like_self_memory_query(user_input):
+            return self._deterministic_self_memory_response(
+                user_input=user_input,
+                state=state,
+                on_context=on_context,
+            )
+
         if not looks_like_capability_query(user_input):
             return None
 
@@ -1374,6 +1388,128 @@ class Agent:
             usage=LLMUsage(),
             provider="deterministic",
             model="capability-handler",
+        )
+
+    def _deterministic_self_memory_response(
+        self,
+        *,
+        user_input: str,
+        state: _TurnState,
+        on_context: ContextCallback | None,
+    ) -> LLMResponse:
+        if on_context is not None:
+            packet = self._build_context_packet(
+                user_input=user_input,
+                state=state,
+                plan={"kind": "answer", "step_summary": "responder con memoria"},
+                tool_observations=[],
+            )
+            on_context(self._build_context_snapshot(packet))
+
+        memory_count = self._memory_store.count() if self._memory_store is not None else 0
+        relevant_memories = list(state.memories)
+        if not relevant_memories:
+            relevant_memories = self._fallback_self_memories(limit=5)
+
+        if relevant_memories:
+            lines = [
+                "Esto es lo que tengo ahora mismo en memoria sobre ti o tus intereses:"
+            ]
+            for record in relevant_memories[:5]:
+                lines.append(f"- {record.content}")
+            lines.append(
+                "\nSi quieres, puedo usar esto para recomendarte lecturas, proyectos o "
+                "siguientes pasos."
+            )
+            text = "\n".join(lines)
+        elif memory_count == 0:
+            text = (
+                "Ahora mismo no tengo recuerdos persistentes claros sobre tus intereses "
+                "actuales. Si quieres, puedes decírmelo en una frase tipo "
+                "`recuerda que estoy investigando grimorios, simbolismo y textos esotéricos` "
+                "y a partir de ahí lo usaré en futuras respuestas."
+            )
+        else:
+            text = (
+                "Tengo memoria persistente guardada, pero no encuentro nada claro sobre "
+                "tus intereses actuales en este turno. Si quieres, dime una frase más "
+                "concreta sobre lo que estás investigando ahora y la guardaré."
+            )
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="self-memory-handler",
+        )
+
+    def _fallback_self_memories(self, *, limit: int = 5) -> list[MemoryRecord]:
+        if self._memory_store is None:
+            return []
+
+        collected: list[MemoryRecord] = []
+        seen_ids: set[int] = set()
+        for query in ("intereses", "perfil", "investigando", "gusta", "prefieres"):
+            try:
+                matches = self._memory_store.find_matches(query, limit=limit)
+            except Exception:
+                continue
+            for record in matches:
+                if record.id in seen_ids:
+                    continue
+                collected.append(record)
+                seen_ids.add(record.id)
+                if len(collected) >= limit:
+                    return collected
+        return collected
+
+    def _deterministic_memory_capture_response(
+        self,
+        *,
+        user_input: str,
+        state: _TurnState,
+        on_context: ContextCallback | None,
+    ) -> LLMResponse:
+        if on_context is not None:
+            packet = self._build_context_packet(
+                user_input=user_input,
+                state=state,
+                plan={"kind": "answer", "step_summary": "guardar recuerdo"},
+                tool_observations=[],
+            )
+            on_context(self._build_context_snapshot(packet))
+
+        memory_text = _extract_memory_capture_fact(user_input)
+        if self._memory_store is None:
+            text = (
+                "Ahora mismo no tengo una memoria persistente disponible para guardar "
+                "ese dato."
+            )
+        elif not memory_text:
+            text = (
+                "No he podido extraer qué quieres que recuerde. Si quieres, dímelo "
+                "en una frase más directa, por ejemplo: "
+                "`recuerda que estoy investigando grimorios y simbolismo`."
+            )
+        else:
+            record = self._memory_store.remember(
+                memory_text,
+                tags=["intereses", "perfil"],
+                source="agent",
+                memory_type="preference",
+                namespace="general",
+                metadata={"captured_from": "chat"},
+            )
+            text = (
+                "He guardado esto en memoria para tenerlo en cuenta a partir de ahora:\n"
+                f"- {record.content}"
+            )
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="memory-capture-handler",
         )
 
     def _deterministic_document_response(
@@ -2023,6 +2159,58 @@ def _looks_like_note_creation(text: str) -> bool:
 
 def _looks_like_note_source_request(text: str) -> bool:
     return _contains_any(text, NOTE_SOURCE_KEYWORDS)
+
+
+def _looks_like_self_memory_query(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(
+        phrase in normalized
+        for phrase in (
+            "que sabes ya de mis intereses",
+            "qué sabes ya de mis intereses",
+            "que sabes de mis intereses",
+            "qué sabes de mis intereses",
+            "que sabes de mi",
+            "qué sabes de mí",
+            "que recuerdas de mi",
+            "qué recuerdas de mí",
+            "que sabes ya de mi",
+            "qué sabes ya de mí",
+        )
+    )
+
+
+def _looks_like_memory_capture_query(text: str) -> bool:
+    normalized = _normalize_text(text)
+    return any(
+        normalized.startswith(prefix)
+        for prefix in (
+            "recuerda que ",
+            "recuerda esto sobre mi",
+            "recuerda esto sobre mí",
+            "guarda en memoria que ",
+            "apunta en memoria que ",
+        )
+    )
+
+
+def _extract_memory_capture_fact(text: str) -> str:
+    normalized = _normalize_text(text).strip()
+    original = text.strip()
+    prefixes = (
+        "recuerda que ",
+        "guarda en memoria que ",
+        "apunta en memoria que ",
+    )
+    for prefix in prefixes:
+        if normalized.startswith(prefix):
+            return original[len(prefix) :].strip(" .,:;")
+
+    for prefix in ("recuerda esto sobre mi", "recuerda esto sobre mí"):
+        if normalized.startswith(prefix):
+            return original[len(prefix) :].strip(" .,:;")
+
+    return original.strip(" .,:;")
 
 
 def _looks_like_direct_file_request(text: str, raw_text: str) -> bool:

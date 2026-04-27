@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from prompt_toolkit import PromptSession
@@ -132,6 +133,7 @@ class ReplApp:
         self._process_prompt(result.text)
 
     def _process_prompt(self, prompt: str) -> bool:
+        normalized_prompt = _normalize_user_prompt(prompt)
         chunks: list[str] = []
 
         def on_chunk(chunk: str) -> None:
@@ -147,14 +149,14 @@ class ReplApp:
             tool_callback = self._renderer.show_tool if show_tool_input else None
             if hasattr(self, "_runtime"):
                 response = self._runtime.send_prompt(
-                    prompt,
+                    normalized_prompt,
                     on_tool=tool_callback,
                     on_chunk=on_chunk,
                     on_context=context_callback,
                 )
             else:
                 response = self._agent.stream_final_response(
-                    prompt,
+                    normalized_prompt,
                     on_tool=tool_callback,
                     on_chunk=on_chunk,
                     on_context=context_callback,
@@ -180,3 +182,18 @@ class ReplApp:
 
     def _shutdown(self) -> None:
         self._runtime.shutdown()
+
+
+def _normalize_user_prompt(prompt: str) -> str:
+    stripped = prompt.strip()
+    patterns = (
+        r'^(?:adv|adv-archon)\s+"(?P<inner>.+)"$',
+        r"^(?:adv|adv-archon)\s+'(?P<inner>.+)'$",
+    )
+    for pattern in patterns:
+        match = re.match(pattern, stripped, flags=re.IGNORECASE)
+        if match:
+            inner = match.group("inner").strip()
+            if inner:
+                return inner
+    return stripped

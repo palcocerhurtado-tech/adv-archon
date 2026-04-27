@@ -65,6 +65,57 @@ class ExplodingKnowledgeStore:
         raise AssertionError("No debería consultar conocimiento para un adjunto directo.")
 
 
+class FakeMemoryStore:
+    def __init__(self, records=None, count: int | None = None) -> None:
+        self._records = list(records or [])
+        self._count = len(self._records) if count is None else count
+        self.saved_records: list[object] = []
+
+    def count(self) -> int:
+        return self._count
+
+    def context_matches(self, *_args, **_kwargs):
+        return list(self._records)
+
+    def find_matches(self, query_or_id: str, *, limit: int = 5):
+        query = str(query_or_id).lower()
+        matches = [
+            record
+            for record in self._records
+            if query in getattr(record, "content", "").lower()
+            or any(query in str(tag).lower() for tag in getattr(record, "tags", []))
+        ]
+        return matches[:limit]
+
+    def remember(
+        self,
+        content: str,
+        tags=None,
+        *,
+        source: str = "agent",
+        memory_type: str = "fact",
+        namespace: str = "general",
+        metadata=None,
+    ):
+        record = type(
+            "Record",
+            (),
+            {
+                "id": len(self.saved_records) + 1,
+                "content": content,
+                "tags": list(tags or []),
+                "source": source,
+                "memory_type": memory_type,
+                "namespace": namespace,
+                "metadata": metadata or {},
+            },
+        )()
+        self.saved_records.append(record)
+        self._records.append(record)
+        self._count += 1
+        return record
+
+
 def _build_agent(tmp_path: Path) -> Agent:
     return Agent(
         llm=FakeLLM(),  # type: ignore[arg-type]
@@ -823,6 +874,102 @@ def test_capability_query_returns_deterministic_overview_even_inside_repo(tmp_pa
     assert "revisar Gmail, Google Calendar y Drive" in result.reply
     assert "automatizar páginas web" in result.reply
     assert "`demo` con 31 cambios" in result.reply
+
+
+def test_self_memory_query_without_memories_returns_direct_answer(tmp_path: Path) -> None:
+    agent = Agent(
+        llm=FakeLLM(),  # type: ignore[arg-type]
+        system_prompt="system",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        memory_store=FakeMemoryStore(count=0),  # type: ignore[arg-type]
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    result = agent.run_turn("que sabes ya de mis intereses actuales ?")
+
+    assert "no tengo recuerdos persistentes claros" in result.reply.lower()
+    assert "revisando entradas" not in result.reply.lower()
+    assert "¿te gustaría explorar" not in result.reply.lower()
+
+
+def test_self_memory_query_with_memories_returns_memory_summary(tmp_path: Path) -> None:
+    records = [
+        type(
+            "Record",
+            (),
+            {
+                "content": "Estás investigando grimorios, simbolismo y textos esotéricos.",
+                "tags": ["intereses"],
+                "memory_type": "fact",
+                "namespace": "general",
+            },
+        )()
+    ]
+    agent = Agent(
+        llm=FakeLLM(),  # type: ignore[arg-type]
+        system_prompt="system",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        memory_store=FakeMemoryStore(records=records),  # type: ignore[arg-type]
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    result = agent.run_turn("que sabes ya de mis intereses actuales ?")
+
+    assert "esto es lo que tengo ahora mismo en memoria" in result.reply.lower()
+    assert "grimorios" in result.reply.lower()
+
+
+def test_memory_capture_query_saves_memory_and_confirms(tmp_path: Path) -> None:
+    store = FakeMemoryStore(count=0)
+    agent = Agent(
+        llm=FakeLLM(),  # type: ignore[arg-type]
+        system_prompt="system",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        memory_store=store,  # type: ignore[arg-type]
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    result = agent.run_turn(
+        "recuerda que ahora estoy investigando grimorios, simbolismo y textos esotéricos"
+    )
+
+    assert "he guardado esto en memoria" in result.reply.lower()
+    assert "grimorios" in result.reply.lower()
+    assert store.saved_records
+    assert "grimorios" in store.saved_records[0].content.lower()
+
+
+def test_self_memory_query_uses_persisted_fallback_matches(tmp_path: Path) -> None:
+    records = [
+        type(
+            "Record",
+            (),
+            {
+                "id": 1,
+                "content": "Ahora estás investigando grimorios, simbolismo y textos esotéricos.",
+                "tags": ["intereses", "perfil"],
+                "memory_type": "preference",
+                "namespace": "general",
+            },
+        )()
+    ]
+    store = FakeMemoryStore(records=records, count=1)
+    agent = Agent(
+        llm=FakeLLM(),  # type: ignore[arg-type]
+        system_prompt="system",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        memory_store=store,  # type: ignore[arg-type]
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    result = agent.run_turn("que sabes ya de mis intereses actuales ?")
+
+    assert "esto es lo que tengo ahora mismo en memoria" in result.reply.lower()
+    assert "grimorios" in result.reply.lower()
 
 
 def test_force_local_private_context_for_documents_query(tmp_path: Path) -> None:

@@ -92,14 +92,33 @@ class GraphifyTools:
         )
 
     def graphify_run(self, path: str | None = None) -> ToolResult:
-        """Build or rebuild the Graphify knowledge graph for a project directory."""
+        """Re-extract and update the Graphify graph for a project (no LLM needed).
+        Note: the initial graph must be built once via Claude Code's /graphify . skill.
+        """
         target = Path(path).expanduser().resolve() if path else self._default_project_path
+        graph_json = target / self._output_dir / "graph.json"
+        if not graph_json.exists():
+            return ToolResult(
+                name="graphify_run",
+                payload={
+                    "project_path": str(target),
+                    "graph_json": str(graph_json),
+                    "graph_exists": False,
+                    "exit_code": 1,
+                    "stdout": "",
+                    "stderr": (
+                        "No existe graph.json en este proyecto. "
+                        "Construye el grafo inicial abriendo Claude Code en la carpeta "
+                        f"'{target}' y ejecutando: /graphify ."
+                    ),
+                    "timed_out": False,
+                },
+            )
         result = self._run(
-            ["graphify", str(target)],
+            ["graphify", "update", str(target)],
             cwd=target,
             timeout=120,
         )
-        graph_json = target / self._output_dir / "graph.json"
         return ToolResult(
             name="graphify_run",
             payload={

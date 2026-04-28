@@ -31,6 +31,7 @@ from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
 from adv_archon.tools.web import WebTools
+from adv_archon.tools.graphify_tools import GraphifyTools, build_graphify_tool_specs
 from adv_archon.tools.web_library_tools import (
     WebLibraryTools,
     build_web_library_tool_specs,
@@ -207,6 +208,11 @@ class ArchonRuntime:
             max_concurrency=config.google.max_concurrency,
             logger=self.logger,
         )
+        self.graphify_tools = GraphifyTools(
+            default_project_path=project_root,
+            output_dir=config.graphify.output_dir,
+            timeout_seconds=config.graphify.timeout_seconds,
+        )
         self.agent = Agent(
             llm=llm,
             system_prompt=system_prompt,
@@ -293,6 +299,7 @@ class ArchonRuntime:
             on_profile_changed=self.apply_profile,
             tts=self.tts,
             stt=self.stt,
+            graphify_tools=self.graphify_tools,
         )
 
     def apply_profile(self, profile_name: str) -> None:
@@ -491,4 +498,14 @@ class ArchonRuntime:
                     fn=definition["fn"],
                 )
             )
+        if self.config.graphify.enabled:
+            for definition in build_graphify_tool_specs(self.graphify_tools):
+                specs.append(
+                    ToolSpec(
+                        name=definition["name"],
+                        description=definition["description"],
+                        schema=definition["schema"],
+                        fn=definition["fn"],
+                    )
+                )
         return specs

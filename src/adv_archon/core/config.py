@@ -240,6 +240,14 @@ class ResearchConfig:
 
 
 @dataclass(slots=True)
+class GraphifyConfig:
+    enabled: bool = True
+    output_dir: str = "graphify-out"
+    auto_query: bool = True
+    timeout_seconds: int = 60
+
+
+@dataclass(slots=True)
 class BenchmarkConfig:
     default_suite: str = "archon-internal"
     default_benchmark: str = "real-cases"
@@ -268,6 +276,7 @@ class AppConfig:
     google: GoogleConfig
     research: ResearchConfig
     benchmark: BenchmarkConfig
+    graphify: GraphifyConfig
     profiles: ProfilesConfig
     system_prompt_path: Path
 
@@ -559,6 +568,12 @@ def load_app_config(
         ),
         max_cases=int(_lookup(data, "benchmark", "max_cases", default=12)),
     )
+    graphify = GraphifyConfig(
+        enabled=bool(_lookup(data, "graphify", "enabled", default=True)),
+        output_dir=str(_lookup(data, "graphify", "output_dir", default="graphify-out")),
+        auto_query=bool(_lookup(data, "graphify", "auto_query", default=True)),
+        timeout_seconds=int(_lookup(data, "graphify", "timeout_seconds", default=60)),
+    )
     profiles_data = _lookup(data, "profiles", default={})
     if not isinstance(profiles_data, dict):
         profiles_data = {}
@@ -603,6 +618,7 @@ def load_app_config(
         google=google,
         research=research,
         benchmark=benchmark,
+        graphify=graphify,
         profiles=profiles,
         system_prompt_path=system_prompt_path,
     )

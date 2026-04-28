@@ -15,6 +15,7 @@ from adv_archon.core.memory import MemoryRecord, MemoryStore
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.core.tasks import TaskStore
 from adv_archon.tools.google_workspace import GoogleWorkspaceTools
+from adv_archon.tools.graphify_tools import GraphifyTools, format_graphify_result
 from adv_archon.tools.guarded_files import GuardedFileTools
 from adv_archon.tools.knowledge_tools import KnowledgeTools
 from adv_archon.tools.personal import PersonalTools
@@ -60,6 +61,7 @@ class CommandServices:
     on_profile_changed: Callable[[str], None]
     tts: MacTextToSpeech
     stt: WhisperSpeechToText
+    graphify_tools: GraphifyTools
 
 
 def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
@@ -343,6 +345,81 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.renderer.show_info(_format_log_entries(entries))
         return CommandResult(handled=True)
 
+    if command == "/graphify":
+        parts = argument.split(None, 1)
+        subcommand = parts[0] if parts else "status"
+        rest = parts[1] if len(parts) > 1 else ""
+
+        if subcommand == "status":
+            result = services.graphify_tools.graphify_status(rest or None)
+            services.logger.log("slash_graphify_status", path=rest or ".")
+            services.renderer.show_info(_format_graphify_status(result.payload))
+            return CommandResult(handled=True)
+
+        if subcommand == "run":
+            services.renderer.show_info("Construyendo grafo Graphify…")
+            result = services.graphify_tools.graphify_run(rest or None)
+            services.logger.log(
+                "slash_graphify_run",
+                path=result.payload.get("project_path"),
+                exit_code=result.payload.get("exit_code"),
+            )
+            services.renderer.show_info(format_graphify_result(result.payload))
+            return CommandResult(handled=True)
+
+        if subcommand == "update":
+            services.renderer.show_info("Actualizando grafo Graphify…")
+            result = services.graphify_tools.graphify_update(rest or None)
+            services.logger.log(
+                "slash_graphify_update",
+                path=result.payload.get("project_path"),
+                exit_code=result.payload.get("exit_code"),
+            )
+            services.renderer.show_info(format_graphify_result(result.payload))
+            return CommandResult(handled=True)
+
+        if subcommand == "query":
+            if not rest:
+                services.renderer.show_error("Uso: /graphify query <pregunta>")
+                return CommandResult(handled=True)
+            result = services.graphify_tools.graphify_query(rest)
+            services.logger.log("slash_graphify_query", query=rest)
+            services.renderer.show_info(format_graphify_result(result.payload))
+            return CommandResult(handled=True)
+
+        if subcommand == "path":
+            tokens = rest.split(None, 1)
+            if len(tokens) < 2:
+                services.renderer.show_error("Uso: /graphify path <origen> <destino>")
+                return CommandResult(handled=True)
+            result = services.graphify_tools.graphify_path(tokens[0], tokens[1])
+            services.logger.log("slash_graphify_path", source=tokens[0], target=tokens[1])
+            services.renderer.show_info(format_graphify_result(result.payload))
+            return CommandResult(handled=True)
+
+        if subcommand == "explain":
+            if not rest:
+                services.renderer.show_error("Uso: /graphify explain <concepto>")
+                return CommandResult(handled=True)
+            result = services.graphify_tools.graphify_explain(rest)
+            services.logger.log("slash_graphify_explain", concept=rest)
+            services.renderer.show_info(format_graphify_result(result.payload))
+            return CommandResult(handled=True)
+
+        if subcommand == "add":
+            if not rest:
+                services.renderer.show_error("Uso: /graphify add <url>")
+                return CommandResult(handled=True)
+            result = services.graphify_tools.graphify_add(rest)
+            services.logger.log("slash_graphify_add", url=rest)
+            services.renderer.show_info(format_graphify_result(result.payload))
+            return CommandResult(handled=True)
+
+        services.renderer.show_error(
+            "Uso: /graphify [status|run|update|query <q>|path <A> <B>|explain <c>|add <url>]"
+        )
+        return CommandResult(handled=True)
+
     services.renderer.show_error(f"Comando no reconocido: {command}")
     return CommandResult(handled=True)
 
@@ -450,3 +527,23 @@ def _parse_log_limit(argument: str) -> int:
         return max(1, int(argument))
     except ValueError:
         return 10
+
+
+def _format_graphify_status(payload: dict[str, object]) -> str:
+    installed = payload.get("graphify_installed", False)
+    graph_exists = payload.get("graph_json_exists", False)
+    project_path = payload.get("project_path", "")
+    graph_dir = payload.get("graph_dir", "")
+    size_bytes = int(payload.get("graph_json_size_bytes", 0))
+    hint = payload.get("install_hint")
+    lines = [
+        f"Graphify instalado: {'sí' if installed else 'no'}",
+        f"Proyecto: {project_path}",
+        f"Grafo en: {graph_dir}",
+        f"graph.json: {'✓' if graph_exists else '✗'}" + (f" ({size_bytes:,} bytes)" if graph_exists else ""),
+    ]
+    if hint:
+        lines.append(f"Aviso: {hint}")
+    if not graph_exists and installed:
+        lines.append("Ejecuta /graphify run para construir el grafo.")
+    return "\n".join(lines)

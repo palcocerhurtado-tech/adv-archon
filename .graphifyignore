@@ -1,0 +1,57 @@
+# Graphify ignore patterns
+# Dependencies
+node_modules/
+dist/
+build/
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+.eggs/
+*.egg-info/
+.tox/
+
+# Generated / output
+graphify-out/
+*.generated.py
+*.generated.ts
+*.min.js
+*.min.css
+
+# Version control
+.git/
+.hg/
+.svn/
+
+# IDE / editors
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Compiled / binary
+*.so
+*.dylib
+*.dll
+*.exe
+*.whl
+
+# Secrets / credentials
+.env
+.env.*
+*.pem
+*.key
+google-token.json
+google-client-secret.json
+
+# Large data / media
+*.sqlite
+*.db
+*.sqlite3
+uv.lock

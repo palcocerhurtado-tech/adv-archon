@@ -38,6 +38,7 @@ dependencies = [
   "sentence-transformers>=4.1.0",
   "structlog>=25.3.0",
   "trafilatura>=2.0.0",
+  "graphifyy>=0.1.0",
 ]
 
 [project.optional-dependencies]

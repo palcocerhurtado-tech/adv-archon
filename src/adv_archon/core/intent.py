@@ -112,6 +112,12 @@ ASSISTANT_KEYWORDS = {
     "triage",
     "meeting prep",
     "reunión",
+    "briefing ejecutivo",
+    "executive brief",
+    "prepárame el día",
+    "preparame el dia",
+    "qué debería hacer hoy",
+    "que deberia hacer hoy",
 }
 KNOWLEDGE_ASSISTANT_KEYWORDS = {
     "nota",

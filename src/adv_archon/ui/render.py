@@ -64,6 +64,7 @@ class Renderer:
         text.append("/help\n")
         text.append("/exit\n")
         text.append("/daily [brief|raw]\n")
+        text.append("/briefing [query]\n")
         text.append("/mode <cloud|local>\n")
         text.append("/profile [name|status]\n")
         text.append("/auto [on|off|status]\n")

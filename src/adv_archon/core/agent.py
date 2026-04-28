@@ -16,8 +16,13 @@ from adv_archon.core.evals import (
     evaluate_knowledge_retrieval,
     summarize_response_confidence,
 )
+from adv_archon.core.executive_brief import build_executive_brief
 from adv_archon.core.gmail_triage import build_reply_draft, triage_mailbox
-from adv_archon.core.intent import IntentAnalysis, IntentRouter, looks_like_capability_query
+from adv_archon.core.intent import (
+    IntentAnalysis,
+    IntentRouter,
+    looks_like_capability_query,
+)
 from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeSearchResult, KnowledgeStore
 from adv_archon.core.llm import LLMRouter, TaskKind
 from adv_archon.core.llm_types import LLMMessage, LLMResponse, LLMUsage
@@ -184,6 +189,19 @@ WEB_LIBRARY_KEYWORDS = {
     "contexto externo",
     "fuentes guardadas",
     "research library",
+}
+EXECUTIVE_BRIEF_KEYWORDS = {
+    "briefing ejecutivo",
+    "executive brief",
+    "prepárame el día",
+    "prepárame el dia",
+    "preparame el día",
+    "preparame el dia",
+    "qué debería hacer hoy",
+    "que deberia hacer hoy",
+    "prioridades de hoy",
+    "plan del día",
+    "plan del dia",
 }
 MEETING_PREP_KEYWORDS = {
     "meeting prep",
@@ -844,6 +862,7 @@ class Agent:
         wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
         wants_drive = _contains_any(normalized, DRIVE_KEYWORDS)
         wants_web_library = _contains_any(normalized, WEB_LIBRARY_KEYWORDS)
+        wants_executive_brief = _looks_like_executive_brief_request(normalized)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
         wants_web = _contains_any(normalized, WEB_QUERY_KEYWORDS)
@@ -856,6 +875,84 @@ class Agent:
         wants_web_document_compare = _looks_like_web_grounded_document_compare_request(
             normalized
         )
+
+        if wants_executive_brief:
+            window = _infer_calendar_window(
+                normalized,
+                now=state.runtime_context.now if state.runtime_context is not None else None,
+            )
+            if "calendar_upcoming" in self._tools and "calendar_upcoming" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "calendar_upcoming",
+                    "arguments": {
+                        "days": max(1, window["days"]),
+                        "limit": 8,
+                        "start_offset_days": window["start_offset_days"],
+                    },
+                    "step_summary": "revisar agenda local",
+                }
+            if "gcal_list_events" in self._tools and "gcal_list_events" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "gcal_list_events",
+                    "arguments": {
+                        "days": max(1, window["days"]),
+                        "max_results": 8,
+                        "start_offset_days": window["start_offset_days"],
+                    },
+                    "step_summary": "revisar agenda de google",
+                }
+            if "reminders_list" in self._tools and "reminders_list" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "reminders_list",
+                    "arguments": {"limit": 8},
+                    "step_summary": "revisar recordatorios",
+                }
+            if "task_list" in self._tools and "task_list" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "task_list",
+                    "arguments": {"status": "open", "limit": 8},
+                    "step_summary": "revisar tareas persistentes",
+                }
+            if "gmail_search" in self._tools and "gmail_search" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "gmail_search",
+                    "arguments": {
+                        "query": "in:inbox category:primary newer_than:14d",
+                        "max_results": 10,
+                    },
+                    "step_summary": "revisar inbox",
+                }
+            executive_query = self._infer_executive_query(user_input, state)
+            if executive_query and "notes_search" in self._tools and "notes_search" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "notes_search",
+                    "arguments": {"query": executive_query, "limit": 5},
+                    "step_summary": "buscar notas relevantes",
+                }
+            if executive_query and "drive_search" in self._tools and "drive_search" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "drive_search",
+                    "arguments": {"query": executive_query, "max_results": 5},
+                    "step_summary": "buscar documentos relevantes",
+                }
+            if (
+                executive_query
+                and "knowledge_search" in self._tools
+                and "knowledge_search" not in executed
+            ):
+                return {
+                    "kind": "tool",
+                    "tool_name": "knowledge_search",
+                    "arguments": {"query": executive_query, "limit": 5},
+                    "step_summary": "buscar contexto local",
+                }
 
         if wants_meeting_prep:
             window = _infer_calendar_window(
@@ -1548,6 +1645,10 @@ class Agent:
             sections.append("ayudarte con calendario, recordatorios, notas, contactos y tareas")
         if {"gmail_search", "gcal_list_events", "drive_search"} & tool_names:
             sections.append("revisar Gmail, Google Calendar y Drive")
+        if {"calendar_upcoming", "gcal_list_events", "gmail_search", "task_list"} & tool_names:
+            sections.append(
+                "darte un briefing ejecutivo del día con agenda, inbox y prioridades"
+            )
         if {"gcal_list_events", "gmail_search", "drive_search", "notes_search"} & tool_names:
             sections.append("prepararte reuniones con agenda, correos, Drive, notas y contexto")
         if {"gmail_search", "gmail_read_thread", "gmail_draft"} & tool_names:
@@ -1609,6 +1710,7 @@ class Agent:
             "- `resume este repo y dime los riesgos principales`\n"
             "- `que tengo manana en el calendario`\n"
             "- `busca en mis notas todo lo relacionado con Acme`\n"
+            "- `dame un briefing ejecutivo del día`\n"
             "- `prepárame la reunión de mañana con contexto`\n"
             "- `hazme triage del gmail y dime qué responder hoy`\n"
             "- `actúa como study partner sobre este PDF`\n"
@@ -1635,6 +1737,9 @@ class Agent:
         if _looks_like_meeting_prep_request(normalized):
             return self._render_meeting_prep_response(state=state, user_input=user_input)
 
+        if _looks_like_executive_brief_request(normalized):
+            return self._render_executive_brief_response(state=state)
+
         if _looks_like_gmail_triage_request(normalized):
             return self._render_gmail_triage_response(user_input=user_input)
 
@@ -1642,6 +1747,54 @@ class Agent:
             return self._render_study_partner_response(user_input=user_input)
 
         return None
+
+    def _render_executive_brief_response(self, *, state: _TurnState) -> LLMResponse | None:
+        calendar_payload = self._latest_tool_payload("calendar_upcoming") or {}
+        gcal_payload = self._latest_tool_payload("gcal_list_events") or {}
+        reminders_payload = self._latest_tool_payload("reminders_list") or {}
+        tasks_payload = self._latest_tool_payload("task_list") or {}
+        gmail_payload = self._latest_tool_payload("gmail_search") or {}
+        notes_payload = self._latest_tool_payload("notes_search") or {}
+        drive_payload = self._latest_tool_payload("drive_search") or {}
+        knowledge_payload = self._latest_tool_payload("knowledge_search") or {}
+
+        if not any(
+            isinstance(payload, dict) and payload
+            for payload in (
+                calendar_payload,
+                gcal_payload,
+                reminders_payload,
+                tasks_payload,
+                gmail_payload,
+                notes_payload,
+                drive_payload,
+                knowledge_payload,
+            )
+        ):
+            return None
+
+        brief = build_executive_brief(
+            profile=state.intent.profile,
+            project_name=(
+                state.runtime_context.working_set.project_name
+                if state.runtime_context is not None
+                else None
+            ),
+            local_calendar_events=list(calendar_payload.get("events") or []),
+            google_calendar_events=list(gcal_payload.get("events") or []),
+            reminders=list(reminders_payload.get("reminders") or []),
+            tasks=list(tasks_payload.get("tasks") or []),
+            gmail_messages=list(gmail_payload.get("messages") or []),
+            drive_files=list(drive_payload.get("files") or []),
+            notes=list(notes_payload.get("notes") or []),
+            knowledge_hits=list(knowledge_payload.get("results") or []),
+        )
+        return LLMResponse(
+            text=brief.render(),
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="executive-brief-handler",
+        )
 
     def _render_meeting_prep_response(
         self,
@@ -2378,6 +2531,16 @@ class Agent:
 
         return _extract_focus_query(_normalize_text(user_input))
 
+    def _infer_executive_query(self, user_input: str, state: _TurnState) -> str:
+        explicit = _extract_focus_query(_normalize_text(user_input))
+        if explicit:
+            return explicit
+        if state.runtime_context is not None:
+            project_name = str(state.runtime_context.working_set.project_name or "").strip()
+            if project_name and project_name not in {"home", "pabloalcocer"}:
+                return project_name
+        return "prioridades"
+
     def _build_gmail_draft_arguments_from_latest_thread(self) -> dict[str, Any] | None:
         payload = self._latest_tool_payload("gmail_read_thread")
         if not isinstance(payload, dict):
@@ -2691,6 +2854,10 @@ def _looks_like_meeting_prep_request(text: str) -> bool:
         _contains_any(text, {"reunion", "reunión", "meeting"})
         and _contains_any(text, {"prepara", "prepárame", "briefing", "contexto"})
     )
+
+
+def _looks_like_executive_brief_request(text: str) -> bool:
+    return _contains_any(text, EXECUTIVE_BRIEF_KEYWORDS)
 
 
 def _looks_like_gmail_triage_request(text: str) -> bool:

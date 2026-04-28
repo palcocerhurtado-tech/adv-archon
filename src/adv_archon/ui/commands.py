@@ -105,6 +105,15 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.renderer.show_error("Uso: /daily [brief|raw]")
         return CommandResult(handled=True)
 
+    if command == "/briefing":
+        prompt = (
+            f"dame un briefing ejecutivo {argument}"
+            if argument
+            else "dame un briefing ejecutivo del día con agenda, inbox y prioridades"
+        )
+        services.logger.log("slash_briefing", prompt=prompt)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
     if command == "/mode":
         if argument not in {"cloud", "local"}:
             services.renderer.show_error("Uso: /mode <cloud|local>")

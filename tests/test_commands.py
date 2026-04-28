@@ -277,3 +277,15 @@ def test_daily_command_rejects_invalid_mode() -> None:
 
     assert result.handled is True
     assert services.renderer.errors[-1] == "Uso: /daily [brief|raw]"
+
+
+def test_briefing_command_injects_executive_prompt() -> None:
+    services = build_services()
+
+    result = handle_command("/briefing", services=services)
+
+    assert result.handled is True
+    assert (
+        result.injected_prompt
+        == "dame un briefing ejecutivo del día con agenda, inbox y prioridades"
+    )

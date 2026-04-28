@@ -1491,6 +1491,64 @@ def test_specialized_study_partner_response_uses_latest_document(tmp_path: Path)
     assert "Preguntas de repaso" in response.text
 
 
+def test_specialized_executive_brief_response_combines_calendar_and_inbox(
+    tmp_path: Path,
+) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+    agent._session.append(  # type: ignore[attr-defined]
+        SessionMessage(
+            role="tool",
+            name="calendar_upcoming",
+            content=json.dumps(
+                {
+                    "events": [
+                        {
+                            "summary": "Reunión ACME",
+                            "start": "2026-04-29T10:00:00+02:00",
+                            "end": "2026-04-29T11:00:00+02:00",
+                            "description": "Revisión de propuesta",
+                        }
+                    ]
+                }
+            ),
+        )
+    )
+    agent._session.append(  # type: ignore[attr-defined]
+        SessionMessage(
+            role="tool",
+            name="gmail_search",
+            content=json.dumps(
+                {
+                    "messages": [
+                        {
+                            "id": "m-1",
+                            "thread_id": "t-1",
+                            "from": "ana@acme.com",
+                            "subject": "Contrato urgente",
+                            "snippet": "Necesito respuesta hoy",
+                            "date": "2026-04-28T09:00:00+02:00",
+                            "label_ids": ["UNREAD"],
+                        }
+                    ]
+                }
+            ),
+        )
+    )
+
+    response = agent._specialized_final_response(
+        user_input="dame un briefing ejecutivo del día",
+        state=state,
+        tool_observations=[],
+    )
+
+    assert response is not None
+    assert "ADV ARCHON executive brief" in response.text
+    assert "Inbox:" in response.text
+    assert "Próxima reunión:" in response.text
+    assert "Contrato urgente" in response.text
+
+
 def test_parse_plan_repairs_argument_types_from_model_text(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
 

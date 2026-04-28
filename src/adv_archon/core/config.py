@@ -102,12 +102,22 @@ class LLMConfig:
     mode: str = "cloud"
     gemini_model: str = "gemini-2.5-flash"
     ollama_model: str = "llama3.1:8b"
+    fast_local_model: str | None = None
+    planner_local_model: str | None = None
+    document_local_model: str | None = None
+    coding_local_model: str | None = None
+    fast_cloud_model: str | None = None
+    planner_cloud_model: str | None = None
+    document_cloud_model: str | None = None
+    coding_cloud_model: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: int = 180
     gemini_api_key: str | None = None
     temperature: float = 0.2
     redact_cloud_pii: bool = False
     force_local_private_context: bool = True
+    task_routing_enabled: bool = True
+    tool_call_repair: bool = True
 
 
 @dataclass(slots=True)
@@ -156,6 +166,18 @@ class BrowserConfig:
     headless: bool = True
     browser_name: str = "chromium"
     default_timeout_ms: int = 10000
+    rate_limit_interval_seconds: float = 0.2
+    retry_attempts: int = 2
+    retry_base_delay_seconds: float = 0.6
+    max_concurrency: int = 1
+
+
+@dataclass(slots=True)
+class WebConfig:
+    rate_limit_interval_seconds: float = 0.2
+    retry_attempts: int = 3
+    retry_base_delay_seconds: float = 0.6
+    max_concurrency: int = 2
 
 
 @dataclass(slots=True)
@@ -189,6 +211,23 @@ class GoogleConfig:
     default_calendar_id: str = "primary"
     gmail_default_max_results: int = 10
     drive_default_max_results: int = 10
+    rate_limit_interval_seconds: float = 0.25
+    retry_attempts: int = 3
+    retry_base_delay_seconds: float = 0.8
+    max_concurrency: int = 2
+
+
+@dataclass(slots=True)
+class FileAccessConfig:
+    allowed_roots: tuple[str, ...] = ("~",)
+    sensitive_roots: tuple[str, ...] = (
+        "/System",
+        "/Library",
+        "/Applications",
+        "/private",
+        "/usr",
+    )
+    allow_sensitive_reads: bool = False
 
 
 @dataclass(slots=True)
@@ -220,9 +259,11 @@ class AppConfig:
     ui: UIConfig
     memory: MemoryConfig
     knowledge: KnowledgeConfig
+    files: FileAccessConfig
     shell: ShellConfig
     tasks: TasksConfig
     browser: BrowserConfig
+    web: WebConfig
     voice: VoiceConfig
     google: GoogleConfig
     research: ResearchConfig
@@ -273,6 +314,34 @@ def load_app_config(
         or _lookup(data, "llm", "gemini_model", default="gemini-2.5-flash"),
         ollama_model=os.getenv("ADV_ARCHON_DEFAULT_OLLAMA_MODEL")
         or _lookup(data, "llm", "ollama_model", default="llama3.1:8b"),
+        fast_local_model=str(_lookup(data, "llm", "fast_local_model", default="")).strip()
+        or None,
+        planner_local_model=str(
+            _lookup(data, "llm", "planner_local_model", default="")
+        ).strip()
+        or None,
+        document_local_model=str(
+            _lookup(data, "llm", "document_local_model", default="")
+        ).strip()
+        or None,
+        coding_local_model=str(
+            _lookup(data, "llm", "coding_local_model", default="")
+        ).strip()
+        or None,
+        fast_cloud_model=str(_lookup(data, "llm", "fast_cloud_model", default="")).strip()
+        or None,
+        planner_cloud_model=str(
+            _lookup(data, "llm", "planner_cloud_model", default="")
+        ).strip()
+        or None,
+        document_cloud_model=str(
+            _lookup(data, "llm", "document_cloud_model", default="")
+        ).strip()
+        or None,
+        coding_cloud_model=str(
+            _lookup(data, "llm", "coding_cloud_model", default="")
+        ).strip()
+        or None,
         ollama_base_url=os.getenv("ADV_ARCHON_OLLAMA_BASE_URL")
         or _lookup(data, "llm", "ollama_base_url", default="http://127.0.0.1:11434"),
         ollama_timeout_seconds=int(
@@ -285,6 +354,10 @@ def load_app_config(
         force_local_private_context=bool(
             _lookup(data, "privacy", "force_local_private_context", default=True)
         ),
+        task_routing_enabled=bool(
+            _lookup(data, "llm", "task_routing_enabled", default=True)
+        ),
+        tool_call_repair=bool(_lookup(data, "llm", "tool_call_repair", default=True)),
     )
 
     ui = UIConfig(
@@ -337,6 +410,24 @@ def load_app_config(
             _lookup(data, "knowledge", "background_interval_minutes", default=60)
         ),
     )
+    raw_allowed_roots = _lookup(data, "files", "allowed_roots", default=["~"])
+    if not isinstance(raw_allowed_roots, list):
+        raw_allowed_roots = ["~"]
+    raw_sensitive_roots = _lookup(
+        data,
+        "files",
+        "sensitive_roots",
+        default=["/System", "/Library", "/Applications", "/private", "/usr"],
+    )
+    if not isinstance(raw_sensitive_roots, list):
+        raw_sensitive_roots = ["/System", "/Library", "/Applications", "/private", "/usr"]
+    files = FileAccessConfig(
+        allowed_roots=tuple(str(item) for item in raw_allowed_roots),
+        sensitive_roots=tuple(str(item) for item in raw_sensitive_roots),
+        allow_sensitive_reads=bool(
+            _lookup(data, "files", "allow_sensitive_reads", default=False)
+        ),
+    )
     whitelist = _lookup(
         data,
         "shell",
@@ -368,6 +459,24 @@ def load_app_config(
         default_timeout_ms=int(
             _lookup(data, "browser", "default_timeout_ms", default=10000)
         ),
+        rate_limit_interval_seconds=float(
+            _lookup(data, "browser", "rate_limit_interval_seconds", default=0.2)
+        ),
+        retry_attempts=int(_lookup(data, "browser", "retry_attempts", default=2)),
+        retry_base_delay_seconds=float(
+            _lookup(data, "browser", "retry_base_delay_seconds", default=0.6)
+        ),
+        max_concurrency=int(_lookup(data, "browser", "max_concurrency", default=1)),
+    )
+    web = WebConfig(
+        rate_limit_interval_seconds=float(
+            _lookup(data, "web", "rate_limit_interval_seconds", default=0.2)
+        ),
+        retry_attempts=int(_lookup(data, "web", "retry_attempts", default=3)),
+        retry_base_delay_seconds=float(
+            _lookup(data, "web", "retry_base_delay_seconds", default=0.6)
+        ),
+        max_concurrency=int(_lookup(data, "web", "max_concurrency", default=2)),
     )
     voice = VoiceConfig(
         enabled=bool(_lookup(data, "voice", "enabled", default=False)),
@@ -418,6 +527,14 @@ def load_app_config(
         drive_default_max_results=int(
             _lookup(data, "google", "drive_default_max_results", default=10)
         ),
+        rate_limit_interval_seconds=float(
+            _lookup(data, "google", "rate_limit_interval_seconds", default=0.25)
+        ),
+        retry_attempts=int(_lookup(data, "google", "retry_attempts", default=3)),
+        retry_base_delay_seconds=float(
+            _lookup(data, "google", "retry_base_delay_seconds", default=0.8)
+        ),
+        max_concurrency=int(_lookup(data, "google", "max_concurrency", default=2)),
     )
     seed_queries = _lookup(data, "research", "seed_queries", default=[])
     if not isinstance(seed_queries, list):
@@ -477,9 +594,11 @@ def load_app_config(
         ui=ui,
         memory=memory,
         knowledge=knowledge,
+        files=files,
         shell=shell,
         tasks=tasks,
         browser=browser,
+        web=web,
         voice=voice,
         google=google,
         research=research,

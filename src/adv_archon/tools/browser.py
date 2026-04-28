@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from adv_archon.core.logging import AppLogger
+from adv_archon.core.resilience import ConcurrencyPolicy, ResilientExecutor, RetryPolicy
 
 ConfirmCallback = Callable[[str], bool]
 
@@ -26,6 +27,10 @@ class BrowserTools:
         browser_name: str = "chromium",
         headless: bool = True,
         default_timeout_ms: int = 10000,
+        rate_limit_interval_seconds: float = 0.2,
+        retry_attempts: int = 2,
+        retry_base_delay_seconds: float = 0.6,
+        max_concurrency: int = 1,
         confirm: ConfirmCallback | None = None,
         logger: AppLogger | None = None,
     ) -> None:
@@ -39,68 +44,93 @@ class BrowserTools:
         self._playwright: Any | None = None
         self._context: Any | None = None
         self._page: Any | None = None
+        self._executor = ResilientExecutor(
+            retry_policy=RetryPolicy(
+                attempts=retry_attempts,
+                base_delay_seconds=retry_base_delay_seconds,
+            ),
+            concurrency_policy=ConcurrencyPolicy(
+                max_concurrency=max_concurrency,
+                min_interval_seconds=rate_limit_interval_seconds,
+            ),
+        )
 
     def browser_open(self, url: str) -> ToolResult:
-        page = self._ensure_page()
-        page.goto(url, wait_until="domcontentloaded")
-        payload = self._snapshot(page)
-        self._log("browser_open", url=url)
-        return ToolResult(name="browser_open", payload=payload)
+        def _run() -> ToolResult:
+            page = self._ensure_page()
+            page.goto(url, wait_until="domcontentloaded")
+            payload = self._snapshot(page)
+            self._log("browser_open", url=url)
+            return ToolResult(name="browser_open", payload=payload)
+
+        return self._executor.run(_run)
 
     def browser_click(self, selector: str) -> ToolResult:
-        self._confirm_action(
-            "Se va a hacer click en el navegador gestionado.\n"
-            f"Selector: {selector}\n"
-            "¿Confirmas?"
-        )
-        page = self._ensure_page()
-        page.locator(selector).first.click()
-        payload = self._snapshot(page)
-        self._log("browser_click", selector=selector)
-        return ToolResult(name="browser_click", payload=payload)
+        def _run() -> ToolResult:
+            self._confirm_action(
+                "Se va a hacer click en el navegador gestionado.\n"
+                f"Selector: {selector}\n"
+                "¿Confirmas?"
+            )
+            page = self._ensure_page()
+            page.locator(selector).first.click()
+            payload = self._snapshot(page)
+            self._log("browser_click", selector=selector)
+            return ToolResult(name="browser_click", payload=payload)
+
+        return self._executor.run(_run)
 
     def browser_fill(self, selector: str, text: str, submit: bool = False) -> ToolResult:
-        preview = text if len(text) <= 120 else f"{text[:117]}..."
-        action = "rellenar y enviar" if submit else "rellenar"
-        self._confirm_action(
-            "Se va a interactuar con el navegador gestionado.\n"
-            f"Accion: {action}\n"
-            f"Selector: {selector}\n"
-            f"Texto: {preview}\n"
-            "¿Confirmas?"
-        )
-        page = self._ensure_page()
-        locator = page.locator(selector).first
-        locator.fill(text)
-        if submit:
-            locator.press("Enter")
-        payload = self._snapshot(page)
-        self._log("browser_fill", selector=selector, chars=len(text), submit=submit)
-        return ToolResult(name="browser_fill", payload=payload)
+        def _run() -> ToolResult:
+            preview = text if len(text) <= 120 else f"{text[:117]}..."
+            action = "rellenar y enviar" if submit else "rellenar"
+            self._confirm_action(
+                "Se va a interactuar con el navegador gestionado.\n"
+                f"Accion: {action}\n"
+                f"Selector: {selector}\n"
+                f"Texto: {preview}\n"
+                "¿Confirmas?"
+            )
+            page = self._ensure_page()
+            locator = page.locator(selector).first
+            locator.fill(text)
+            if submit:
+                locator.press("Enter")
+            payload = self._snapshot(page)
+            self._log("browser_fill", selector=selector, chars=len(text), submit=submit)
+            return ToolResult(name="browser_fill", payload=payload)
+
+        return self._executor.run(_run)
 
     def browser_extract(self, selector: str | None = None) -> ToolResult:
-        page = self._ensure_page()
-        if selector:
-            text = page.locator(selector).first.inner_text()
-        else:
-            text = page.locator("body").inner_text()
-        payload = self._snapshot(page)
-        payload["text"] = text[:4000]
-        self._log("browser_extract", selector=selector or "body")
-        return ToolResult(name="browser_extract", payload=payload)
+        def _run() -> ToolResult:
+            page = self._ensure_page()
+            if selector:
+                text = page.locator(selector).first.inner_text()
+            else:
+                text = page.locator("body").inner_text()
+            payload = self._snapshot(page)
+            payload["text"] = text[:4000]
+            self._log("browser_extract", selector=selector or "body")
+            return ToolResult(name="browser_extract", payload=payload)
+
+        return self._executor.run(_run)
 
     def browser_screenshot(self, path: str | None = None) -> ToolResult:
-        page = self._ensure_page()
-        if path is None:
-            screenshot_path = Path(tempfile.gettempdir()) / "adv-archon-browser.png"
-        else:
-            screenshot_path = Path(path).expanduser().resolve()
-        screenshot_path.parent.mkdir(parents=True, exist_ok=True)
-        page.screenshot(path=str(screenshot_path), full_page=True)
-        payload = self._snapshot(page)
-        payload["path"] = str(screenshot_path)
-        self._log("browser_screenshot", path=str(screenshot_path))
-        return ToolResult(name="browser_screenshot", payload=payload)
+        def _run() -> ToolResult:
+            page = self._ensure_page()
+            if path is None:
+                screenshot_path = Path(tempfile.gettempdir()) / "adv-archon-browser.png"
+            else:
+                screenshot_path = Path(path).expanduser().resolve()
+            screenshot_path.parent.mkdir(parents=True, exist_ok=True)
+            page.screenshot(path=str(screenshot_path), full_page=True)
+            payload = self._snapshot(page)
+            payload["path"] = str(screenshot_path)
+            self._log("browser_screenshot", path=str(screenshot_path))
+            return ToolResult(name="browser_screenshot", payload=payload)
+
+        return self._executor.run(_run)
 
     def browser_close(self) -> ToolResult:
         if self._page is not None:

@@ -46,6 +46,12 @@ DOCUMENT_KEYWORDS = {
     "resumen",
     "lee",
     "leer",
+    "estudia",
+    "estudiar",
+    "repaso",
+    "repasar",
+    "study",
+    "preguntas de repaso",
 }
 WEB_KEYWORDS = {
     "internet",
@@ -103,6 +109,9 @@ ASSISTANT_KEYWORDS = {
     "google calendar",
     "google drive",
     "biblioteca web",
+    "triage",
+    "meeting prep",
+    "reunión",
 }
 KNOWLEDGE_ASSISTANT_KEYWORDS = {
     "nota",

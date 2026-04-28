@@ -16,12 +16,15 @@ from adv_archon.core.evals import (
     evaluate_knowledge_retrieval,
     summarize_response_confidence,
 )
+from adv_archon.core.gmail_triage import build_reply_draft, triage_mailbox
 from adv_archon.core.intent import IntentAnalysis, IntentRouter, looks_like_capability_query
 from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeSearchResult, KnowledgeStore
-from adv_archon.core.llm import LLMRouter
+from adv_archon.core.llm import LLMRouter, TaskKind
 from adv_archon.core.llm_types import LLMMessage, LLMResponse, LLMUsage
+from adv_archon.core.meeting_prep import build_meeting_prep_brief
 from adv_archon.core.memory import MemoryRecord, MemoryStore
 from adv_archon.core.session import SessionMessage, SessionStore
+from adv_archon.core.study_partner import build_study_partner_guide
 from adv_archon.tools.files import find_local, list_dir, read_file
 from adv_archon.tools.knowledge_tools import KnowledgeTools
 from adv_archon.tools.memory_tools import MemoryTools
@@ -181,6 +184,41 @@ WEB_LIBRARY_KEYWORDS = {
     "contexto externo",
     "fuentes guardadas",
     "research library",
+}
+MEETING_PREP_KEYWORDS = {
+    "meeting prep",
+    "prepara la reunion",
+    "prepara la reunión",
+    "prepárame la reunión",
+    "prepárame la reunion",
+    "reunion de mañana",
+    "reunión de mañana",
+    "briefing de reunion",
+    "briefing de reunión",
+}
+GMAIL_TRIAGE_KEYWORDS = {
+    "triage",
+    "triage gmail",
+    "triage del gmail",
+    "inbox zero",
+    "correos urgentes",
+    "correos importantes",
+    "qué correos responder",
+    "que correos responder",
+    "borrador de respuesta",
+    "redacta respuesta",
+}
+STUDY_PARTNER_KEYWORDS = {
+    "study partner",
+    "plan de estudio",
+    "preguntas de repaso",
+    "repaso",
+    "flashcards",
+    "ficha de estudio",
+    "estudiar",
+    "estudia",
+    "pregúntame",
+    "preguntame",
 }
 CONTACT_KEYWORDS = {
     "contacto",
@@ -779,6 +817,8 @@ class Agent:
             self._build_messages(),
             system_prompt=planner_prompt,
             response_mime_type="application/json",
+            task="planner",
+            prefer_local=True,
         )
         self._record_usage("planner", response)
         return self._parse_plan(response.text)
@@ -807,11 +847,121 @@ class Agent:
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
         wants_web = _contains_any(normalized, WEB_QUERY_KEYWORDS)
+        wants_meeting_prep = _looks_like_meeting_prep_request(normalized)
+        wants_gmail_triage = _looks_like_gmail_triage_request(normalized)
+        wants_gmail_draft = _looks_like_gmail_draft_request(normalized)
+        wants_study_partner = _looks_like_study_partner_request(normalized)
         wants_local_file_search = _looks_like_local_file_search_request(normalized)
         wants_related_local_documents = _looks_like_related_local_documents_request(normalized)
         wants_web_document_compare = _looks_like_web_grounded_document_compare_request(
             normalized
         )
+
+        if wants_meeting_prep:
+            window = _infer_calendar_window(
+                normalized,
+                now=state.runtime_context.now if state.runtime_context is not None else None,
+            )
+            if "gcal_list_events" in self._tools and "gcal_list_events" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "gcal_list_events",
+                    "arguments": {
+                        "days": max(1, window["days"]),
+                        "max_results": 10,
+                        "start_offset_days": window["start_offset_days"],
+                    },
+                    "step_summary": "reunir agenda de reunion",
+                }
+            if (
+                "calendar_upcoming" in self._tools
+                and "calendar_upcoming" not in executed
+                and "gcal_list_events" not in self._tools
+            ):
+                return {
+                    "kind": "tool",
+                    "tool_name": "calendar_upcoming",
+                    "arguments": {
+                        "days": max(1, window["days"]),
+                        "limit": 10,
+                        "start_offset_days": window["start_offset_days"],
+                    },
+                    "step_summary": "revisar agenda local",
+                }
+            meeting_query = self._infer_meeting_query(user_input)
+            if meeting_query and "gmail_search" in self._tools and "gmail_search" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "gmail_search",
+                    "arguments": {"query": meeting_query, "max_results": 8},
+                    "step_summary": "buscar correos de la reunion",
+                }
+            if meeting_query and "drive_search" in self._tools and "drive_search" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "drive_search",
+                    "arguments": {"query": meeting_query, "max_results": 6},
+                    "step_summary": "buscar documentos de apoyo",
+                }
+            if meeting_query and "notes_search" in self._tools and "notes_search" not in executed:
+                return {
+                    "kind": "tool",
+                    "tool_name": "notes_search",
+                    "arguments": {"query": meeting_query, "limit": 6},
+                    "step_summary": "buscar notas relacionadas",
+                }
+            if (
+                meeting_query
+                and "knowledge_search" in self._tools
+                and "knowledge_search" not in executed
+            ):
+                return {
+                    "kind": "tool",
+                    "tool_name": "knowledge_search",
+                    "arguments": {"query": meeting_query, "limit": 6},
+                    "step_summary": "buscar contexto local",
+                }
+
+        if wants_gmail_triage and "gmail_search" in self._tools and "gmail_search" not in executed:
+            triage_query = _extract_gmail_triage_query(normalized)
+            return {
+                "kind": "tool",
+                "tool_name": "gmail_search",
+                "arguments": {"query": triage_query, "max_results": 12},
+                "step_summary": "revisar bandeja de entrada",
+            }
+
+        if (
+            wants_gmail_triage
+            and wants_gmail_draft
+            and "gmail_read_thread" in self._tools
+            and "gmail_search" in executed
+            and "gmail_read_thread" not in executed
+        ):
+            thread_id = self._select_first_gmail_thread_id()
+            if thread_id:
+                return {
+                    "kind": "tool",
+                    "tool_name": "gmail_read_thread",
+                    "arguments": {"thread_id": thread_id},
+                    "step_summary": "leer hilo para preparar borrador",
+                }
+
+        if (
+            wants_gmail_triage
+            and wants_gmail_draft
+            and "gmail_draft" in self._tools
+            and "gmail_read_thread" in executed
+            and "gmail_draft" not in executed
+        ):
+            draft_arguments = self._build_gmail_draft_arguments_from_latest_thread()
+            if draft_arguments is not None:
+                return {
+                    "kind": "tool",
+                    "tool_name": "gmail_draft",
+                    "arguments": draft_arguments,
+                    "step_summary": "crear borrador de respuesta",
+                }
 
         if (
             wants_web_document_compare
@@ -869,6 +1019,65 @@ class Agent:
                     "tool_name": "list_dir",
                     "arguments": {"path": recent_folder, "depth": 2},
                     "step_summary": "buscar documentos relacionados en carpeta",
+                }
+
+        if (
+            wants_study_partner
+            and self._latest_read_file_path() is not None
+            and "read_file" not in executed
+        ):
+            return {
+                "kind": "answer",
+                "step_summary": "preparar guia de estudio",
+            }
+
+        if (
+            wants_study_partner
+            and _looks_like_direct_file_request(normalized, user_input)
+            and "read_file" in self._tools
+            and "read_file" not in executed
+        ):
+            hinted_path = _extract_path_hint(user_input)
+            if hinted_path is not None:
+                return {
+                    "kind": "tool",
+                    "tool_name": "read_file",
+                    "arguments": {"path": hinted_path, "preview": True},
+                    "step_summary": "leer documento para estudiar",
+                }
+        
+        if (
+            wants_study_partner
+            and wants_local_file_search
+            and "find_local" in self._tools
+            and "find_local" not in executed
+        ):
+            search_query = _extract_local_search_query(user_input)
+            if search_query:
+                return {
+                    "kind": "tool",
+                    "tool_name": "find_local",
+                    "arguments": {
+                        "query": search_query,
+                        "kind": "file",
+                        "max_results": 5,
+                    },
+                    "step_summary": "localizar documento de estudio",
+                }
+
+        if (
+            wants_study_partner
+            and "find_local" in executed
+            and "read_file" in self._tools
+            and "read_file" not in executed
+        ):
+            matched_path = _select_first_file_match_path(self._latest_tool_payload("find_local"))
+            if matched_path is not None:
+                return {
+                    "kind": "tool",
+                    "tool_name": "read_file",
+                    "arguments": {"path": matched_path, "preview": True},
+                    "step_summary": "leer documento de estudio",
                 }
 
         if (
@@ -1235,6 +1444,19 @@ class Agent:
         tool_observations: Sequence[ToolObservation],
         on_chunk: ChunkCallback | None,
     ) -> LLMResponse:
+        specialized = self._specialized_final_response(
+            user_input=user_input,
+            state=state,
+            tool_observations=tool_observations,
+        )
+        if specialized is not None:
+            return self._append_confidence_block(
+                specialized,
+                state=state,
+                tool_observations=tool_observations,
+                on_chunk=on_chunk,
+            )
+
         packet = self._build_context_packet(
             user_input=user_input,
             state=state,
@@ -1258,6 +1480,7 @@ class Agent:
             self._build_messages(),
             system_prompt=final_prompt,
             on_chunk=on_chunk,
+            task=_task_kind_for_intent(state.intent.category),
         )
         response = self._append_confidence_block(
             response,
@@ -1325,6 +1548,12 @@ class Agent:
             sections.append("ayudarte con calendario, recordatorios, notas, contactos y tareas")
         if {"gmail_search", "gcal_list_events", "drive_search"} & tool_names:
             sections.append("revisar Gmail, Google Calendar y Drive")
+        if {"gcal_list_events", "gmail_search", "drive_search", "notes_search"} & tool_names:
+            sections.append("prepararte reuniones con agenda, correos, Drive, notas y contexto")
+        if {"gmail_search", "gmail_read_thread", "gmail_draft"} & tool_names:
+            sections.append("hacer triage del inbox y proponerte borradores de respuesta")
+        if {"read_file", "notes_create"} & tool_names:
+            sections.append("actuar como study partner sobre documentos locales")
         if {
             "web_search",
             "web_fetch",
@@ -1380,6 +1609,9 @@ class Agent:
             "- `resume este repo y dime los riesgos principales`\n"
             "- `que tengo manana en el calendario`\n"
             "- `busca en mis notas todo lo relacionado con Acme`\n"
+            "- `prepárame la reunión de mañana con contexto`\n"
+            "- `hazme triage del gmail y dime qué responder hoy`\n"
+            "- `actúa como study partner sobre este PDF`\n"
             "- `abre una pagina y saca una captura`"
         )
 
@@ -1388,6 +1620,156 @@ class Agent:
             usage=LLMUsage(),
             provider="deterministic",
             model="capability-handler",
+        )
+
+    def _specialized_final_response(
+        self,
+        *,
+        user_input: str,
+        state: _TurnState,
+        tool_observations: Sequence[ToolObservation],
+    ) -> LLMResponse | None:
+        del tool_observations
+        normalized = _normalize_text(user_input)
+
+        if _looks_like_meeting_prep_request(normalized):
+            return self._render_meeting_prep_response(state=state, user_input=user_input)
+
+        if _looks_like_gmail_triage_request(normalized):
+            return self._render_gmail_triage_response(user_input=user_input)
+
+        if _looks_like_study_partner_request(normalized):
+            return self._render_study_partner_response(user_input=user_input)
+
+        return None
+
+    def _render_meeting_prep_response(
+        self,
+        *,
+        state: _TurnState,
+        user_input: str,
+    ) -> LLMResponse | None:
+        calendar_payload = self._latest_tool_payload("gcal_list_events")
+        if calendar_payload is None:
+            calendar_payload = self._latest_tool_payload("calendar_upcoming")
+        gmail_payload = self._latest_tool_payload("gmail_search")
+        drive_payload = self._latest_tool_payload("drive_search")
+        notes_payload = self._latest_tool_payload("notes_search")
+        knowledge_payload = self._latest_tool_payload("knowledge_search")
+
+        if not any(
+            isinstance(payload, dict) and payload
+            for payload in (
+                calendar_payload,
+                gmail_payload,
+                drive_payload,
+                notes_payload,
+                knowledge_payload,
+            )
+        ):
+            return None
+
+        query = self._infer_meeting_query(user_input) or "Próxima reunión"
+        brief = build_meeting_prep_brief(
+            meeting_title=query,
+            calendar_events=list((calendar_payload or {}).get("events") or []),
+            gmail_messages=list((gmail_payload or {}).get("messages") or []),
+            drive_files=list((drive_payload or {}).get("files") or []),
+            notes=list((notes_payload or {}).get("notes") or []),
+            knowledge_hits=list((knowledge_payload or {}).get("results") or []),
+            project_name=(
+                state.runtime_context.working_set.project_name
+                if state.runtime_context is not None
+                else None
+            ),
+        )
+        return LLMResponse(
+            text=brief.render(),
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="meeting-prep-handler",
+        )
+
+    def _render_gmail_triage_response(self, *, user_input: str) -> LLMResponse | None:
+        gmail_payload = self._latest_tool_payload("gmail_search")
+        if not isinstance(gmail_payload, dict):
+            return None
+        messages = gmail_payload.get("messages")
+        if not isinstance(messages, list):
+            return None
+
+        mailbox = triage_mailbox(messages)
+        lines = [
+            "ADV ARCHON Gmail triage",
+            f"- Urgentes: {mailbox.counts.get('urgent', 0)}",
+            f"- Hoy: {mailbox.counts.get('today', 0)}",
+            f"- En espera: {mailbox.counts.get('waiting', 0)}",
+            f"- Baja prioridad: {mailbox.counts.get('low', 0)}",
+            "",
+            "Lo más relevante:",
+        ]
+        for item in mailbox.messages[:5]:
+            reasons = "; ".join(item.reasons[:2]) if item.reasons else "sin señal fuerte"
+            next_step = item.next_steps[0] if item.next_steps else "revisar hilo"
+            lines.append(
+                f"- [{item.priority}] {item.subject or '(sin asunto)'} | {item.sender}"
+            )
+            lines.append(f"  Motivo: {reasons}")
+            lines.append(f"  Siguiente paso: {next_step}")
+
+        if _looks_like_gmail_draft_request(_normalize_text(user_input)):
+            thread_payload = self._latest_tool_payload("gmail_read_thread")
+            thread_messages = (
+                list((thread_payload or {}).get("messages") or [])
+                if isinstance(thread_payload, dict)
+                else []
+            )
+            if thread_messages:
+                draft = build_reply_draft(thread_messages, owner_name="Pablo")
+                lines.extend(
+                    [
+                        "",
+                        "Borrador sugerido:",
+                        f"- Para: {', '.join(draft.to) or 'sin destinatario claro'}",
+                        f"- Asunto: {draft.subject}",
+                        draft.body,
+                    ]
+                )
+            elif "gmail_draft" in self._tools:
+                lines.extend(
+                    [
+                        "",
+                        "Si quieres un borrador automático, pídemelo sobre un hilo concreto "
+                        "o deja que lea primero el hilo más prioritario.",
+                    ]
+                )
+
+        return LLMResponse(
+            text="\n".join(lines),
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="gmail-triage-handler",
+        )
+
+    def _render_study_partner_response(self, *, user_input: str) -> LLMResponse | None:
+        payload = self._latest_tool_payload("read_file")
+        if not isinstance(payload, dict):
+            return None
+        content = str(payload.get("content") or "").strip()
+        if not content:
+            return None
+        path = str(payload.get("path") or "").strip()
+        title = Path(path).stem if path else "Documento local"
+        guide = build_study_partner_guide(
+            title=title,
+            content=content,
+            objective=user_input,
+        )
+        return LLMResponse(
+            text=guide.render(),
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="study-partner-handler",
         )
 
     def _deterministic_self_memory_response(
@@ -1553,6 +1935,8 @@ class Agent:
             [LLMMessage(role="user", content=prompt)],
             system_prompt=guidance,
             on_chunk=on_chunk,
+            task="documents",
+            prefer_local=True,
         )
         if truncated:
             note = (
@@ -1691,18 +2075,49 @@ class Agent:
             for tool in self._tools.values()
         ]
 
-    @staticmethod
-    def _parse_plan(text: str) -> dict[str, Any]:
+    def _parse_plan(self, text: str) -> dict[str, Any]:
         stripped = text.strip()
         if not stripped:
             return {"kind": "answer", "step_summary": "reply directly"}
-        try:
-            data = json.loads(stripped)
-        except json.JSONDecodeError:
-            return {"kind": "answer", "step_summary": "reply directly"}
+
+        data = self._parse_plan_payload(stripped)
         if not isinstance(data, dict) or "kind" not in data:
             return {"kind": "answer", "step_summary": "reply directly"}
+        if self._llm.tool_call_repair_enabled:
+            data = self._repair_plan_payload(data)
         return data
+
+    def _parse_plan_payload(self, text: str) -> dict[str, Any] | None:
+        try:
+            payload = json.loads(text)
+            return payload if isinstance(payload, dict) else None
+        except json.JSONDecodeError:
+            snippet = _extract_first_json_object(text)
+            if not snippet:
+                return None
+            try:
+                payload = json.loads(snippet)
+            except json.JSONDecodeError:
+                return None
+            return payload if isinstance(payload, dict) else None
+
+    def _repair_plan_payload(self, payload: dict[str, Any]) -> dict[str, Any]:
+        tool_name = str(payload.get("tool_name") or "").strip()
+        if not tool_name:
+            return payload
+        tool = self._tools.get(tool_name)
+        if tool is None:
+            return payload
+        arguments = payload.get("arguments")
+        if not isinstance(arguments, dict):
+            arguments = {}
+        repaired_arguments = _coerce_arguments_to_schema(arguments, tool.schema)
+        repaired = dict(payload)
+        repaired["tool_name"] = tool_name
+        repaired["arguments"] = repaired_arguments
+        if "step_summary" not in repaired or not str(repaired.get("step_summary") or "").strip():
+            repaired["step_summary"] = f"usar {tool_name}"
+        return repaired
 
     def _build_context_packet(
         self,
@@ -1921,6 +2336,64 @@ class Agent:
         first_text = str(first)
         citations.append(first_text)
         return (f"{tool_name}: {count} resultados, primero {first_text}", tuple(citations))
+
+    def _select_first_gmail_thread_id(self) -> str | None:
+        payload = self._latest_tool_payload("gmail_search")
+        if not isinstance(payload, dict):
+            return None
+        messages = payload.get("messages")
+        if not isinstance(messages, list):
+            return None
+        for message in messages:
+            if not isinstance(message, dict):
+                continue
+            thread_id = str(message.get("thread_id") or "").strip()
+            if thread_id:
+                return thread_id
+        return None
+
+    def _infer_meeting_query(self, user_input: str) -> str:
+        explicit = _extract_meeting_focus_query(user_input)
+        if explicit:
+            return explicit
+
+        for tool_name in ("gcal_list_events", "calendar_upcoming"):
+            payload = self._latest_tool_payload(tool_name)
+            if not isinstance(payload, dict):
+                continue
+            events = payload.get("events")
+            if not isinstance(events, list):
+                continue
+            for event in events:
+                if not isinstance(event, dict):
+                    continue
+                summary = str(
+                    event.get("summary")
+                    or event.get("title")
+                    or event.get("name")
+                    or ""
+                ).strip()
+                if summary:
+                    return summary
+
+        return _extract_focus_query(_normalize_text(user_input))
+
+    def _build_gmail_draft_arguments_from_latest_thread(self) -> dict[str, Any] | None:
+        payload = self._latest_tool_payload("gmail_read_thread")
+        if not isinstance(payload, dict):
+            return None
+        messages = payload.get("messages")
+        if not isinstance(messages, list) or not messages:
+            return None
+        draft = build_reply_draft(messages, owner_name="Pablo")
+        if not draft.to:
+            return None
+        return {
+            "to": draft.to,
+            "cc": draft.cc,
+            "subject": draft.subject,
+            "body": draft.body,
+        }
 
     def _append_confidence_block(
         self,
@@ -2211,6 +2684,45 @@ def _extract_memory_capture_fact(text: str) -> str:
             return original[len(prefix) :].strip(" .,:;")
 
     return original.strip(" .,:;")
+
+
+def _looks_like_meeting_prep_request(text: str) -> bool:
+    return _contains_any(text, MEETING_PREP_KEYWORDS) or (
+        _contains_any(text, {"reunion", "reunión", "meeting"})
+        and _contains_any(text, {"prepara", "prepárame", "briefing", "contexto"})
+    )
+
+
+def _looks_like_gmail_triage_request(text: str) -> bool:
+    return _contains_any(text, GMAIL_TRIAGE_KEYWORDS) or (
+        _contains_any(text, {"gmail", "correo", "correos", "mail", "inbox"})
+        and _contains_any(text, {"triage", "prioriza", "priorizar", "urgente", "responder"})
+    )
+
+
+def _looks_like_gmail_draft_request(text: str) -> bool:
+    return _contains_any(
+        text,
+        {"borrador", "respuesta", "responder", "contestacion", "contestación"},
+    ) and _contains_any(
+        text,
+        {
+            "gmail",
+            "correo",
+            "mail",
+            "email",
+            "redacta",
+            "prepara",
+            "crea",
+        },
+    )
+
+
+def _looks_like_study_partner_request(text: str) -> bool:
+    return _contains_any(text, STUDY_PARTNER_KEYWORDS) or (
+        _contains_any(text, {"documento", "pdf", "libro", "texto", "apuntes"})
+        and _contains_any(text, {"estudia", "estudiar", "repaso", "preguntas", "plan"})
+    )
 
 
 def _looks_like_direct_file_request(text: str, raw_text: str) -> bool:
@@ -2508,6 +3020,41 @@ def _extract_web_grounded_compare_query(text: str) -> str:
     stripped = re.sub(r"\bqu[eé]\s+es\b", " ", stripped, flags=re.IGNORECASE)
     stripped = re.sub(r"\s+", " ", stripped).strip(" .,:;")
     return _extract_focus_query(_normalize_text(stripped))
+
+
+def _extract_meeting_focus_query(text: str) -> str:
+    stripped = re.sub(
+        r"\b(prepara|prepárame|hazme|dame)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"\b(la|una|mi|proxima|próxima|siguiente)\s+(reunion|reunión|meeting)\b",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(
+        r"\b(briefing|contexto|agenda|para|de)\b",
+        " ",
+        stripped,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(r"\s+", " ", stripped).strip(" .,:;")
+    return _extract_focus_query(_normalize_text(stripped))
+
+
+def _extract_gmail_triage_query(text: str) -> str:
+    stripped = re.sub(
+        r"\b(hazme|dame|haz|prepara|prioriza|triage|del|de|gmail|correo|correos|mail|inbox)\b",
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    stripped = re.sub(r"\s+", " ", stripped).strip(" .,:;")
+    focus = _extract_focus_query(_normalize_text(stripped))
+    return focus or "in:inbox newer_than:21d"
 
 
 def _extract_folder_hint(text: str) -> str | None:
@@ -2814,3 +3361,98 @@ def _name_tokens(text: str) -> list[str]:
         for token in re.findall(r"[a-zA-Z0-9áéíóúüñÁÉÍÓÚÜÑ]+", text.casefold())
         if len(token) > 2
     ]
+
+
+def _task_kind_for_intent(intent: str) -> TaskKind:
+    if intent == "assistant":
+        return "assistant"
+    if intent == "chat":
+        return "fast"
+    if intent == "coding":
+        return "coding"
+    if intent == "documents":
+        return "documents"
+    if intent == "shell":
+        return "fast"
+    if intent == "web":
+        return "web"
+    return "general"
+
+
+def _extract_first_json_object(text: str) -> str | None:
+    start = text.find("{")
+    if start < 0:
+        return None
+    depth = 0
+    in_string = False
+    escaped = False
+    for index, char in enumerate(text[start:], start=start):
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+            continue
+        if char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return text[start : index + 1]
+    return None
+
+
+def _coerce_arguments_to_schema(
+    arguments: dict[str, Any],
+    schema: dict[str, Any],
+) -> dict[str, Any]:
+    properties = schema.get("properties")
+    if not isinstance(properties, dict):
+        return arguments
+    repaired: dict[str, Any] = {}
+    for key, value in arguments.items():
+        definition = properties.get(key)
+        if not isinstance(definition, dict):
+            repaired[key] = value
+            continue
+        repaired[key] = _coerce_argument_value(value, definition)
+    return repaired
+
+
+def _coerce_argument_value(value: Any, definition: dict[str, Any]) -> Any:
+    expected = definition.get("type")
+    if expected == "integer":
+        if isinstance(value, bool):
+            return int(value)
+        if isinstance(value, (int, float)):
+            return int(value)
+        if isinstance(value, str):
+            stripped = value.strip()
+            if stripped.isdigit():
+                return int(stripped)
+        return value
+    if expected == "boolean":
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, str):
+            lowered = value.strip().casefold()
+            if lowered in {"true", "1", "si", "sí", "yes"}:
+                return True
+            if lowered in {"false", "0", "no"}:
+                return False
+        return value
+    if expected == "array":
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            parts = [item.strip() for item in value.split(",") if item.strip()]
+            return parts
+        return [value]
+    if expected == "string" and value is not None:
+        return str(value)
+    return value

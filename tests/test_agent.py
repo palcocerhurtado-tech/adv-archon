@@ -17,6 +17,7 @@ from adv_archon.core.session import SessionMessage, SessionStore
 
 class FakeLLM:
     mode = "local"
+    tool_call_repair_enabled = True
 
     def temporary_mode(self, _mode: str):
         from contextlib import nullcontext
@@ -132,12 +133,31 @@ def _build_agent(tmp_path: Path) -> Agent:
             ToolSpec(
                 name="gcal_list_events",
                 description="google calendar",
-                schema={},
+                schema={
+                    "type": "object",
+                    "properties": {
+                        "days": {"type": "integer"},
+                        "max_results": {"type": "integer"},
+                        "start_offset_days": {"type": "integer"},
+                    },
+                },
                 fn=lambda **_kwargs: None,
             ),
             ToolSpec(
                 name="gmail_search",
                 description="gmail",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="gmail_read_thread",
+                description="gmail read thread",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="gmail_draft",
+                description="gmail draft",
                 schema={},
                 fn=lambda **_kwargs: None,
             ),
@@ -1351,3 +1371,137 @@ def test_inspect_turn_exposes_local_knowledge_signals(tmp_path: Path) -> None:
     assert inspection.profile == "general"
     assert inspection.knowledge_eval is not None
     assert inspection.local_knowledge_hits == ("roadmap-acme.md",)
+
+
+def test_specialized_meeting_prep_response_renders_structured_brief(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+    agent._session.append(  # type: ignore[attr-defined]
+        SessionMessage(
+            role="tool",
+            name="gcal_list_events",
+            content=json.dumps(
+                {
+                    "events": [
+                        {
+                            "summary": "Reunión ACME",
+                            "start": "2026-04-29T10:00:00+02:00",
+                            "description": "Revisar propuesta y próximos hitos",
+                            "location": "Meet",
+                        }
+                    ]
+                }
+            ),
+        )
+    )
+    agent._session.append(  # type: ignore[attr-defined]
+        SessionMessage(
+            role="tool",
+            name="gmail_search",
+            content=json.dumps(
+                {
+                    "messages": [
+                        {
+                            "subject": "ACME - feedback de propuesta",
+                            "from": "ana@acme.com",
+                            "date": "Mon, 27 Apr 2026 09:00:00 +0200",
+                            "snippet": "Necesitamos cerrar la prioridad del sprint.",
+                        }
+                    ]
+                }
+            ),
+        )
+    )
+
+    response = agent._specialized_final_response(
+        user_input="prepárame la reunión de acme de mañana",
+        state=state,
+        tool_observations=[],
+    )
+
+    assert response is not None
+    assert "ADV ARCHON meeting prep" in response.text
+    assert "Reunión ACME" in response.text
+    assert "ACME - feedback de propuesta" in response.text
+
+
+def test_rule_based_plan_routes_gmail_draft_after_read_thread(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+    agent._session.append(  # type: ignore[attr-defined]
+        SessionMessage(
+            role="tool",
+            name="gmail_read_thread",
+            content=json.dumps(
+                {
+                    "thread_id": "thread-1",
+                    "messages": [
+                        {
+                            "from": "cliente@acme.com",
+                            "to": "pablo@example.com",
+                            "subject": "Revisión de propuesta",
+                            "date": "Mon, 27 Apr 2026 09:00:00 +0200",
+                            "snippet": "¿Puedes responder hoy?",
+                            "body_excerpt": "¿Puedes responder hoy con la versión final?",
+                        }
+                    ],
+                }
+            ),
+        )
+    )
+
+    plan = agent._rule_based_plan(
+        "hazme triage del gmail y redacta una respuesta",
+        state,
+        ["gmail_search", "gmail_read_thread"],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "gmail_draft"
+    assert plan["arguments"]["to"] == ["cliente@acme.com"]
+
+
+def test_specialized_study_partner_response_uses_latest_document(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+    agent._session.append(  # type: ignore[attr-defined]
+        SessionMessage(
+            role="tool",
+            name="read_file",
+            content=json.dumps(
+                {
+                    "path": "/tmp/nota-salomon.pdf",
+                    "content": (
+                        "La clavicula de Salomon es un grimorio atribuido a la tradición "
+                        "salomónica. El texto describe jerarquías, sellos y rituales."
+                    ),
+                }
+            ),
+        )
+    )
+
+    response = agent._specialized_final_response(
+        user_input="actúa como study partner sobre este libro",
+        state=state,
+        tool_observations=[],
+    )
+
+    assert response is not None
+    assert "Study partner guide" in response.text
+    assert "Preguntas de repaso" in response.text
+
+
+def test_parse_plan_repairs_argument_types_from_model_text(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+
+    plan = agent._parse_plan(
+        "Claro. "
+        '{"kind":"tool","tool_name":"gcal_list_events",'
+        '"arguments":{"days":"7","max_results":"5","start_offset_days":"1"},'
+        '"step_summary":"revisar agenda"}'
+    )
+
+    assert plan["tool_name"] == "gcal_list_events"
+    assert plan["arguments"]["days"] == 7
+    assert plan["arguments"]["max_results"] == 5
+    assert plan["arguments"]["start_offset_days"] == 1

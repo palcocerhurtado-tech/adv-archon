@@ -55,7 +55,13 @@ class FakeTaskStore:
 
 
 class FakePersonalTools:
-    pass
+    def notes_create(self, title: str, body: str, folder: str | None = None) -> object:
+        from adv_archon.tools.personal import ToolResult
+
+        return ToolResult(
+            name="notes_create",
+            payload={"title": title, "body": body, "folder": folder},
+        )
 
 
 class FakeGoogleWorkspaceTools:
@@ -140,6 +146,34 @@ class FakeSTT:
         return TranscriptionResult(text="abre el README", language="es", duration_seconds=1.5)
 
 
+class FakeFileTools:
+    def read_file(self, path: str) -> object:
+        from adv_archon.tools.files import ToolResult
+
+        return ToolResult(
+            name="read_file",
+            payload={"path": path, "content": "contenido"},
+        )
+
+
+class FakeWebTools:
+    def web_search(self, query: str) -> object:
+        from adv_archon.tools.web import ToolResult
+
+        return ToolResult(
+            name="web_search",
+            payload={
+                "results": [
+                    {
+                        "title": "Resultado",
+                        "url": "https://example.com",
+                        "snippet": f"resultado para {query}",
+                    }
+                ]
+            },
+        )
+
+
 def build_services() -> CommandServices:
     return CommandServices(
         llm=FakeLLM(),
@@ -161,6 +195,8 @@ def build_services() -> CommandServices:
         shell_tool=FakeShellTool(),
         python_tool=FakePythonTool(),
         knowledge_tools=FakeKnowledgeTools(),
+        file_tools=FakeFileTools(),
+        web_tools=FakeWebTools(),
         profile_manager=FakeProfileManager(),
         on_profile_changed=lambda _profile: None,
         tts=FakeTTS(),
@@ -186,6 +222,15 @@ def test_listen_command_injects_transcribed_prompt() -> None:
     assert result.handled is True
     assert result.injected_prompt == "abre el README"
     assert services.renderer.infos[-1] == "Dictado: abre el README"
+
+
+def test_voice_note_command_creates_note() -> None:
+    services = build_services()
+
+    result = handle_command("/voice-note Libro", services=services)
+
+    assert result.handled is True
+    assert services.renderer.infos[-1] == "Nota de voz creada: Libro"
 
 
 def test_profile_command_switches_active_profile() -> None:

@@ -23,12 +23,14 @@ from adv_archon.tools.google_workspace import (
     GoogleWorkspaceTools,
     build_google_workspace_tool_specs,
 )
+from adv_archon.tools.guarded_files import FileAccessPolicy, GuardedFileTools
 from adv_archon.tools.knowledge_tools import KnowledgeTools, build_knowledge_tool_specs
 from adv_archon.tools.mac import MacTools, build_mac_tool_specs
 from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
+from adv_archon.tools.web import WebTools
 from adv_archon.tools.web_library_tools import (
     WebLibraryTools,
     build_web_library_tool_specs,
@@ -138,6 +140,22 @@ class ArchonRuntime:
             self.knowledge_store,
             profile_manager=self.profile_manager,
         )
+        file_policy = FileAccessPolicy(
+            allowed_roots=tuple(
+                Path(item).expanduser().resolve() for item in config.files.allowed_roots
+            ),
+            sensitive_roots=tuple(
+                Path(item).expanduser().resolve() for item in config.files.sensitive_roots
+            ),
+            allow_sensitive_reads=config.files.allow_sensitive_reads,
+        )
+        self.file_tools = GuardedFileTools(policy=file_policy)
+        self.web_tools = WebTools(
+            retry_attempts=config.web.retry_attempts,
+            retry_base_delay_seconds=config.web.retry_base_delay_seconds,
+            max_concurrency=config.web.max_concurrency,
+            min_interval_seconds=config.web.rate_limit_interval_seconds,
+        )
         self.web_library_store = WebLibraryStore(
             config.paths.web_library_db,
             encoder=encoder,
@@ -167,6 +185,10 @@ class ArchonRuntime:
             browser_name=config.browser.browser_name,
             headless=config.browser.headless,
             default_timeout_ms=config.browser.default_timeout_ms,
+            rate_limit_interval_seconds=config.browser.rate_limit_interval_seconds,
+            retry_attempts=config.browser.retry_attempts,
+            retry_base_delay_seconds=config.browser.retry_base_delay_seconds,
+            max_concurrency=config.browser.max_concurrency,
             confirm=confirm,
             logger=self.logger,
         )
@@ -179,6 +201,10 @@ class ArchonRuntime:
             default_calendar_id=config.google.default_calendar_id,
             gmail_default_max_results=config.google.gmail_default_max_results,
             drive_default_max_results=config.google.drive_default_max_results,
+            rate_limit_interval_seconds=config.google.rate_limit_interval_seconds,
+            retry_attempts=config.google.retry_attempts,
+            retry_base_delay_seconds=config.google.retry_base_delay_seconds,
+            max_concurrency=config.google.max_concurrency,
             logger=self.logger,
         )
         self.agent = Agent(
@@ -261,6 +287,8 @@ class ArchonRuntime:
             shell_tool=self.shell_tool,
             python_tool=self.python_tool,
             knowledge_tools=self.knowledge_tools,
+            file_tools=self.file_tools,
+            web_tools=self.web_tools,
             profile_manager=self.profile_manager,
             on_profile_changed=self.apply_profile,
             tts=self.tts,
@@ -306,6 +334,82 @@ class ArchonRuntime:
 
     def build_agent_tools(self) -> list[ToolSpec]:
         specs: list[ToolSpec] = []
+        specs.extend(
+            [
+                ToolSpec(
+                    name="read_file",
+                    description=(
+                        "Read a local file under the configured directory guardrails. "
+                        "Supports text, markdown, PDFs, images with OCR, and office docs."
+                    ),
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "start_line": {"type": "integer"},
+                            "end_line": {"type": "integer"},
+                            "preview": {"type": "boolean"},
+                        },
+                        "required": ["path"],
+                    },
+                    fn=self.file_tools.read_file,
+                ),
+                ToolSpec(
+                    name="list_dir",
+                    description="List a directory under the configured directory guardrails.",
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string"},
+                            "depth": {"type": "integer"},
+                        },
+                        "required": ["path"],
+                    },
+                    fn=self.file_tools.list_dir,
+                ),
+                ToolSpec(
+                    name="find_local",
+                    description=(
+                        "Find local files or folders under the configured directory guardrails."
+                    ),
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "path": {"type": "string"},
+                            "folder_hint": {"type": "string"},
+                            "kind": {"type": "string"},
+                            "max_results": {"type": "integer"},
+                        },
+                        "required": ["query"],
+                    },
+                    fn=self.file_tools.find_local,
+                ),
+                ToolSpec(
+                    name="web_search",
+                    description="Search the web with retries, backoff and concurrency caps.",
+                    schema={
+                        "type": "object",
+                        "properties": {
+                            "query": {"type": "string"},
+                            "n": {"type": "integer"},
+                        },
+                        "required": ["query"],
+                    },
+                    fn=self.web_tools.web_search,
+                ),
+                ToolSpec(
+                    name="web_fetch",
+                    description="Fetch and clean the main text of a webpage with retries.",
+                    schema={
+                        "type": "object",
+                        "properties": {"url": {"type": "string"}},
+                        "required": ["url"],
+                    },
+                    fn=self.web_tools.web_fetch,
+                ),
+            ]
+        )
         for definition in build_shell_tool_specs(self.shell_tool):
             specs.append(
                 ToolSpec(

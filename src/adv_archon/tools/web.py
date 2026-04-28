@@ -9,6 +9,8 @@ from urllib.robotparser import RobotFileParser
 import httpx
 import trafilatura
 
+from adv_archon.core.resilience import ConcurrencyPolicy, ResilientExecutor, RetryPolicy
+
 try:
     from ddgs import DDGS  # type: ignore[import-not-found]
 except ModuleNotFoundError:  # pragma: no cover - compatibilidad con instalaciones antiguas
@@ -44,42 +46,81 @@ class ToolResult:
     payload: dict[str, Any]
 
 
+class WebTools:
+    def __init__(
+        self,
+        *,
+        retry_attempts: int = 3,
+        retry_base_delay_seconds: float = 0.6,
+        max_concurrency: int = 2,
+        min_interval_seconds: float = 0.2,
+    ) -> None:
+        self._executor = ResilientExecutor(
+            retry_policy=RetryPolicy(
+                attempts=retry_attempts,
+                base_delay_seconds=retry_base_delay_seconds,
+            ),
+            concurrency_policy=ConcurrencyPolicy(
+                max_concurrency=max_concurrency,
+                min_interval_seconds=min_interval_seconds,
+            ),
+        )
+
+    def web_search(self, query: str, n: int = 5) -> ToolResult:
+        def _run() -> ToolResult:
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=n))
+            normalized = [
+                {
+                    "title": item.get("title", ""),
+                    "url": item.get("href", ""),
+                    "snippet": item.get("body", ""),
+                }
+                for item in results
+            ]
+            return ToolResult(
+                name="web_search",
+                payload={"query": query, "results": normalized},
+            )
+
+        return self._executor.run(_run)
+
+    def web_fetch(self, url: str) -> ToolResult:
+        def _run() -> ToolResult:
+            if not _allowed_by_robots(url):
+                raise PermissionError(f"robots.txt disallows fetching: {url}")
+
+            extracted = ""
+            try:
+                extracted = _fetch_static_text(url)
+            except Exception:
+                extracted = ""
+
+            if _should_fallback_to_browser(url, extracted):
+                browser_text = _fetch_browser_text(url)
+                if browser_text:
+                    extracted = browser_text
+
+            return ToolResult(
+                name="web_fetch",
+                payload={
+                    "url": url,
+                    "text": extracted,
+                },
+            )
+
+        return self._executor.run(_run)
+
+
+_DEFAULT_WEB_TOOLS = WebTools()
+
+
 def web_search(query: str, n: int = 5) -> ToolResult:
-    with DDGS() as ddgs:
-        results = list(ddgs.text(query, max_results=n))
-    normalized = [
-        {
-            "title": item.get("title", ""),
-            "url": item.get("href", ""),
-            "snippet": item.get("body", ""),
-        }
-        for item in results
-    ]
-    return ToolResult(name="web_search", payload={"query": query, "results": normalized})
+    return _DEFAULT_WEB_TOOLS.web_search(query, n=n)
 
 
 def web_fetch(url: str) -> ToolResult:
-    if not _allowed_by_robots(url):
-        raise PermissionError(f"robots.txt disallows fetching: {url}")
-
-    extracted = ""
-    try:
-        extracted = _fetch_static_text(url)
-    except Exception:
-        extracted = ""
-
-    if _should_fallback_to_browser(url, extracted):
-        browser_text = _fetch_browser_text(url)
-        if browser_text:
-            extracted = browser_text
-
-    return ToolResult(
-        name="web_fetch",
-        payload={
-            "url": url,
-            "text": extracted,
-        },
-    )
+    return _DEFAULT_WEB_TOOLS.web_fetch(url)
 
 
 def _fetch_static_text(url: str) -> str:

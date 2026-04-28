@@ -11,6 +11,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from adv_archon.core.logging import AppLogger
+from adv_archon.core.resilience import ConcurrencyPolicy, ResilientExecutor, RetryPolicy
 from adv_archon.core.tasks import parse_due_text
 
 ConfirmCallback = Callable[[str], bool]
@@ -42,6 +43,10 @@ class GoogleWorkspaceTools:
         default_calendar_id: str = "primary",
         gmail_default_max_results: int = 10,
         drive_default_max_results: int = 10,
+        rate_limit_interval_seconds: float = 0.25,
+        retry_attempts: int = 3,
+        retry_base_delay_seconds: float = 0.8,
+        max_concurrency: int = 2,
         logger: AppLogger | None = None,
     ) -> None:
         self._client_secret_file = client_secret_file
@@ -54,68 +59,85 @@ class GoogleWorkspaceTools:
         self._drive_default_max_results = drive_default_max_results
         self._logger = logger
         self._service_cache: dict[tuple[str, str], Any] = {}
+        self._executor = ResilientExecutor(
+            retry_policy=RetryPolicy(
+                attempts=retry_attempts,
+                base_delay_seconds=retry_base_delay_seconds,
+            ),
+            concurrency_policy=ConcurrencyPolicy(
+                max_concurrency=max_concurrency,
+                min_interval_seconds=rate_limit_interval_seconds,
+            ),
+            should_retry=_should_retry_google_error,
+        )
 
     def gmail_search(self, query: str = "", max_results: int | None = None) -> ToolResult:
-        service = self._service("gmail", "v1")
-        payload = service.users().messages().list(
-            userId="me",
-            q=query or None,
-            maxResults=max_results or self._gmail_default_max_results,
-        ).execute()
-        items = payload.get("messages", [])
-        messages: list[dict[str, Any]] = []
-        for item in items:
-            detail = service.users().messages().get(
+        def _run() -> ToolResult:
+            service = self._service("gmail", "v1")
+            payload = service.users().messages().list(
                 userId="me",
-                id=item["id"],
-                format="metadata",
-                metadataHeaders=["Subject", "From", "Date", "To"],
+                q=query or None,
+                maxResults=max_results or self._gmail_default_max_results,
             ).execute()
-            headers = _header_map(detail.get("payload", {}).get("headers", []))
-            messages.append(
-                {
-                    "id": detail.get("id"),
-                    "thread_id": detail.get("threadId"),
-                    "label_ids": detail.get("labelIds", []),
-                    "subject": headers.get("Subject", ""),
-                    "from": headers.get("From", ""),
-                    "to": headers.get("To", ""),
-                    "date": headers.get("Date", ""),
-                    "snippet": detail.get("snippet", ""),
-                }
+            items = payload.get("messages", [])
+            messages: list[dict[str, Any]] = []
+            for item in items:
+                detail = service.users().messages().get(
+                    userId="me",
+                    id=item["id"],
+                    format="metadata",
+                    metadataHeaders=["Subject", "From", "Date", "To"],
+                ).execute()
+                headers = _header_map(detail.get("payload", {}).get("headers", []))
+                messages.append(
+                    {
+                        "id": detail.get("id"),
+                        "thread_id": detail.get("threadId"),
+                        "label_ids": detail.get("labelIds", []),
+                        "subject": headers.get("Subject", ""),
+                        "from": headers.get("From", ""),
+                        "to": headers.get("To", ""),
+                        "date": headers.get("Date", ""),
+                        "snippet": detail.get("snippet", ""),
+                    }
+                )
+            self._log("gmail_search", query=query, results=len(messages))
+            return ToolResult(
+                name="gmail_search",
+                payload={"query": query, "messages": messages},
             )
-        self._log("gmail_search", query=query, results=len(messages))
-        return ToolResult(
-            name="gmail_search",
-            payload={"query": query, "messages": messages},
-        )
+
+        return self._executor.run(_run)
 
     def gmail_read_thread(self, thread_id: str) -> ToolResult:
-        service = self._service("gmail", "v1")
-        payload = service.users().threads().get(
-            userId="me",
-            id=thread_id,
-            format="full",
-        ).execute()
-        messages: list[dict[str, Any]] = []
-        for item in payload.get("messages", []):
-            headers = _header_map(item.get("payload", {}).get("headers", []))
-            messages.append(
-                {
-                    "id": item.get("id"),
-                    "from": headers.get("From", ""),
-                    "to": headers.get("To", ""),
-                    "subject": headers.get("Subject", ""),
-                    "date": headers.get("Date", ""),
-                    "snippet": item.get("snippet", ""),
-                    "body_excerpt": _extract_gmail_body(item.get("payload", {}))[:2500],
-                }
+        def _run() -> ToolResult:
+            service = self._service("gmail", "v1")
+            payload = service.users().threads().get(
+                userId="me",
+                id=thread_id,
+                format="full",
+            ).execute()
+            messages: list[dict[str, Any]] = []
+            for item in payload.get("messages", []):
+                headers = _header_map(item.get("payload", {}).get("headers", []))
+                messages.append(
+                    {
+                        "id": item.get("id"),
+                        "from": headers.get("From", ""),
+                        "to": headers.get("To", ""),
+                        "subject": headers.get("Subject", ""),
+                        "date": headers.get("Date", ""),
+                        "snippet": item.get("snippet", ""),
+                        "body_excerpt": _extract_gmail_body(item.get("payload", {}))[:2500],
+                    }
+                )
+            self._log("gmail_read_thread", thread_id=thread_id, messages=len(messages))
+            return ToolResult(
+                name="gmail_read_thread",
+                payload={"thread_id": thread_id, "messages": messages},
             )
-        self._log("gmail_read_thread", thread_id=thread_id, messages=len(messages))
-        return ToolResult(
-            name="gmail_read_thread",
-            payload={"thread_id": thread_id, "messages": messages},
-        )
+
+        return self._executor.run(_run)
 
     def gmail_draft(
         self,
@@ -125,34 +147,37 @@ class GoogleWorkspaceTools:
         cc: list[str] | None = None,
         bcc: list[str] | None = None,
     ) -> ToolResult:
-        self._confirm_action(
-            "Se va a crear un borrador en Gmail.\n"
-            f"Para: {', '.join(to)}\n"
-            f"Asunto: {subject}\n"
-            "¿Confirmas?"
-        )
-        service = self._service("gmail", "v1")
-        message = EmailMessage()
-        message["To"] = ", ".join(to)
-        if cc:
-            message["Cc"] = ", ".join(cc)
-        if bcc:
-            message["Bcc"] = ", ".join(bcc)
-        message["Subject"] = subject
-        message.set_content(body)
-        encoded = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
-        payload = service.users().drafts().create(
-            userId="me",
-            body={"message": {"raw": encoded}},
-        ).execute()
-        self._log("gmail_draft", to=to, subject=subject)
-        return ToolResult(
-            name="gmail_draft",
-            payload={
-                "id": payload.get("id"),
-                "message_id": payload.get("message", {}).get("id"),
-            },
-        )
+        def _run() -> ToolResult:
+            self._confirm_action(
+                "Se va a crear un borrador en Gmail.\n"
+                f"Para: {', '.join(to)}\n"
+                f"Asunto: {subject}\n"
+                "¿Confirmas?"
+            )
+            service = self._service("gmail", "v1")
+            message = EmailMessage()
+            message["To"] = ", ".join(to)
+            if cc:
+                message["Cc"] = ", ".join(cc)
+            if bcc:
+                message["Bcc"] = ", ".join(bcc)
+            message["Subject"] = subject
+            message.set_content(body)
+            encoded = base64.urlsafe_b64encode(message.as_bytes()).decode("utf-8")
+            payload = service.users().drafts().create(
+                userId="me",
+                body={"message": {"raw": encoded}},
+            ).execute()
+            self._log("gmail_draft", to=to, subject=subject)
+            return ToolResult(
+                name="gmail_draft",
+                payload={
+                    "id": payload.get("id"),
+                    "message_id": payload.get("message", {}).get("id"),
+                },
+            )
+
+        return self._executor.run(_run)
 
     def gcal_list_events(
         self,
@@ -161,56 +186,59 @@ class GoogleWorkspaceTools:
         start_offset_days: int = 0,
         calendar_id: str | None = None,
     ) -> ToolResult:
-        service = self._service("calendar", "v3")
-        timezone = ZoneInfo(self._timezone_name)
-        window_start = datetime.now(timezone).replace(
-            hour=0,
-            minute=0,
-            second=0,
-            microsecond=0,
-        ) + timedelta(days=max(0, start_offset_days))
-        window_end = window_start + timedelta(days=days)
-        payload = service.events().list(
-            calendarId=calendar_id or self._default_calendar_id,
-            timeMin=window_start.astimezone(UTC).isoformat(),
-            timeMax=window_end.astimezone(UTC).isoformat(),
-            singleEvents=True,
-            orderBy="startTime",
-            maxResults=max_results,
-        ).execute()
-        events: list[dict[str, Any]] = []
-        for item in payload.get("items", []):
-            start_value = item.get("start", {})
-            end_value = item.get("end", {})
-            start = start_value.get("dateTime") or start_value.get("date")
-            end = end_value.get("dateTime") or end_value.get("date")
-            events.append(
-                {
-                    "id": item.get("id"),
-                    "summary": item.get("summary", ""),
-                    "start": start,
-                    "end": end,
-                    "location": item.get("location"),
-                    "description": item.get("description"),
-                    "calendar_id": calendar_id or self._default_calendar_id,
-                    "all_day": "date" in start_value,
-                    "html_link": item.get("htmlLink"),
-                }
+        def _run() -> ToolResult:
+            service = self._service("calendar", "v3")
+            timezone = ZoneInfo(self._timezone_name)
+            window_start = datetime.now(timezone).replace(
+                hour=0,
+                minute=0,
+                second=0,
+                microsecond=0,
+            ) + timedelta(days=max(0, start_offset_days))
+            window_end = window_start + timedelta(days=days)
+            payload = service.events().list(
+                calendarId=calendar_id or self._default_calendar_id,
+                timeMin=window_start.astimezone(UTC).isoformat(),
+                timeMax=window_end.astimezone(UTC).isoformat(),
+                singleEvents=True,
+                orderBy="startTime",
+                maxResults=max_results,
+            ).execute()
+            events: list[dict[str, Any]] = []
+            for item in payload.get("items", []):
+                start_value = item.get("start", {})
+                end_value = item.get("end", {})
+                start = start_value.get("dateTime") or start_value.get("date")
+                end = end_value.get("dateTime") or end_value.get("date")
+                events.append(
+                    {
+                        "id": item.get("id"),
+                        "summary": item.get("summary", ""),
+                        "start": start,
+                        "end": end,
+                        "location": item.get("location"),
+                        "description": item.get("description"),
+                        "calendar_id": calendar_id or self._default_calendar_id,
+                        "all_day": "date" in start_value,
+                        "html_link": item.get("htmlLink"),
+                    }
+                )
+            self._log(
+                "gcal_list_events",
+                days=days,
+                start_offset_days=start_offset_days,
+                results=len(events),
             )
-        self._log(
-            "gcal_list_events",
-            days=days,
-            start_offset_days=start_offset_days,
-            results=len(events),
-        )
-        return ToolResult(
-            name="gcal_list_events",
-            payload={
-                "window_start": window_start.isoformat(),
-                "window_end": window_end.isoformat(),
-                "events": events,
-            },
-        )
+            return ToolResult(
+                name="gcal_list_events",
+                payload={
+                    "window_start": window_start.isoformat(),
+                    "window_end": window_end.isoformat(),
+                    "events": events,
+                },
+            )
+
+        return self._executor.run(_run)
 
     def gcal_create_event(
         self,
@@ -222,113 +250,128 @@ class GoogleWorkspaceTools:
         description: str | None = None,
         location: str | None = None,
     ) -> ToolResult:
-        self._confirm_action(
-            "Se va a crear un evento en Google Calendar.\n"
-            f"Titulo: {summary}\n"
-            f"Cuando: {start_text}\n"
-            "¿Confirmas?"
-        )
-        timezone = ZoneInfo(self._timezone_name)
-        start_at = parse_due_text(start_text, timezone_name=self._timezone_name).astimezone(
-            timezone
-        )
-        if end_text:
-            end_at = parse_due_text(end_text, timezone_name=self._timezone_name).astimezone(
-                timezone
+        def _run() -> ToolResult:
+            self._confirm_action(
+                "Se va a crear un evento en Google Calendar.\n"
+                f"Titulo: {summary}\n"
+                f"Cuando: {start_text}\n"
+                "¿Confirmas?"
             )
-        else:
-            end_at = start_at + timedelta(minutes=max(1, duration_minutes))
-        service = self._service("calendar", "v3")
-        payload = service.events().insert(
-            calendarId=calendar_id or self._default_calendar_id,
-            body={
-                "summary": summary,
-                "description": description or "",
-                "location": location or "",
-                "start": {
-                    "dateTime": start_at.isoformat(),
-                    "timeZone": timezone.key,
+            timezone = ZoneInfo(self._timezone_name)
+            start_at = parse_due_text(
+                start_text,
+                timezone_name=self._timezone_name,
+            ).astimezone(timezone)
+            if end_text:
+                end_at = parse_due_text(
+                    end_text,
+                    timezone_name=self._timezone_name,
+                ).astimezone(timezone)
+            else:
+                end_at = start_at + timedelta(minutes=max(1, duration_minutes))
+            service = self._service("calendar", "v3")
+            payload = service.events().insert(
+                calendarId=calendar_id or self._default_calendar_id,
+                body={
+                    "summary": summary,
+                    "description": description or "",
+                    "location": location or "",
+                    "start": {
+                        "dateTime": start_at.isoformat(),
+                        "timeZone": timezone.key,
+                    },
+                    "end": {
+                        "dateTime": end_at.isoformat(),
+                        "timeZone": timezone.key,
+                    },
                 },
-                "end": {
-                    "dateTime": end_at.isoformat(),
-                    "timeZone": timezone.key,
+            ).execute()
+            self._log(
+                "gcal_create_event",
+                summary=summary,
+                calendar_id=calendar_id or "primary",
+            )
+            return ToolResult(
+                name="gcal_create_event",
+                payload={
+                    "id": payload.get("id"),
+                    "html_link": payload.get("htmlLink"),
+                    "summary": payload.get("summary"),
                 },
-            },
-        ).execute()
-        self._log("gcal_create_event", summary=summary, calendar_id=calendar_id or "primary")
-        return ToolResult(
-            name="gcal_create_event",
-            payload={
-                "id": payload.get("id"),
-                "html_link": payload.get("htmlLink"),
-                "summary": payload.get("summary"),
-            },
-        )
+            )
+
+        return self._executor.run(_run)
 
     def drive_search(self, query: str = "", max_results: int | None = None) -> ToolResult:
-        service = self._service("drive", "v3")
-        payload = service.files().list(
-            q=_drive_query(query),
-            pageSize=max_results or self._drive_default_max_results,
-            fields=(
-                "files(id,name,mimeType,modifiedTime,webViewLink,webContentLink,owners(displayName))"
-            ),
-            orderBy="modifiedTime desc",
-        ).execute()
-        files = [
-            {
-                "id": item.get("id"),
-                "name": item.get("name"),
-                "mime_type": item.get("mimeType"),
-                "modified_time": item.get("modifiedTime"),
-                "web_view_link": item.get("webViewLink"),
-                "web_content_link": item.get("webContentLink"),
-                "owner": (item.get("owners") or [{}])[0].get("displayName", ""),
-            }
-            for item in payload.get("files", [])
-        ]
-        self._log("drive_search", query=query, results=len(files))
-        return ToolResult(
-            name="drive_search",
-            payload={"query": query, "files": files},
-        )
+        def _run() -> ToolResult:
+            service = self._service("drive", "v3")
+            payload = service.files().list(
+                q=_drive_query(query),
+                pageSize=max_results or self._drive_default_max_results,
+                fields=(
+                    "files(id,name,mimeType,modifiedTime,webViewLink,webContentLink,owners(displayName))"
+                ),
+                orderBy="modifiedTime desc",
+            ).execute()
+            files = [
+                {
+                    "id": item.get("id"),
+                    "name": item.get("name"),
+                    "mime_type": item.get("mimeType"),
+                    "modified_time": item.get("modifiedTime"),
+                    "web_view_link": item.get("webViewLink"),
+                    "web_content_link": item.get("webContentLink"),
+                    "owner": (item.get("owners") or [{}])[0].get("displayName", ""),
+                }
+                for item in payload.get("files", [])
+            ]
+            self._log("drive_search", query=query, results=len(files))
+            return ToolResult(
+                name="drive_search",
+                payload={"query": query, "files": files},
+            )
+
+        return self._executor.run(_run)
 
     def drive_read_file(self, file_id: str) -> ToolResult:
-        service = self._service("drive", "v3")
-        metadata = service.files().get(
-            fileId=file_id,
-            fields="id,name,mimeType,modifiedTime,webViewLink,webContentLink",
-        ).execute()
-        mime_type = str(metadata.get("mimeType", ""))
-        content = ""
-        supported = False
-        if mime_type == "application/vnd.google-apps.document":
-            content = self._download_drive_text(file_id, export_mime_type="text/plain")
-            supported = True
-        elif mime_type == "application/vnd.google-apps.spreadsheet":
-            content = self._download_drive_text(file_id, export_mime_type="text/csv")
-            supported = True
-        elif mime_type in {
-            "text/plain",
-            "text/markdown",
-            "text/csv",
-            "application/json",
-        } or mime_type.startswith("text/"):
-            content = self._download_drive_text(file_id)
-            supported = True
-        self._log("drive_read_file", file_id=file_id, supported=supported)
-        return ToolResult(
-            name="drive_read_file",
-            payload={
-                "id": metadata.get("id"),
-                "name": metadata.get("name"),
-                "mime_type": mime_type,
-                "modified_time": metadata.get("modifiedTime"),
-                "web_view_link": metadata.get("webViewLink"),
-                "supported_content": supported,
-                "content": content[:12000],
-            },
-        )
+        def _run() -> ToolResult:
+            service = self._service("drive", "v3")
+            metadata = service.files().get(
+                fileId=file_id,
+                fields="id,name,mimeType,modifiedTime,webViewLink,webContentLink",
+            ).execute()
+            mime_type = str(metadata.get("mimeType", ""))
+            content = ""
+            supported = False
+            if mime_type == "application/vnd.google-apps.document":
+                content = self._download_drive_text(file_id, export_mime_type="text/plain")
+                supported = True
+            elif mime_type == "application/vnd.google-apps.spreadsheet":
+                content = self._download_drive_text(file_id, export_mime_type="text/csv")
+                supported = True
+            elif mime_type in {
+                "text/plain",
+                "text/markdown",
+                "text/csv",
+                "application/json",
+            } or mime_type.startswith("text/"):
+                content = self._download_drive_text(file_id)
+                supported = True
+            self._log("drive_read_file", file_id=file_id, supported=supported)
+            return ToolResult(
+                name="drive_read_file",
+                payload={
+                    "id": metadata.get("id"),
+                    "name": metadata.get("name"),
+                    "mime_type": mime_type,
+                    "modified_time": metadata.get("modifiedTime"),
+                    "web_view_link": metadata.get("webViewLink"),
+                    "supported_content": supported,
+                    "content": content[:12000],
+                },
+            )
+
+        return self._executor.run(_run)
 
     def _download_drive_text(
         self,
@@ -522,6 +565,23 @@ def _header_map(headers: list[dict[str, Any]]) -> dict[str, str]:
         if key:
             mapping[key] = str(item.get("value", ""))
     return mapping
+
+
+def _should_retry_google_error(exc: Exception) -> bool:
+    message = str(exc).lower()
+    retryable_markers = (
+        "429",
+        "500",
+        "502",
+        "503",
+        "504",
+        "backend error",
+        "rate limit",
+        "temporarily unavailable",
+        "timed out",
+        "timeout",
+    )
+    return any(marker in message for marker in retryable_markers)
 
 
 def _extract_gmail_body(payload: dict[str, Any]) -> str:

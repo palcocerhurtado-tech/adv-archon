@@ -14,13 +14,13 @@ from adv_archon.core.logging import AppLogger
 from adv_archon.core.memory import MemoryRecord, MemoryStore
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.core.tasks import TaskStore
-from adv_archon.tools.files import read_file
 from adv_archon.tools.google_workspace import GoogleWorkspaceTools
+from adv_archon.tools.guarded_files import GuardedFileTools
 from adv_archon.tools.knowledge_tools import KnowledgeTools
 from adv_archon.tools.personal import PersonalTools
 from adv_archon.tools.python_sandbox import PythonSandboxTool
 from adv_archon.tools.shell import AutoModeManager, ShellTool, format_shell_result
-from adv_archon.tools.web import web_search
+from adv_archon.tools.web import WebTools
 from adv_archon.ui.render import Renderer
 from adv_archon.voice.stt import WhisperSpeechToText
 from adv_archon.voice.tts import MacTextToSpeech
@@ -54,6 +54,8 @@ class CommandServices:
     shell_tool: ShellTool
     python_tool: PythonSandboxTool
     knowledge_tools: KnowledgeTools
+    file_tools: GuardedFileTools
+    web_tools: WebTools
     profile_manager: ProfileManager
     on_profile_changed: Callable[[str], None]
     tts: MacTextToSpeech
@@ -170,11 +172,30 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.renderer.show_info(f"Dictado: {result.text}")
         return CommandResult(handled=True, injected_prompt=result.text)
 
+    if command == "/voice-note":
+        title = argument or "Nota de voz ADV ARCHON"
+        services.renderer.show_info(f"Escuchando nota de voz... {services.stt.describe()}")
+        result = services.stt.listen_once()
+        create_result = services.personal_tools.notes_create(
+            title=title,
+            body=result.text,
+        )
+        services.logger.log(
+            "voice_note_created",
+            title=title,
+            chars=len(result.text),
+            duration_seconds=round(result.duration_seconds, 2),
+        )
+        services.renderer.show_info(
+            f"Nota de voz creada: {create_result.payload.get('title', title)}"
+        )
+        return CommandResult(handled=True)
+
     if command == "/read":
         if not argument:
             services.renderer.show_error("Uso: /read <path>")
             return CommandResult(handled=True)
-        read_result = read_file(argument)
+        read_result = services.file_tools.read_file(argument)
         path = Path(read_result.payload["path"])
         services.logger.log("slash_read", path=str(path))
         services.renderer.show_info(f"{path}:\n{read_result.payload['content']}")
@@ -184,7 +205,7 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         if not argument:
             services.renderer.show_error("Uso: /web <query>")
             return CommandResult(handled=True)
-        web_result = web_search(argument)
+        web_result = services.web_tools.web_search(argument)
         services.logger.log(
             "slash_web_search",
             query=argument,
@@ -212,6 +233,31 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
             _format_knowledge_results(vault_result.payload, label="Vault")
         )
         return CommandResult(handled=True)
+
+    if command == "/meeting":
+        prompt = (
+            f"prepárame la reunión {argument}" if argument else "prepárame la próxima reunión"
+        )
+        services.logger.log("slash_meeting", prompt=prompt)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
+    if command == "/triage":
+        prompt = (
+            f"hazme triage del gmail sobre {argument}"
+            if argument
+            else "hazme triage del gmail y dime qué correos requieren respuesta"
+        )
+        services.logger.log("slash_triage", prompt=prompt)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
+    if command == "/study":
+        prompt = (
+            f"actúa como study partner sobre {argument}"
+            if argument
+            else "actúa como study partner sobre el último documento que he abierto"
+        )
+        services.logger.log("slash_study", prompt=prompt)
+        return CommandResult(handled=True, injected_prompt=prompt)
 
     if command == "/run":
         if not argument:

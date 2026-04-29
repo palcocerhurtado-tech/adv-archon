@@ -21,6 +21,7 @@ from adv_archon.core.gmail_triage import build_reply_draft, triage_mailbox
 from adv_archon.core.intent import (
     IntentAnalysis,
     IntentRouter,
+    extract_municipality,
     looks_like_capability_query,
 )
 from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeSearchResult, KnowledgeStore
@@ -3580,6 +3581,8 @@ def _task_kind_for_intent(intent: str) -> TaskKind:
         return "fast"
     if intent == "coding":
         return "coding"
+    if intent == "compliance":
+        return "reasoning"
     if intent == "documents":
         return "documents"
     if intent == "research":

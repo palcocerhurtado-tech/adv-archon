@@ -164,8 +164,12 @@ if PYSIDE6_AVAILABLE:
                 return
             self._cancel_requested = False
             attachment_paths = [Path(raw_path) for raw_path in attachments]
+            prompt = _enrich_prompt_for_desktop(prompt, attachments)
+            has_pdf = any(str(p).lower().endswith(".pdf") for p in attachment_paths)
             initial_detail = (
-                "Leyendo adjuntos y preparando contexto…"
+                "Analizando plano arquitectónico…"
+                if has_pdf
+                else "Leyendo adjuntos y preparando contexto…"
                 if attachment_paths
                 else "Analizando petición…"
             )
@@ -323,6 +327,9 @@ def _tool_progress(name: str) -> int:
         "gmail_search": 55,
         "drive_search": 55,
         "notes_create": 80,
+        "pgou_add": 40,
+        "plan_compliance_check": 70,
+        "pgou_status": 20,
     }.get(name, 60)
 
 
@@ -339,7 +346,29 @@ def _tool_detail(name: str, *, has_attachments: bool) -> str:
         "gmail_search": "Triando Gmail…",
         "drive_search": "Buscando en Drive…",
         "notes_create": "Guardando en Notes…",
+        "pgou_add": "Indexando normativa urbanística del municipio…",
+        "plan_compliance_check": "Analizando cumplimiento normativo del plano…",
+        "pgou_status": "Consultando municipios indexados…",
     }
     if name == "read_file" and has_attachments:
         return "Leyendo adjuntos…"
     return details.get(name, "Procesando contexto…")
+
+
+def _enrich_prompt_for_desktop(prompt: str, attachments: list[str]) -> str:
+    """If no text given but PDFs are attached, build a natural compliance prompt."""
+    pdf_paths = [p for p in attachments if p.lower().endswith(".pdf")]
+    if not pdf_paths:
+        return prompt
+
+    stripped = prompt.strip()
+    if stripped:
+        return prompt
+
+    # User dropped a PDF without writing anything → ask for municipality
+    return (
+        "He subido un plano arquitectónico en PDF. "
+        "¿En qué municipio se ubica el proyecto? "
+        "Cuando me lo indiques, analizaré el cumplimiento normativo completo "
+        "contra el PGOU de ese municipio."
+    )

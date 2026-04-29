@@ -254,7 +254,11 @@ class ArchonRuntime:
         on_chunk: Callable[[str], None] | None = None,
         on_context: Callable[[TurnContextSnapshot], None] | None = None,
     ) -> LLMResponse:
-        final_prompt = format_prompt_with_attachments(prompt, attachments or ())
+        resolved_attachments = list(attachments or ())
+        enriched_prompt = _maybe_build_compliance_prompt(
+            prompt, resolved_attachments, self.urban_compliance_tools
+        )
+        final_prompt = format_prompt_with_attachments(enriched_prompt, resolved_attachments)
         return self.agent.stream_final_response(
             final_prompt,
             on_tool=on_tool,
@@ -507,6 +511,70 @@ class ArchonRuntime:
                 )
             )
         return specs
+
+
+def _maybe_build_compliance_prompt(
+    prompt: str,
+    attachments: list,
+    compliance_tools: "UrbanComplianceTools",
+) -> str:
+    """If the request looks like a plan compliance check, build a rich operator prompt."""
+    from adv_archon.core.intent import COMPLIANCE_KEYWORDS, extract_municipality, _normalize
+
+    pdf_paths = [
+        str(p) for p in attachments
+        if str(p).lower().endswith(".pdf")
+    ]
+    if not pdf_paths:
+        return prompt
+
+    text_lower = _normalize(prompt)
+    is_compliance = any(kw.replace("á","a").replace("é","e").replace("í","i")
+                        .replace("ó","o").replace("ú","u") in text_lower
+                        for kw in COMPLIANCE_KEYWORDS)
+    if not is_compliance:
+        return prompt
+
+    municipality = extract_municipality(prompt)
+    plan_path = pdf_paths[0]
+
+    if municipality is None:
+        return (
+            f"{prompt}\n\n"
+            "INSTRUCCIÓN INTERNA: Se ha detectado un plano PDF y keywords de normativa urbanística. "
+            "Pregunta al usuario en qué municipio se ubica el proyecto antes de continuar "
+            "con el análisis de cumplimiento normativo."
+        )
+
+    muni_status = compliance_tools.pgou_status()
+    indexed = [m["name"].lower() for m in muni_status.payload.get("municipalities", [])]
+    municipality_indexed = municipality.lower() in indexed
+
+    if not municipality_indexed:
+        return (
+            f"{prompt}\n\n"
+            "INSTRUCCIÓN INTERNA: Flujo de análisis normativo activado automáticamente.\n"
+            f"Municipio detectado: {municipality}\n"
+            f"Plano PDF: {plan_path}\n\n"
+            f"PASO 1: La normativa de {municipality} no está indexada todavía. "
+            f"Busca en la web el PGOU o las normas urbanísticas oficiales de {municipality} "
+            f"(portal web del ayuntamiento, BOE, boletín oficial de la comunidad autónoma). "
+            f"Descarga el texto y usa pgou_add con municipality='{municipality}'. "
+            f"PASO 2: Una vez indexado, usa plan_compliance_check con "
+            f"plan_path='{plan_path}' y municipality='{municipality}'. "
+            "PASO 3: Presenta el informe de cumplimiento de forma clara, con tabla de "
+            "parámetros (altura, superficies, retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
+        )
+
+    return (
+        f"{prompt}\n\n"
+        "INSTRUCCIÓN INTERNA: Flujo de análisis normativo activado automáticamente.\n"
+        f"Municipio detectado: {municipality} (normativa ya indexada ✓)\n"
+        f"Plano PDF: {plan_path}\n\n"
+        f"Usa plan_compliance_check con plan_path='{plan_path}' y municipality='{municipality}'. "
+        "Presenta el informe de cumplimiento de forma clara, con tabla de parámetros "
+        "(altura, superficies, retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
+    )
 
 
 def _build_urban_compliance_tool_specs(

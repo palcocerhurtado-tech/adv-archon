@@ -674,4 +674,51 @@ def _build_urban_compliance_tool_specs(
             },
             "fn": tools.plan_compliance_export,
         },
+        {
+            "name": "pgou_fetch",
+            "description": (
+                "Automatically download and index the PGOU (urban planning regulation) "
+                "for a municipality from its official source. "
+                "Use this instead of pgou_add when the user asks to fetch, download, or "
+                "auto-index a municipality's regulations."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "municipality": {
+                        "type": "string",
+                        "description": "Municipality name, e.g. 'Madrid', 'Sevilla'.",
+                    },
+                },
+                "required": ["municipality"],
+            },
+            "fn": tools.pgou_fetch,
+        },
+        {
+            "name": "pgou_fetch_all",
+            "description": (
+                "Automatically download and index PGOU regulations for all municipalities "
+                "in the catalogue. Skips already-indexed municipalities by default."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "skip_indexed": {
+                        "type": "boolean",
+                        "description": "If true (default), skip municipalities already indexed.",
+                    },
+                },
+                "required": [],
+            },
+            "fn": tools.pgou_fetch_all,
+        },
+        {
+            "name": "pgou_catalogue",
+            "description": (
+                "List all municipalities available for automatic PGOU fetching, "
+                "showing which are already indexed."
+            ),
+            "schema": {"type": "object", "properties": {}, "required": []},
+            "fn": tools.pgou_catalogue,
+        },
     ]

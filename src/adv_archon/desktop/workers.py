@@ -329,7 +329,11 @@ def _tool_progress(name: str) -> int:
         "notes_create": 80,
         "pgou_add": 40,
         "plan_compliance_check": 70,
+        "plan_compliance_export": 75,
         "pgou_status": 20,
+        "pgou_fetch": 50,
+        "pgou_fetch_all": 55,
+        "pgou_catalogue": 20,
     }.get(name, 60)
 
 
@@ -348,7 +352,11 @@ def _tool_detail(name: str, *, has_attachments: bool) -> str:
         "notes_create": "Guardando en Notes…",
         "pgou_add": "Indexando normativa urbanística del municipio…",
         "plan_compliance_check": "Analizando cumplimiento normativo del plano…",
+        "plan_compliance_export": "Generando informe PDF de cumplimiento…",
         "pgou_status": "Consultando municipios indexados…",
+        "pgou_fetch": "Descargando normativa urbanística desde la fuente oficial…",
+        "pgou_fetch_all": "Descargando normativa de todos los municipios del catálogo…",
+        "pgou_catalogue": "Consultando catálogo de municipios disponibles…",
     }
     if name == "read_file" and has_attachments:
         return "Leyendo adjuntos…"

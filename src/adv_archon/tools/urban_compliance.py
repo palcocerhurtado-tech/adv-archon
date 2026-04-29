@@ -10,6 +10,7 @@ from adv_archon.core.llm_types import LLMMessage
 from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.report_generator import generate_compliance_pdf
 from adv_archon.tools.urban_plan import PlanData, plan_to_summary, read_plan
+from adv_archon.tools.pgou_scraper import PGOUScraper
 
 
 @dataclass(slots=True)
@@ -44,6 +45,7 @@ class UrbanComplianceTools:
     ) -> None:
         self._store = pgou_store
         self._llm = llm
+        self._scraper = PGOUScraper(pgou_store)
 
     # ------------------------------------------------------------------ #
     # Tool: pgou_add                                                       #
@@ -74,6 +76,82 @@ class UrbanComplianceTools:
                 "municipality": municipality,
                 "chunks_indexed": chunk_count,
                 "source": source,
+            },
+        )
+
+    # ------------------------------------------------------------------ #
+    # Tool: pgou_fetch                                                     #
+    # ------------------------------------------------------------------ #
+
+    def pgou_fetch(
+        self,
+        municipality: str,
+        *,
+        progress_cb: Any = None,
+    ) -> ToolResult:
+        """Auto-fetch and index PGOU from the official source for a catalogued municipality."""
+        if not municipality.strip():
+            return ToolResult(
+                name="pgou_fetch",
+                payload={"ok": False, "error": "El nombre del municipio no puede estar vacío."},
+            )
+        result = self._scraper.scrape_and_index(municipality, progress_cb=progress_cb)
+        return ToolResult(name="pgou_fetch", payload=result)
+
+    # ------------------------------------------------------------------ #
+    # Tool: pgou_fetch_all                                                 #
+    # ------------------------------------------------------------------ #
+
+    def pgou_fetch_all(
+        self,
+        *,
+        skip_indexed: bool = True,
+        progress_cb: Any = None,
+    ) -> ToolResult:
+        """Fetch and index PGOU for all municipalities in the catalogue."""
+        results = self._scraper.scrape_all(
+            skip_indexed=skip_indexed,
+            progress_cb=progress_cb,
+        )
+        ok_count = sum(1 for r in results if r.get("ok") and not r.get("skipped"))
+        skipped = sum(1 for r in results if r.get("skipped"))
+        failed = [r for r in results if not r.get("ok")]
+        return ToolResult(
+            name="pgou_fetch_all",
+            payload={
+                "ok": True,
+                "indexed": ok_count,
+                "skipped": skipped,
+                "failed": len(failed),
+                "failures": [
+                    {"municipality": r.get("municipality"), "error": r.get("error")}
+                    for r in failed
+                ],
+            },
+        )
+
+    # ------------------------------------------------------------------ #
+    # Tool: pgou_catalogue                                                 #
+    # ------------------------------------------------------------------ #
+
+    def pgou_catalogue(self) -> ToolResult:
+        """List all municipalities available for auto-fetch."""
+        from adv_archon.tools.pgou_scraper import SOURCES
+        indexed_names = {m.name for m in self._store.list_municipalities()}
+        entries = [
+            {
+                "name": s.name,
+                "indexed": s.name in indexed_names,
+                "kind": s.kind,
+            }
+            for s in SOURCES
+        ]
+        return ToolResult(
+            name="pgou_catalogue",
+            payload={
+                "total": len(entries),
+                "indexed": sum(1 for e in entries if e["indexed"]),
+                "municipalities": entries,
             },
         )
 

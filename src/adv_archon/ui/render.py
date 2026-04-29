@@ -79,7 +79,7 @@ class Renderer:
         text.append("/study [query|path]\n")
         text.append("/memory [status|categories|list|remember|edit|forget]\n")
         text.append("/automation [status|presets|install|tasks]\n")
-        text.append("/pgou [status|add <municipio>|check <plano.pdf> <municipio>|report <plano.pdf> <municipio>|delete <municipio>]\n")
+        text.append("/pgou [status|catalogue|fetch [<municipio>|--all]|add <municipio>|check <plano.pdf> <municipio>|report <plano.pdf> <municipio>|delete <municipio>]\n")
         text.append("/run <cmd>\n")
         text.append("/python <code>\n")
         text.append("/recall <query>\n")

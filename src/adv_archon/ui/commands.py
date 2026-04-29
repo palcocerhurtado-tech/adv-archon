@@ -612,6 +612,41 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
         services.logger.log("slash_pgou_report", plan_path=plan_path, municipality=municipality)
         return CommandResult(handled=True, injected_prompt=prompt)
 
+    if subcommand == "fetch":
+        if not remainder or remainder == "--all":
+            # Fetch all catalogued municipalities
+            prompt = (
+                "Descarga e indexa automáticamente la normativa urbanística (PGOU) de todos "
+                "los municipios disponibles en el catálogo. "
+                "Usa la herramienta pgou_fetch_all con skip_indexed=true para saltar los que "
+                "ya estén indexados. Informa del progreso y del resultado final."
+            )
+            services.logger.log("slash_pgou_fetch_all")
+            return CommandResult(handled=True, injected_prompt=prompt)
+
+        # Fetch a specific municipality
+        prompt = (
+            f"Descarga e indexa automáticamente la normativa urbanística (PGOU) del municipio "
+            f"de {remainder} desde su fuente oficial. "
+            f"Usa la herramienta pgou_fetch con municipality='{remainder}'. "
+            f"Informa del resultado: cuántos fragmentos se indexaron y desde qué URL."
+        )
+        services.logger.log("slash_pgou_fetch", municipality=remainder)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
+    if subcommand == "catalogue":
+        result = services.urban_compliance_tools.pgou_catalogue()
+        payload = result.payload
+        entries = payload.get("municipalities", [])
+        total = payload.get("total", 0)
+        indexed = payload.get("indexed", 0)
+        lines = [f"Catálogo PGOU ({indexed}/{total} indexados):"]
+        for e in entries:
+            marker = "[OK]" if e["indexed"] else "[ ]"
+            lines.append(f"  {marker} {e['name']} ({e['kind']})")
+        services.renderer.show_info("\n".join(lines))
+        return CommandResult(handled=True)
+
     if subcommand == "delete":
         if not remainder:
             services.renderer.show_error("Uso: /pgou delete <municipio>")
@@ -624,7 +659,8 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
         return CommandResult(handled=True)
 
     services.renderer.show_error(
-        "Uso: /pgou [status | add <municipio> | check <plano.pdf> <municipio> | "
+        "Uso: /pgou [status | catalogue | fetch [<municipio>|--all] | "
+        "add <municipio> | check <plano.pdf> <municipio> | "
         "report <plano.pdf> <municipio> | delete <municipio>]"
     )
     return CommandResult(handled=True)

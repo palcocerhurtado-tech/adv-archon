@@ -177,6 +177,39 @@ PLAN_KEYWORDS = {
     "monta",
     "construye",
 }
+REASONING_KEYWORDS = {
+    "razona",
+    "razonamiento",
+    "razonar",
+    "deduce",
+    "deducir",
+    "infiere",
+    "inferir",
+    "step by step",
+    "paso a paso",
+    "explica por qué",
+    "explica porque",
+    "por qué funciona",
+    "por que funciona",
+    "demuestra",
+    "demostrar",
+    "prueba que",
+    "complejidad",
+    "algoritmo",
+    "optimiza",
+    "optimizar",
+    "arquitectura",
+    "diseña",
+    "disenar",
+    "tradeoff",
+    "trade-off",
+    "ventajas y desventajas",
+    "pros y contras",
+    "deep",
+    "think",
+    "piensa",
+    "reflexiona",
+}
 
 
 IntentCategory = (
@@ -244,6 +277,10 @@ class IntentRouter:
         if _contains_any(text, CODE_KEYWORDS):
             category_scores["coding"] += 3
             reasons.append("keywords de codigo")
+        if _contains_any(text, REASONING_KEYWORDS):
+            category_scores["coding"] += 2
+            category_scores["research"] += 2
+            reasons.append("keywords de razonamiento profundo")
         if _contains_any(text, DOCUMENT_KEYWORDS):
             category_scores["documents"] += 3
             reasons.append("keywords de documentos")

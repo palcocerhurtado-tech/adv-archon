@@ -106,6 +106,7 @@ class LLMConfig:
     planner_local_model: str | None = None
     document_local_model: str | None = None
     coding_local_model: str | None = None
+    reasoning_local_model: str | None = None
     fast_cloud_model: str | None = None
     planner_cloud_model: str | None = None
     document_cloud_model: str | None = None
@@ -326,6 +327,10 @@ def load_app_config(
         or None,
         coding_local_model=str(
             _lookup(data, "llm", "coding_local_model", default="")
+        ).strip()
+        or None,
+        reasoning_local_model=str(
+            _lookup(data, "llm", "reasoning_local_model", default="")
         ).strip()
         or None,
         fast_cloud_model=str(_lookup(data, "llm", "fast_cloud_model", default="")).strip()

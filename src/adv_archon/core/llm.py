@@ -21,6 +21,7 @@ TaskKind = Literal[
     "fast",
     "general",
     "planner",
+    "reasoning",
     "study",
     "web",
 ]
@@ -182,7 +183,7 @@ class LLMRouter:
             return "local"
         if not self._config.task_routing_enabled:
             return self.mode
-        if task in {"documents", "fast", "planner", "study"}:
+        if task in {"coding", "documents", "fast", "planner", "reasoning", "study"}:
             return "local"
         return self.mode
 
@@ -196,6 +197,7 @@ class LLMRouter:
                 "documents": self._config.document_local_model,
                 "fast": self._config.fast_local_model,
                 "planner": self._config.planner_local_model,
+                "reasoning": self._config.reasoning_local_model or self._config.coding_local_model,
                 "study": self._config.document_local_model,
             }
             return mapping.get(task or "general") or self._config.ollama_model

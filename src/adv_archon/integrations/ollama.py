@@ -15,6 +15,8 @@ class OllamaClient:
     model: str
     temperature: float
     timeout: float = 60.0
+    num_ctx: int = 8192
+    keep_alive: str = "-1"
 
     def complete(
         self,
@@ -27,7 +29,8 @@ class OllamaClient:
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": False,
-            "options": {"temperature": self.temperature},
+            "keep_alive": self.keep_alive,
+            "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
         }
         if response_mime_type == "application/json":
             payload["format"] = "json"
@@ -50,7 +53,8 @@ class OllamaClient:
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": True,
-            "options": {"temperature": self.temperature},
+            "keep_alive": self.keep_alive,
+            "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
         }
         chunks: list[str] = []
         usage = LLMUsage()

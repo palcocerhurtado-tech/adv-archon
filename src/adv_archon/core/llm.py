@@ -155,6 +155,8 @@ class LLMRouter:
             model=model,
             temperature=self._config.temperature,
             timeout=float(self._config.ollama_timeout_seconds),
+            num_ctx=self._config.ollama_num_ctx,
+            keep_alive=self._config.ollama_keep_alive,
         )
 
     def _resolve_route(

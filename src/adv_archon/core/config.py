@@ -113,6 +113,8 @@ class LLMConfig:
     coding_cloud_model: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: int = 180
+    ollama_num_ctx: int = 8192
+    ollama_keep_alive: str = "-1"
     gemini_api_key: str | None = None
     temperature: float = 0.2
     redact_cloud_pii: bool = False
@@ -353,6 +355,8 @@ def load_app_config(
             os.getenv("ADV_ARCHON_OLLAMA_TIMEOUT_SECONDS")
             or _lookup(data, "llm", "ollama_timeout_seconds", default=180)
         ),
+        ollama_num_ctx=int(_lookup(data, "llm", "ollama_num_ctx", default=8192)),
+        ollama_keep_alive=str(_lookup(data, "llm", "ollama_keep_alive", default="-1")),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         temperature=float(_lookup(data, "llm", "temperature", default=0.2)),
         redact_cloud_pii=bool(_lookup(data, "privacy", "redact_cloud_pii", default=False)),

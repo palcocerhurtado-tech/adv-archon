@@ -566,14 +566,24 @@ def _maybe_build_compliance_prompt(
             "parámetros (altura, superficies, retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
         )
 
+    wants_pdf = any(w in _normalize(prompt) for w in
+                    ("informe", "pdf", "exporta", "genera", "descarga", "report", "documento"))
+
+    tool_name = "plan_compliance_export" if wants_pdf else "plan_compliance_check"
+    extra = (
+        " El informe PDF se guardará en el Escritorio automáticamente."
+        if wants_pdf else
+        " Presenta el informe con tabla de parámetros (altura, superficies, "
+        "retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
+    )
+
     return (
         f"{prompt}\n\n"
         "INSTRUCCIÓN INTERNA: Flujo de análisis normativo activado automáticamente.\n"
         f"Municipio detectado: {municipality} (normativa ya indexada ✓)\n"
         f"Plano PDF: {plan_path}\n\n"
-        f"Usa plan_compliance_check con plan_path='{plan_path}' y municipality='{municipality}'. "
-        "Presenta el informe de cumplimiento de forma clara, con tabla de parámetros "
-        "(altura, superficies, retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
+        f"Usa {tool_name} con plan_path='{plan_path}' y municipality='{municipality}'."
+        f"{extra}"
     )
 
 
@@ -636,5 +646,32 @@ def _build_urban_compliance_tool_specs(
             "description": "List all municipalities with indexed PGOU regulations.",
             "schema": {"type": "object", "properties": {}, "required": []},
             "fn": tools.pgou_status,
+        },
+        {
+            "name": "plan_compliance_export",
+            "description": (
+                "Run a full compliance check on an architectural plan PDF and export the result "
+                "as a professional PDF report ready to share with clients or submit to the council. "
+                "Saves the PDF to the Desktop by default."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "plan_path": {
+                        "type": "string",
+                        "description": "Path to the architectural plan PDF.",
+                    },
+                    "municipality": {
+                        "type": "string",
+                        "description": "Municipality whose PGOU to check against.",
+                    },
+                    "output_path": {
+                        "type": "string",
+                        "description": "Optional output path for the PDF report.",
+                    },
+                },
+                "required": ["plan_path", "municipality"],
+            },
+            "fn": tools.plan_compliance_export,
         },
     ]

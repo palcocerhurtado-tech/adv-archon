@@ -8,6 +8,7 @@ from typing import Any
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage
 from adv_archon.core.pgou_store import PGOUStore
+from adv_archon.core.report_generator import generate_compliance_pdf
 from adv_archon.tools.urban_plan import PlanData, plan_to_summary, read_plan
 
 
@@ -148,6 +149,61 @@ class UrbanComplianceTools:
                     for m in munis
                 ],
                 "total": len(munis),
+            },
+        )
+
+    # ------------------------------------------------------------------ #
+    # Tool: plan_compliance_export                                         #
+    # ------------------------------------------------------------------ #
+
+    def plan_compliance_export(
+        self,
+        plan_path: str,
+        municipality: str,
+        output_path: str | None = None,
+    ) -> ToolResult:
+        """Run compliance check and export the result as a professional PDF report."""
+        check = self.plan_compliance_check(plan_path, municipality)
+        if not check.payload.get("ok"):
+            return ToolResult(
+                name="plan_compliance_export",
+                payload=check.payload,
+            )
+
+        if not output_path:
+            stem = Path(plan_path).stem
+            safe_muni = municipality.lower().replace(" ", "_")
+            ts = datetime.now().strftime("%Y%m%d_%H%M")
+            output_path = str(
+                Path.home() / "Desktop" / f"informe_{safe_muni}_{stem}_{ts}.pdf"
+            )
+
+        out = Path(output_path).expanduser()
+        try:
+            generate_compliance_pdf(
+                plan_path=plan_path,
+                municipality=municipality,
+                generated_at=check.payload["generated_at"],
+                summary=check.payload["summary"],
+                annotations=check.payload["annotations"],
+                full_analysis=check.payload["full_analysis"],
+                output_path=out,
+            )
+        except Exception as exc:
+            return ToolResult(
+                name="plan_compliance_export",
+                payload={"ok": False, "error": f"Error generando PDF: {exc}"},
+            )
+
+        return ToolResult(
+            name="plan_compliance_export",
+            payload={
+                "ok": True,
+                "pdf_path": str(out),
+                "plan": Path(plan_path).name,
+                "municipality": municipality,
+                "summary": check.payload["summary"],
+                "annotations_count": len(check.payload["annotations"]),
             },
         )
 

@@ -585,6 +585,33 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
         services.logger.log("slash_pgou_check", plan_path=plan_path, municipality=municipality)
         return CommandResult(handled=True, injected_prompt=prompt)
 
+    if subcommand == "report":
+        if not remainder:
+            services.renderer.show_error(
+                "Uso: /pgou report <ruta_plano.pdf> <municipio>\n"
+                "Ejemplo: /pgou report ~/Desktop/plano.pdf Madrid\n"
+                "Genera el análisis y exporta un PDF al Escritorio."
+            )
+            return CommandResult(handled=True)
+        parts = remainder.rsplit(" ", 1)
+        plan_path = parts[0].strip()
+        municipality = parts[1].strip() if len(parts) > 1 else ""
+        if not municipality:
+            services.renderer.show_error(
+                "Especifica también el municipio.\n"
+                "Ejemplo: /pgou report ~/Desktop/plano.pdf Madrid"
+            )
+            return CommandResult(handled=True)
+        prompt = (
+            f"Analiza el plano arquitectónico en '{plan_path}' contra la normativa "
+            f"de {municipality} y exporta el informe como PDF. "
+            f"Usa la herramienta plan_compliance_export con "
+            f"plan_path='{plan_path}' y municipality='{municipality}'. "
+            "Cuando termine, dime la ruta del PDF generado."
+        )
+        services.logger.log("slash_pgou_report", plan_path=plan_path, municipality=municipality)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
     if subcommand == "delete":
         if not remainder:
             services.renderer.show_error("Uso: /pgou delete <municipio>")
@@ -597,7 +624,8 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
         return CommandResult(handled=True)
 
     services.renderer.show_error(
-        "Uso: /pgou [status | add <municipio> | check <plano.pdf> <municipio> | delete <municipio>]"
+        "Uso: /pgou [status | add <municipio> | check <plano.pdf> <municipio> | "
+        "report <plano.pdf> <municipio> | delete <municipio>]"
     )
     return CommandResult(handled=True)
 

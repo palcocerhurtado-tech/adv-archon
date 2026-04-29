@@ -78,6 +78,7 @@ class PathsConfig:
     google_token_file: Path = field(init=False)
     sessions_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
+    pgou_db: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.config_file = self.root / "config.toml"
@@ -95,6 +96,7 @@ class PathsConfig:
         self.google_token_file = self.root / "google-token.json"
         self.sessions_dir = self.root / "sessions"
         self.logs_dir = self.root / "logs"
+        self.pgou_db = self.root / "pgou.db"
 
 
 @dataclass(slots=True)

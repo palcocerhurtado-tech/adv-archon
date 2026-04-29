@@ -21,6 +21,7 @@ from adv_archon.tools.personal import PersonalTools
 from adv_archon.tools.python_sandbox import PythonSandboxTool
 from adv_archon.tools.shell import AutoModeManager, ShellTool, format_shell_result
 from adv_archon.tools.task_tools import TaskTools
+from adv_archon.tools.urban_compliance import UrbanComplianceTools
 from adv_archon.tools.web import WebTools
 from adv_archon.ui.render import Renderer
 from adv_archon.voice.stt import WhisperSpeechToText
@@ -62,6 +63,7 @@ class CommandServices:
     on_profile_changed: Callable[[str], None]
     tts: MacTextToSpeech
     stt: WhisperSpeechToText
+    urban_compliance_tools: UrbanComplianceTools
 
 
 def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
@@ -275,6 +277,9 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
 
     if command == "/automation":
         return _handle_automation_command(argument, services=services)
+
+    if command == "/pgou":
+        return _handle_pgou(argument, services=services)
 
     if command == "/run":
         if not argument:
@@ -507,6 +512,93 @@ def _handle_automation_command(argument: str, *, services: CommandServices) -> C
         return CommandResult(handled=True)
 
     services.renderer.show_error("Uso: /automation [status|presets|install [foco]|tasks]")
+    return CommandResult(handled=True)
+
+
+def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
+    subcommand, _, remainder = argument.partition(" ")
+    subcommand = subcommand.strip().lower()
+    remainder = remainder.strip()
+
+    if not subcommand or subcommand == "status":
+        result = services.urban_compliance_tools.pgou_status()
+        payload = result.payload
+        munis = payload.get("municipalities", [])
+        if not munis:
+            services.renderer.show_info(
+                "No hay normativa indexada todavía.\n"
+                "Usa /pgou add <municipio> para indexar un PGOU.\n"
+                "Ejemplo: /pgou add Madrid"
+            )
+        else:
+            lines = [f"Municipios indexados ({payload['total']}):"]
+            for m in munis:
+                lines.append(
+                    f"  - {m['name']} | {m['chunks']} fragmentos | "
+                    f"indexado {m['indexed_at'][:10]}"
+                )
+            services.renderer.show_info("\n".join(lines))
+        return CommandResult(handled=True)
+
+    if subcommand == "add":
+        if not remainder:
+            services.renderer.show_error(
+                "Uso: /pgou add <municipio>\n"
+                "Proporciona el nombre del municipio. ARCHON buscará y descargará "
+                "la normativa urbanística automáticamente."
+            )
+            return CommandResult(handled=True)
+        prompt = (
+            f"Necesito indexar la normativa urbanística (PGOU o normas urbanísticas) "
+            f"del municipio de {remainder} en España. "
+            f"Busca el texto oficial en la web, descárgalo y luego usa la herramienta "
+            f"pgou_add para indexarlo con municipality='{remainder}'. "
+            f"Si no encuentras el PGOU completo, indexa al menos las normas urbanísticas "
+            f"o el resumen de parámetros edificatorios que encuentres."
+        )
+        services.logger.log("slash_pgou_add", municipality=remainder)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
+    if subcommand == "check":
+        if not remainder:
+            services.renderer.show_error(
+                "Uso: /pgou check <ruta_plano.pdf> [municipio]\n"
+                "Ejemplo: /pgou check ~/Desktop/plano.pdf Madrid"
+            )
+            return CommandResult(handled=True)
+        parts = remainder.rsplit(" ", 1)
+        plan_path = parts[0].strip()
+        municipality = parts[1].strip() if len(parts) > 1 else ""
+        if not municipality:
+            services.renderer.show_error(
+                "Especifica también el municipio.\n"
+                "Ejemplo: /pgou check ~/Desktop/plano.pdf Madrid"
+            )
+            return CommandResult(handled=True)
+        prompt = (
+            f"Analiza el plano arquitectónico en '{plan_path}' "
+            f"contra la normativa urbanística del municipio de {municipality}. "
+            f"Usa la herramienta plan_compliance_check con "
+            f"plan_path='{plan_path}' y municipality='{municipality}'. "
+            f"Luego presenta el informe de forma clara y ordenada."
+        )
+        services.logger.log("slash_pgou_check", plan_path=plan_path, municipality=municipality)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
+    if subcommand == "delete":
+        if not remainder:
+            services.renderer.show_error("Uso: /pgou delete <municipio>")
+            return CommandResult(handled=True)
+        deleted = services.urban_compliance_tools._store.delete_municipality(remainder)
+        if deleted:
+            services.renderer.show_info(f"Normativa de '{remainder}' eliminada.")
+        else:
+            services.renderer.show_error(f"No se encontró normativa indexada para '{remainder}'.")
+        return CommandResult(handled=True)
+
+    services.renderer.show_error(
+        "Uso: /pgou [status | add <municipio> | check <plano.pdf> <municipio> | delete <municipio>]"
+    )
     return CommandResult(handled=True)
 
 

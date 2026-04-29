@@ -31,6 +31,7 @@ from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
 from adv_archon.tools.web import WebTools
+from adv_archon.tools.urban_compliance import UrbanComplianceTools
 from adv_archon.tools.web_library_tools import (
     WebLibraryTools,
     build_web_library_tool_specs,
@@ -163,6 +164,9 @@ class ArchonRuntime:
             logger=self.logger,
         )
         self.web_library_tools = WebLibraryTools(self.web_library_store)
+        from adv_archon.core.pgou_store import PGOUStore
+        self.pgou_store = PGOUStore(config.paths.pgou_db, encoder=encoder)
+        self.urban_compliance_tools = UrbanComplianceTools(self.pgou_store, llm)
         self.task_store = TaskStore(
             config.paths.tasks_db,
             timezone_name=config.tasks.default_timezone,
@@ -294,6 +298,7 @@ class ArchonRuntime:
             on_profile_changed=self.apply_profile,
             tts=self.tts,
             stt=self.stt,
+            urban_compliance_tools=self.urban_compliance_tools,
         )
 
     def apply_profile(self, profile_name: str) -> None:
@@ -492,4 +497,76 @@ class ArchonRuntime:
                     fn=definition["fn"],
                 )
             )
+        for definition in _build_urban_compliance_tool_specs(self.urban_compliance_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
         return specs
+
+
+def _build_urban_compliance_tool_specs(
+    tools: "UrbanComplianceTools",
+) -> list[dict]:
+    return [
+        {
+            "name": "pgou_add",
+            "description": (
+                "Index the text of a municipal PGOU (urban planning regulation) "
+                "so it can be used for compliance analysis. "
+                "Pass the full text of the regulation and the municipality name."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "municipality": {
+                        "type": "string",
+                        "description": "Municipality name, e.g. 'Madrid', 'Barcelona'.",
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "Full text of the PGOU or urban regulation.",
+                    },
+                    "source": {
+                        "type": "string",
+                        "description": "Origin URL or file path of the regulation document.",
+                    },
+                },
+                "required": ["municipality", "text"],
+            },
+            "fn": tools.pgou_add,
+        },
+        {
+            "name": "plan_compliance_check",
+            "description": (
+                "Analyze an architectural plan PDF against the indexed PGOU of a municipality. "
+                "Returns a compliance report with annotations about heights, areas, setbacks, "
+                "land use, and buildability rules."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "plan_path": {
+                        "type": "string",
+                        "description": "Absolute or ~ path to the architectural plan PDF.",
+                    },
+                    "municipality": {
+                        "type": "string",
+                        "description": "Municipality whose PGOU to check against.",
+                    },
+                },
+                "required": ["plan_path", "municipality"],
+            },
+            "fn": tools.plan_compliance_check,
+        },
+        {
+            "name": "pgou_status",
+            "description": "List all municipalities with indexed PGOU regulations.",
+            "schema": {"type": "object", "properties": {}, "required": []},
+            "fn": tools.pgou_status,
+        },
+    ]

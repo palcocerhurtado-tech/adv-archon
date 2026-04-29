@@ -23,6 +23,10 @@ def desktop_stylesheet() -> str:
         background: {MATTE_BLACK};
         color: {WHITE};
     }}
+    QScrollArea#RootScroll {{
+        border: none;
+        background: {MATTE_BLACK};
+    }}
     QMainWindow {{
         background: {MATTE_BLACK};
     }}
@@ -41,10 +45,16 @@ def desktop_stylesheet() -> str:
     QFrame#ComposerCard,
     QFrame#SidebarCard,
     QFrame#AttachmentsCard,
-    QFrame#TranscriptCard {{
+    QFrame#TranscriptCard,
+    QFrame#OnboardingCard,
+    QFrame#OnboardingPromptCard {{
         background: {GRAPHITE};
         border: 1px solid {SOFT_GRAPHITE};
         border-radius: 22px;
+    }}
+    QFrame#OnboardingPromptCard {{
+        background: #171A1F;
+        border-radius: 18px;
     }}
     QLabel#HeroEyebrow {{
         color: {NEON_GREEN};
@@ -68,6 +78,16 @@ def desktop_stylesheet() -> str:
         font-size: 14px;
         font-weight: 700;
         padding-bottom: 2px;
+    }}
+    QLabel#OnboardingTitle {{
+        color: {WHITE};
+        font-size: 24px;
+        font-weight: 800;
+    }}
+    QLabel#OnboardingBody {{
+        color: {MUTED_TEXT};
+        font-size: 14px;
+        line-height: 1.4em;
     }}
     QLabel#StatusPill {{
         background: rgba(120, 255, 107, 0.12);
@@ -183,6 +203,15 @@ def desktop_stylesheet() -> str:
         color: {WHITE};
         border-color: {NEON_PINK};
     }}
+    QPushButton#QuickPromptButton {{
+        background: transparent;
+        border: 1px solid rgba(120, 255, 107, 0.3);
+        color: {WHITE};
+    }}
+    QPushButton#QuickPromptButton:hover {{
+        border-color: {NEON_GREEN};
+        background: rgba(120, 255, 107, 0.08);
+    }}
     QProgressBar {{
         background: #121417;
         color: {WHITE};
@@ -227,4 +256,3 @@ __all__ = [
     "desktop_stylesheet",
     "logo_path",
 ]
-

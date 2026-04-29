@@ -12,6 +12,8 @@ from adv_archon.desktop.presenters import (
     build_history_entry,
     format_sources_summary,
     merge_recent_items,
+    onboarding_cards,
+    recommended_window_size,
 )
 
 
@@ -24,7 +26,16 @@ def launch_desktop_app(
     incognito: bool = False,
 ) -> int:
     try:
-        from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
+        from PySide6.QtCore import (
+            QEasingCurve,
+            QObject,
+            QPropertyAnimation,
+            QSize,
+            Qt,
+            QThread,
+            QTimer,
+            Signal,
+        )
         from PySide6.QtGui import QAction, QIcon, QPixmap, QTextCursor
         from PySide6.QtWidgets import (
             QApplication,
@@ -40,7 +51,9 @@ def launch_desktop_app(
             QPlainTextEdit,
             QProgressBar,
             QPushButton,
+            QScrollArea,
             QSplitter,
+            QStackedWidget,
             QTextEdit,
             QVBoxLayout,
             QWidget,
@@ -116,10 +129,19 @@ def launch_desktop_app(
             self._logo_path = logo_path()
             self._logo_pixmap = QPixmap(str(self._logo_path)) if self._logo_path.exists() else None
             self.setWindowTitle("ADV ARCHON")
+            self.setMinimumSize(1080, 720)
             if self._logo_pixmap is not None:
                 icon = QIcon(str(self._logo_path))
                 self.setWindowIcon(icon)
-            self.resize(1280, 860)
+            screen = QApplication.primaryScreen()
+            if screen is not None:
+                width, height = recommended_window_size(
+                    screen.availableGeometry().width(),
+                    screen.availableGeometry().height(),
+                )
+                self.resize(width, height)
+            else:
+                self.resize(1280, 860)
             self._confirm_bridge = ConfirmBridge()
             self._confirm_bridge.requested.connect(self._show_confirmation_dialog)
             self._profile_manager = ProfileManager(
@@ -137,6 +159,9 @@ def launch_desktop_app(
             self._pending_prompt = ""
             self._pending_attachments: list[Path] = []
             self._current_chunked_reply = False
+            self._intro_played = False
+            self._staged_widgets: list[QWidget] = []
+            self._progress_animation = None
             self._busy_state = DesktopBusyState(backend_ready=False, busy=True, task="initializing")
             self._close_requested = False
             self._backend_thread = QThread(self)
@@ -173,6 +198,7 @@ def launch_desktop_app(
             self._build_ui()
             self._apply_branding()
             self._load_header_state()
+            self._fit_window_to_available_screen()
             self._append_system("Preparando backend desktop…")
             self._backend_thread.start()
 
@@ -198,16 +224,31 @@ def launch_desktop_app(
             self.shutdown_requested.emit()
             event.ignore()
 
+        def showEvent(self, event) -> None:  # type: ignore[override]
+            super().showEvent(event)
+            self._fit_window_to_available_screen()
+            if self._intro_played:
+                return
+            self._intro_played = True
+            QTimer.singleShot(80, self._play_intro_animation)
+
         def _build_ui(self) -> None:
+            scroll = QScrollArea()
+            scroll.setObjectName("RootScroll")
+            scroll.setWidgetResizable(True)
+            scroll.setFrameShape(QFrame.Shape.NoFrame)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
             root = QWidget()
             root.setObjectName("Root")
             layout = QVBoxLayout(root)
             layout.setContentsMargins(18, 18, 18, 18)
             layout.setSpacing(14)
 
-            hero_card = QFrame()
-            hero_card.setObjectName("HeroCard")
-            hero_layout = QVBoxLayout(hero_card)
+            self._hero_card = QFrame()
+            self._hero_card.setObjectName("HeroCard")
+            hero_layout = QVBoxLayout(self._hero_card)
             hero_layout.setContentsMargins(18, 18, 18, 18)
             hero_layout.setSpacing(14)
 
@@ -280,7 +321,7 @@ def launch_desktop_app(
             quick_actions.addStretch(1)
             hero_layout.addLayout(quick_actions)
 
-            layout.addWidget(hero_card)
+            layout.addWidget(self._hero_card)
 
             self._progress_bar = QProgressBar()
             self._progress_bar.setRange(0, 0)
@@ -289,6 +330,7 @@ def launch_desktop_app(
 
             splitter = QSplitter(Qt.Orientation.Horizontal)
             splitter.setHandleWidth(10)
+            splitter.setChildrenCollapsible(False)
             layout.addWidget(splitter, 1)
 
             chat_panel = QWidget()
@@ -296,12 +338,15 @@ def launch_desktop_app(
             chat_layout.setContentsMargins(0, 0, 0, 0)
             chat_layout.setSpacing(12)
 
-            transcript_card = QFrame()
-            transcript_card.setObjectName("TranscriptCard")
-            transcript_layout = QVBoxLayout(transcript_card)
+            self._transcript_card = QFrame()
+            self._transcript_card.setObjectName("TranscriptCard")
+            transcript_layout = QVBoxLayout(self._transcript_card)
             transcript_layout.setContentsMargins(16, 16, 16, 16)
             transcript_layout.setSpacing(10)
             transcript_layout.addWidget(self._section_label("Conversación"))
+
+            self._conversation_stack = QStackedWidget()
+            self._conversation_stack.addWidget(self._build_onboarding_panel())
 
             self._transcript = QPlainTextEdit()
             self._transcript.setObjectName("Transcript")
@@ -309,12 +354,14 @@ def launch_desktop_app(
             self._transcript.setPlaceholderText(
                 "Aquí aparecerá la conversación con ADV ARCHON."
             )
-            transcript_layout.addWidget(self._transcript, 1)
-            chat_layout.addWidget(transcript_card, 4)
+            self._conversation_stack.addWidget(self._transcript)
+            self._conversation_stack.setCurrentIndex(0)
+            transcript_layout.addWidget(self._conversation_stack, 1)
+            chat_layout.addWidget(self._transcript_card, 5)
 
-            attachments_card = QFrame()
-            attachments_card.setObjectName("AttachmentsCard")
-            attachments_layout = QVBoxLayout(attachments_card)
+            self._attachments_card = QFrame()
+            self._attachments_card.setObjectName("AttachmentsCard")
+            attachments_layout = QVBoxLayout(self._attachments_card)
             attachments_layout.setContentsMargins(16, 16, 16, 16)
             attachments_layout.setSpacing(10)
             attachment_bar = QHBoxLayout()
@@ -343,11 +390,11 @@ def launch_desktop_app(
                 "Se usarán en el próximo mensaje o podrán añadirse al conocimiento."
             )
             attachments_layout.addWidget(self._attachment_list)
-            chat_layout.addWidget(attachments_card, 2)
+            chat_layout.addWidget(self._attachments_card, 2)
 
-            composer_card = QFrame()
-            composer_card.setObjectName("ComposerCard")
-            composer_wrap = QVBoxLayout(composer_card)
+            self._composer_card = QFrame()
+            self._composer_card.setObjectName("ComposerCard")
+            composer_wrap = QVBoxLayout(self._composer_card)
             composer_wrap.setContentsMargins(16, 16, 16, 16)
             composer_wrap.setSpacing(10)
             composer_wrap.addWidget(self._section_label("Pide algo"))
@@ -380,16 +427,16 @@ def launch_desktop_app(
             send_column.addStretch(1)
             composer.addLayout(send_column)
             composer_wrap.addLayout(composer)
-            chat_layout.addWidget(composer_card, 2)
+            chat_layout.addWidget(self._composer_card, 2)
 
             context_panel = QWidget()
             context_layout = QVBoxLayout(context_panel)
             context_layout.setContentsMargins(0, 0, 0, 0)
             context_layout.setSpacing(12)
 
-            command_card = QFrame()
-            command_card.setObjectName("SidebarCard")
-            command_layout = QVBoxLayout(command_card)
+            self._command_card = QFrame()
+            self._command_card.setObjectName("SidebarCard")
+            command_layout = QVBoxLayout(self._command_card)
             command_layout.setContentsMargins(16, 16, 16, 16)
             command_layout.setSpacing(10)
             command_header = QHBoxLayout()
@@ -405,11 +452,11 @@ def launch_desktop_app(
             command_copy.addWidget(command_subtitle)
             command_header.addLayout(command_copy, 1)
             command_layout.addLayout(command_header)
-            context_layout.addWidget(command_card)
+            context_layout.addWidget(self._command_card)
 
-            context_card = QFrame()
-            context_card.setObjectName("PanelCard")
-            context_card_layout = QVBoxLayout(context_card)
+            self._context_card = QFrame()
+            self._context_card.setObjectName("PanelCard")
+            context_card_layout = QVBoxLayout(self._context_card)
             context_card_layout.setContentsMargins(16, 16, 16, 16)
             context_card_layout.setSpacing(10)
             context_card_layout.addWidget(self._section_label("Contexto y actividad"))
@@ -420,11 +467,11 @@ def launch_desktop_app(
                 "Aquí verás intención, perfil, checkpoint y herramientas usadas."
             )
             context_card_layout.addWidget(self._context_view, 1)
-            context_layout.addWidget(context_card, 2)
+            context_layout.addWidget(self._context_card, 2)
 
-            sources_card = QFrame()
-            sources_card.setObjectName("PanelCard")
-            sources_layout = QVBoxLayout(sources_card)
+            self._sources_card = QFrame()
+            self._sources_card.setObjectName("PanelCard")
+            sources_layout = QVBoxLayout(self._sources_card)
             sources_layout.setContentsMargins(16, 16, 16, 16)
             sources_layout.setSpacing(10)
             sources_layout.addWidget(self._section_label("Fuentes usadas"))
@@ -435,11 +482,11 @@ def launch_desktop_app(
                 "Memoria, conocimiento local y herramientas relevantes del turno."
             )
             sources_layout.addWidget(self._sources_view, 1)
-            context_layout.addWidget(sources_card, 2)
+            context_layout.addWidget(self._sources_card, 2)
 
-            history_card = QFrame()
-            history_card.setObjectName("PanelCard")
-            history_layout = QVBoxLayout(history_card)
+            self._history_card = QFrame()
+            self._history_card.setObjectName("PanelCard")
+            history_layout = QVBoxLayout(self._history_card)
             history_layout.setContentsMargins(16, 16, 16, 16)
             history_layout.setSpacing(10)
             history_layout.addWidget(self._section_label("Historial reciente"))
@@ -447,11 +494,11 @@ def launch_desktop_app(
             self._history_list.setObjectName("CompactList")
             self._history_list.setAlternatingRowColors(True)
             history_layout.addWidget(self._history_list, 1)
-            context_layout.addWidget(history_card, 2)
+            context_layout.addWidget(self._history_card, 2)
 
-            recent_attachments_card = QFrame()
-            recent_attachments_card.setObjectName("PanelCard")
-            recent_attachments_layout = QVBoxLayout(recent_attachments_card)
+            self._recent_attachments_card = QFrame()
+            self._recent_attachments_card.setObjectName("PanelCard")
+            recent_attachments_layout = QVBoxLayout(self._recent_attachments_card)
             recent_attachments_layout.setContentsMargins(16, 16, 16, 16)
             recent_attachments_layout.setSpacing(10)
             recent_attachments_layout.addWidget(self._section_label("Adjuntos recientes"))
@@ -459,13 +506,25 @@ def launch_desktop_app(
             self._recent_attachments_list.setObjectName("CompactList")
             self._recent_attachments_list.setAlternatingRowColors(True)
             recent_attachments_layout.addWidget(self._recent_attachments_list, 1)
-            context_layout.addWidget(recent_attachments_card, 2)
+            context_layout.addWidget(self._recent_attachments_card, 2)
+
+            chat_layout.setStretch(0, 5)
+            chat_layout.setStretch(1, 2)
+            chat_layout.setStretch(2, 2)
+            context_layout.setStretch(0, 0)
+            context_layout.setStretch(1, 2)
+            context_layout.setStretch(2, 2)
+            context_layout.setStretch(3, 2)
+            context_layout.setStretch(4, 2)
 
             splitter.addWidget(chat_panel)
             splitter.addWidget(context_panel)
+            splitter.setStretchFactor(0, 3)
+            splitter.setStretchFactor(1, 2)
             splitter.setSizes([860, 420])
 
-            self.setCentralWidget(root)
+            scroll.setWidget(root)
+            self.setCentralWidget(scroll)
 
             daily_action = QAction("Daily Brief", self)
             daily_action.triggered.connect(self._send_daily_prompt)
@@ -474,6 +533,81 @@ def launch_desktop_app(
 
         def _apply_branding(self) -> None:
             self.setStyleSheet(desktop_stylesheet())
+
+        def _fit_window_to_available_screen(self) -> None:
+            screen = self.screen() or QApplication.primaryScreen()
+            if screen is None:
+                return
+            available = screen.availableGeometry()
+            target_width, target_height = recommended_window_size(
+                available.width(),
+                available.height(),
+            )
+            width = min(max(self.width(), self.minimumWidth()), target_width)
+            height = min(max(self.height(), self.minimumHeight()), target_height)
+            self.resize(width, height)
+            frame = self.frameGeometry()
+            x = max(
+                available.left() + 12,
+                min(frame.x(), available.right() - frame.width() - 12),
+            )
+            y = max(
+                available.top() + 12,
+                min(frame.y(), available.bottom() - frame.height() - 12),
+            )
+            self.move(x, y)
+
+        def _build_onboarding_panel(self) -> QWidget:
+            panel = QFrame()
+            panel.setObjectName("OnboardingCard")
+            layout = QVBoxLayout(panel)
+            layout.setContentsMargins(22, 22, 22, 22)
+            layout.setSpacing(16)
+
+            top = QHBoxLayout()
+            top.setSpacing(14)
+            top.addWidget(self._build_logo_label(72))
+            copy = QVBoxLayout()
+            copy.setSpacing(4)
+            title = QLabel("Tu centro de mando está listo")
+            title.setObjectName("OnboardingTitle")
+            body = QLabel(
+                "Empieza con un briefing, estudia un documento o deja que ARCHON "
+                "te oriente con tus notas, correos y conocimiento local."
+            )
+            body.setWordWrap(True)
+            body.setObjectName("OnboardingBody")
+            copy.addWidget(title)
+            copy.addWidget(body)
+            top.addLayout(copy, 1)
+            layout.addLayout(top)
+
+            for card in onboarding_cards():
+                card_frame = QFrame()
+                card_frame.setObjectName("OnboardingPromptCard")
+                card_layout = QVBoxLayout(card_frame)
+                card_layout.setContentsMargins(14, 14, 14, 14)
+                card_layout.setSpacing(8)
+                card_title = QLabel(card.title)
+                card_title.setObjectName("SectionTitle")
+                card_body = QLabel(card.body)
+                card_body.setObjectName("OnboardingBody")
+                card_body.setWordWrap(True)
+                button = QPushButton("Lanzar")
+                button.setObjectName("QuickPromptButton")
+                if not self.windowIcon().isNull():
+                    button.setIcon(self.windowIcon())
+                    button.setIconSize(QSize(16, 16))
+                button.clicked.connect(
+                    lambda _checked=False, prompt=card.prompt: self._run_onboarding_prompt(prompt)
+                )
+                card_layout.addWidget(card_title)
+                card_layout.addWidget(card_body)
+                card_layout.addWidget(button, alignment=Qt.AlignmentFlag.AlignLeft)
+                layout.addWidget(card_frame)
+
+            layout.addStretch(1)
+            return panel
 
         def _build_logo_label(self, size: int) -> QLabel:
             label = QLabel()
@@ -495,6 +629,10 @@ def launch_desktop_app(
             label.setObjectName("SectionTitle")
             return label
 
+        def _run_onboarding_prompt(self, prompt: str) -> None:
+            self._input.setPlainText(prompt)
+            self._submit_prompt()
+
         def _decorate_button(self, button: QPushButton, *, role: str) -> None:
             role_names = {
                 "primary": "PrimaryButton",
@@ -512,6 +650,37 @@ def launch_desktop_app(
             self._mode_combo.setCurrentText(self._selected_mode)
             self._profile_combo.setCurrentText(self._selected_profile)
             self._handle_busy_state_changed(self._busy_state)
+
+        def _play_intro_animation(self) -> None:
+            widgets = [
+                self._hero_card,
+                self._transcript_card,
+                self._attachments_card,
+                self._composer_card,
+                self._command_card,
+                self._context_card,
+                self._sources_card,
+                self._history_card,
+                self._recent_attachments_card,
+            ]
+            self._staged_widgets = widgets
+            for widget in widgets:
+                widget.setVisible(False)
+            for index, widget in enumerate(widgets):
+                QTimer.singleShot(45 * index, lambda w=widget: self._reveal_widget(w))
+
+        def _reveal_widget(self, widget: QWidget) -> None:
+            widget.setVisible(True)
+            widget.update()
+
+        def _show_onboarding(self) -> None:
+            self._conversation_stack.setCurrentIndex(0)
+
+        def _show_transcript(self) -> None:
+            if self._conversation_stack.currentIndex() == 1:
+                return
+            self._conversation_stack.setCurrentIndex(1)
+            self._transcript.update()
 
         def _change_mode(self, mode: str) -> None:
             self._selected_mode = mode
@@ -538,6 +707,16 @@ def launch_desktop_app(
 
         def _refresh_status(self, message: str) -> None:
             self._status_label.setText(message)
+
+        def _animate_progress(self, value: int) -> None:
+            current = self._progress_bar.value()
+            animation = QPropertyAnimation(self._progress_bar, b"value", self)
+            animation.setDuration(220)
+            animation.setStartValue(current)
+            animation.setEndValue(value)
+            animation.setEasingCurve(QEasingCurve.Type.OutCubic)
+            animation.start()
+            self._progress_animation = animation
 
         def _handle_backend_ready(self, greeting: str) -> None:
             self._append_system(greeting)
@@ -616,6 +795,7 @@ def launch_desktop_app(
             if not prompt:
                 return
             attachments = list(self._attachments)
+            self._show_transcript()
             self._input.clear()
             self._pending_prompt = prompt
             self._pending_attachments = attachments
@@ -701,10 +881,10 @@ def launch_desktop_app(
                     self._progress_bar.setRange(0, 0)
                 else:
                     self._progress_bar.setRange(0, 100)
-                    self._progress_bar.setValue(max(0, min(100, state.progress)))
+                    self._animate_progress(max(0, min(100, state.progress)))
             else:
                 self._progress_bar.setRange(0, 100)
-                self._progress_bar.setValue(100)
+                self._animate_progress(100)
                 self._progress_bar.setVisible(False)
             self._refresh_status(
                 state.status_text(

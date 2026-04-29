@@ -4,6 +4,8 @@ from adv_archon.desktop.presenters import (
     build_history_entry,
     format_sources_summary,
     merge_recent_items,
+    onboarding_cards,
+    recommended_window_size,
 )
 
 
@@ -40,3 +42,19 @@ def test_merge_recent_items_deduplicates_and_keeps_latest_first() -> None:
 
     assert merged == ["C", "A", "B"]
 
+
+def test_recommended_window_size_respects_screen_bounds() -> None:
+    width, height = recommended_window_size(1512, 982)
+
+    assert width <= 1512
+    assert height <= 982
+    assert width >= 980
+    assert height >= 680
+
+
+def test_onboarding_cards_expose_actionable_prompts() -> None:
+    cards = onboarding_cards()
+
+    assert len(cards) == 3
+    assert any("briefing ejecutivo" in card.prompt for card in cards)
+    assert any("study partner" in card.prompt for card in cards)

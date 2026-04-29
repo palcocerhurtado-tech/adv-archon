@@ -61,6 +61,11 @@ class FakeRuntime:
         return self.response
 
 
+class InterruptingRuntime:
+    def send_prompt(self, prompt: str, **_kwargs) -> LLMResponse:
+        raise KeyboardInterrupt(prompt)
+
+
 def test_process_prompt_renders_non_streamed_response() -> None:
     app = ReplApp.__new__(ReplApp)
     app._renderer = FakeRenderer()
@@ -132,3 +137,19 @@ def test_process_prompt_strips_accidental_adv_wrapper() -> None:
     assert runtime.prompts == [
         "recuerda que ahora estoy investigando grimorios, simbolismo y textos esotéricos"
     ]
+
+
+def test_process_prompt_handles_keyboard_interrupt_gracefully() -> None:
+    app = ReplApp.__new__(ReplApp)
+    app._renderer = FakeRenderer()
+    app._runtime = InterruptingRuntime()
+    app._config = SimpleNamespace(
+        ui=SimpleNamespace(show_context_panel=True, show_tool_input=False)
+    )
+    app._maybe_speak = lambda _text: None
+
+    result = app._process_prompt("resume este PDF")
+
+    assert result is False
+    assert app._renderer.errors == []
+    assert app._renderer.infos[-1] == "Operación cancelada."

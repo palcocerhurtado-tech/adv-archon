@@ -161,6 +161,11 @@ class ReplApp:
                     on_chunk=on_chunk,
                     on_context=context_callback,
                 )
+        except KeyboardInterrupt:
+            if chunks:
+                self._renderer.finish_stream()
+            self._renderer.show_info("Operación cancelada.")
+            return False
         except Exception as exc:
             self._renderer.show_error(str(exc))
             return False

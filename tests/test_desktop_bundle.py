@@ -15,6 +15,8 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
     assert result.info_plist_path.exists()
     assert result.launcher_path.exists()
     assert os.access(result.launcher_path, os.X_OK)
+    assert result.icon_path is not None
+    assert result.icon_path.exists()
 
     launcher = result.launcher_path.read_text(encoding="utf-8")
     assert "/usr/bin/python3" in launcher
@@ -24,4 +26,4 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
         plist = plistlib.load(handle)
     assert plist["CFBundleName"] == "ADV ARCHON"
     assert plist["CFBundleExecutable"] == "adv-archon-desktop"
-
+    assert plist["CFBundleIconFile"] == result.icon_path.name

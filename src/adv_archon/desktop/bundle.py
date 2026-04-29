@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import plistlib
+import shutil
 import stat
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from adv_archon.desktop.branding import logo_path
 
 
 @dataclass(frozen=True, slots=True)
@@ -12,6 +15,7 @@ class DesktopBundleResult:
     app_path: Path
     launcher_path: Path
     info_plist_path: Path
+    icon_path: Path | None = None
 
 
 def create_macos_app_bundle(
@@ -28,6 +32,7 @@ def create_macos_app_bundle(
     resources_path = contents_path / "Resources"
     info_plist_path = contents_path / "Info.plist"
     launcher_path = macos_path / "adv-archon-desktop"
+    bundled_icon_path: Path | None = None
 
     resources_path.mkdir(parents=True, exist_ok=True)
     macos_path.mkdir(parents=True, exist_ok=True)
@@ -46,6 +51,11 @@ def create_macos_app_bundle(
     current_mode = launcher_path.stat().st_mode
     launcher_path.chmod(current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
+    source_logo = logo_path()
+    if source_logo.exists():
+        bundled_icon_path = resources_path / source_logo.name
+        shutil.copy2(source_logo, bundled_icon_path)
+
     info_plist = {
         "CFBundleName": app_name,
         "CFBundleDisplayName": app_name,
@@ -57,6 +67,8 @@ def create_macos_app_bundle(
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
     }
+    if bundled_icon_path is not None:
+        info_plist["CFBundleIconFile"] = bundled_icon_path.name
     with info_plist_path.open("wb") as handle:
         plistlib.dump(info_plist, handle)
 
@@ -64,6 +76,7 @@ def create_macos_app_bundle(
         app_path=app_path,
         launcher_path=launcher_path,
         info_plist_path=info_plist_path,
+        icon_path=bundled_icon_path,
     )
 
 

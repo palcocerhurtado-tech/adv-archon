@@ -7,6 +7,7 @@ from adv_archon.core.attachments import normalize_attachment_paths
 from adv_archon.core.config import AppConfig
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
+from adv_archon.desktop.branding import desktop_stylesheet, logo_path
 from adv_archon.desktop.presenters import (
     build_history_entry,
     format_sources_summary,
@@ -23,12 +24,13 @@ def launch_desktop_app(
     incognito: bool = False,
 ) -> int:
     try:
-        from PySide6.QtCore import QObject, Qt, QThread, Signal
-        from PySide6.QtGui import QAction, QTextCursor
+        from PySide6.QtCore import QObject, QSize, Qt, QThread, Signal
+        from PySide6.QtGui import QAction, QIcon, QPixmap, QTextCursor
         from PySide6.QtWidgets import (
             QApplication,
             QComboBox,
             QFileDialog,
+            QFrame,
             QHBoxLayout,
             QLabel,
             QListWidget,
@@ -111,7 +113,12 @@ def launch_desktop_app(
 
         def __init__(self) -> None:
             super().__init__()
+            self._logo_path = logo_path()
+            self._logo_pixmap = QPixmap(str(self._logo_path)) if self._logo_path.exists() else None
             self.setWindowTitle("ADV ARCHON")
+            if self._logo_pixmap is not None:
+                icon = QIcon(str(self._logo_path))
+                self.setWindowIcon(icon)
             self.resize(1280, 860)
             self._confirm_bridge = ConfirmBridge()
             self._confirm_bridge.requested.connect(self._show_confirmation_dialog)
@@ -164,6 +171,7 @@ def launch_desktop_app(
             self._backend_thread.finished.connect(self._backend_worker.deleteLater)
             self._backend_thread.finished.connect(self._backend_thread.deleteLater)
             self._build_ui()
+            self._apply_branding()
             self._load_header_state()
             self._append_system("Preparando backend desktop…")
             self._backend_thread.start()
@@ -192,28 +200,87 @@ def launch_desktop_app(
 
         def _build_ui(self) -> None:
             root = QWidget()
+            root.setObjectName("Root")
             layout = QVBoxLayout(root)
-            layout.setContentsMargins(14, 14, 14, 14)
-            layout.setSpacing(10)
+            layout.setContentsMargins(18, 18, 18, 18)
+            layout.setSpacing(14)
 
-            header = QHBoxLayout()
-            title = QLabel("ADV ARCHON Desktop")
-            title.setStyleSheet("font-size: 22px; font-weight: 700;")
+            hero_card = QFrame()
+            hero_card.setObjectName("HeroCard")
+            hero_layout = QVBoxLayout(hero_card)
+            hero_layout.setContentsMargins(18, 18, 18, 18)
+            hero_layout.setSpacing(14)
+
+            hero_top = QHBoxLayout()
+            hero_top.setSpacing(18)
+            hero_top.addWidget(self._build_logo_label(88))
+
+            hero_copy = QVBoxLayout()
+            hero_copy.setSpacing(4)
+            eyebrow = QLabel("Local-First Executive AI")
+            eyebrow.setObjectName("HeroEyebrow")
+            hero_title = QLabel("ADV ARCHON Desktop")
+            hero_title.setObjectName("HeroTitle")
+            hero_subtitle = QLabel(
+                "Una consola ejecutiva privada para estudiar, decidir y operar desde tu Mac "
+                "con memoria, documentos, agenda y automatización."
+            )
+            hero_subtitle.setWordWrap(True)
+            hero_subtitle.setObjectName("HeroSubtitle")
+            hero_copy.addWidget(eyebrow)
+            hero_copy.addWidget(hero_title)
+            hero_copy.addWidget(hero_subtitle)
+            hero_top.addLayout(hero_copy, 1)
+
+            controls_column = QVBoxLayout()
+            controls_column.setSpacing(10)
+
+            controls_row = QHBoxLayout()
+            controls_row.setSpacing(8)
+            mode_label = QLabel("Modo")
+            mode_label.setObjectName("MetaLabel")
             self._mode_combo = QComboBox()
             self._mode_combo.addItems(["local", "cloud"])
             self._mode_combo.currentTextChanged.connect(self._change_mode)
+            profile_label = QLabel("Perfil")
+            profile_label.setObjectName("MetaLabel")
             self._profile_combo = QComboBox()
             self._profile_combo.addItems(self._profile_manager.available_profiles())
             self._profile_combo.currentTextChanged.connect(self._change_profile)
+            controls_row.addWidget(mode_label)
+            controls_row.addWidget(self._mode_combo)
+            controls_row.addWidget(profile_label)
+            controls_row.addWidget(self._profile_combo)
+            controls_column.addLayout(controls_row)
+
             self._status_label = QLabel("")
-            header.addWidget(title)
-            header.addStretch(1)
-            header.addWidget(QLabel("Modo"))
-            header.addWidget(self._mode_combo)
-            header.addWidget(QLabel("Perfil"))
-            header.addWidget(self._profile_combo)
-            header.addWidget(self._status_label)
-            layout.addLayout(header)
+            self._status_label.setObjectName("StatusPill")
+            controls_column.addWidget(self._status_label, alignment=Qt.AlignmentFlag.AlignRight)
+            hero_top.addLayout(controls_column)
+            hero_layout.addLayout(hero_top)
+
+            quick_actions = QHBoxLayout()
+            quick_actions.setSpacing(10)
+            self._daily_action_button = QPushButton("Briefing diario")
+            self._daily_action_button.clicked.connect(self._send_daily_prompt)
+            self._decorate_button(self._daily_action_button, role="primary")
+            self._briefing_action_button = QPushButton("Modo ejecutivo")
+            self._briefing_action_button.clicked.connect(self._send_briefing_prompt)
+            self._decorate_button(self._briefing_action_button, role="accent")
+            self._triage_action_button = QPushButton("Triage Gmail")
+            self._triage_action_button.clicked.connect(self._send_triage_prompt)
+            self._decorate_button(self._triage_action_button, role="secondary")
+            self._study_action_button = QPushButton("Study partner")
+            self._study_action_button.clicked.connect(self._send_study_prompt)
+            self._decorate_button(self._study_action_button, role="ghost")
+            quick_actions.addWidget(self._daily_action_button)
+            quick_actions.addWidget(self._briefing_action_button)
+            quick_actions.addWidget(self._triage_action_button)
+            quick_actions.addWidget(self._study_action_button)
+            quick_actions.addStretch(1)
+            hero_layout.addLayout(quick_actions)
+
+            layout.addWidget(hero_card)
 
             self._progress_bar = QProgressBar()
             self._progress_bar.setRange(0, 0)
@@ -221,97 +288,182 @@ def launch_desktop_app(
             layout.addWidget(self._progress_bar)
 
             splitter = QSplitter(Qt.Orientation.Horizontal)
+            splitter.setHandleWidth(10)
             layout.addWidget(splitter, 1)
 
             chat_panel = QWidget()
             chat_layout = QVBoxLayout(chat_panel)
             chat_layout.setContentsMargins(0, 0, 0, 0)
-            chat_layout.setSpacing(8)
+            chat_layout.setSpacing(12)
+
+            transcript_card = QFrame()
+            transcript_card.setObjectName("TranscriptCard")
+            transcript_layout = QVBoxLayout(transcript_card)
+            transcript_layout.setContentsMargins(16, 16, 16, 16)
+            transcript_layout.setSpacing(10)
+            transcript_layout.addWidget(self._section_label("Conversación"))
 
             self._transcript = QPlainTextEdit()
+            self._transcript.setObjectName("Transcript")
             self._transcript.setReadOnly(True)
-            self._transcript.setPlaceholderText("Aquí aparecerá la conversación con ADV ARCHON.")
-            chat_layout.addWidget(self._transcript, 1)
+            self._transcript.setPlaceholderText(
+                "Aquí aparecerá la conversación con ADV ARCHON."
+            )
+            transcript_layout.addWidget(self._transcript, 1)
+            chat_layout.addWidget(transcript_card, 4)
 
+            attachments_card = QFrame()
+            attachments_card.setObjectName("AttachmentsCard")
+            attachments_layout = QVBoxLayout(attachments_card)
+            attachments_layout.setContentsMargins(16, 16, 16, 16)
+            attachments_layout.setSpacing(10)
             attachment_bar = QHBoxLayout()
-            attachment_bar.addWidget(QLabel("Adjuntos"))
+            attachment_bar.addWidget(self._section_label("Adjuntos activos"))
+            attachment_bar.addStretch(1)
             self._add_button = QPushButton("Añadir archivos")
             self._add_button.clicked.connect(self._pick_attachments)
+            self._decorate_button(self._add_button, role="ghost")
             self._remove_button = QPushButton("Quitar seleccionados")
             self._remove_button.clicked.connect(self._remove_selected_attachments)
+            self._decorate_button(self._remove_button, role="ghost")
             self._import_button = QPushButton("Añadir al conocimiento")
             self._import_button.clicked.connect(self._import_selected_attachments)
-            attachment_bar.addStretch(1)
+            self._decorate_button(self._import_button, role="accent")
             attachment_bar.addWidget(self._add_button)
             attachment_bar.addWidget(self._remove_button)
             attachment_bar.addWidget(self._import_button)
-            chat_layout.addLayout(attachment_bar)
+            attachments_layout.addLayout(attachment_bar)
 
             self._attachment_list = AttachmentList()
+            self._attachment_list.setObjectName("AttachmentList")
             self._attachment_list.setAlternatingRowColors(True)
             self._attachment_list.files_dropped.connect(self._add_attachments)
             self._attachment_list.setToolTip(
                 "Arrastra aquí archivos o carpetas desde Finder. "
                 "Se usarán en el próximo mensaje o podrán añadirse al conocimiento."
             )
-            chat_layout.addWidget(self._attachment_list)
+            attachments_layout.addWidget(self._attachment_list)
+            chat_layout.addWidget(attachments_card, 2)
+
+            composer_card = QFrame()
+            composer_card.setObjectName("ComposerCard")
+            composer_wrap = QVBoxLayout(composer_card)
+            composer_wrap.setContentsMargins(16, 16, 16, 16)
+            composer_wrap.setSpacing(10)
+            composer_wrap.addWidget(self._section_label("Pide algo"))
 
             composer = QHBoxLayout()
+            composer.setSpacing(12)
             self._input = QTextEdit()
+            self._input.setObjectName("PromptInput")
             self._input.setAcceptRichText(False)
             self._input.setPlaceholderText(
-                "Escribe tu petición o arrastra archivos aquí arriba. "
-                "También puedes pedir resúmenes, notas o análisis sobre adjuntos."
+                "Escribe tu petición con lenguaje natural. Puedes pedir briefings, "
+                "resúmenes, comparaciones, notas o acciones sobre adjuntos."
             )
             self._input.setFixedHeight(110)
             composer.addWidget(self._input, 1)
             send_column = QVBoxLayout()
+            send_column.setSpacing(10)
             self._send_button = QPushButton("Enviar")
             self._send_button.clicked.connect(self._submit_prompt)
+            self._decorate_button(self._send_button, role="primary")
             self._cancel_button = QPushButton("Cancelar")
             self._cancel_button.clicked.connect(self._cancel_active_task)
+            self._decorate_button(self._cancel_button, role="accent")
             self._clear_button = QPushButton("Limpiar adjuntos")
             self._clear_button.clicked.connect(self._clear_attachments)
+            self._decorate_button(self._clear_button, role="ghost")
             send_column.addWidget(self._send_button)
             send_column.addWidget(self._cancel_button)
             send_column.addWidget(self._clear_button)
             send_column.addStretch(1)
             composer.addLayout(send_column)
-            chat_layout.addLayout(composer)
+            composer_wrap.addLayout(composer)
+            chat_layout.addWidget(composer_card, 2)
 
             context_panel = QWidget()
             context_layout = QVBoxLayout(context_panel)
             context_layout.setContentsMargins(0, 0, 0, 0)
-            context_layout.setSpacing(8)
-            context_layout.addWidget(QLabel("Contexto y actividad"))
+            context_layout.setSpacing(12)
+
+            command_card = QFrame()
+            command_card.setObjectName("SidebarCard")
+            command_layout = QVBoxLayout(command_card)
+            command_layout.setContentsMargins(16, 16, 16, 16)
+            command_layout.setSpacing(10)
+            command_header = QHBoxLayout()
+            command_header.addWidget(self._build_logo_label(44))
+            command_copy = QVBoxLayout()
+            command_copy.setSpacing(2)
+            command_title = QLabel("Centro de mando")
+            command_title.setObjectName("SectionTitle")
+            command_subtitle = QLabel("Contexto, fuentes y rastro útil del turno actual.")
+            command_subtitle.setObjectName("HeroSubtitle")
+            command_subtitle.setWordWrap(True)
+            command_copy.addWidget(command_title)
+            command_copy.addWidget(command_subtitle)
+            command_header.addLayout(command_copy, 1)
+            command_layout.addLayout(command_header)
+            context_layout.addWidget(command_card)
+
+            context_card = QFrame()
+            context_card.setObjectName("PanelCard")
+            context_card_layout = QVBoxLayout(context_card)
+            context_card_layout.setContentsMargins(16, 16, 16, 16)
+            context_card_layout.setSpacing(10)
+            context_card_layout.addWidget(self._section_label("Contexto y actividad"))
             self._context_view = QPlainTextEdit()
+            self._context_view.setObjectName("SidebarPanel")
             self._context_view.setReadOnly(True)
             self._context_view.setPlaceholderText(
                 "Aquí verás intención, perfil, checkpoint y herramientas usadas."
             )
-            context_layout.addWidget(self._context_view, 1)
+            context_card_layout.addWidget(self._context_view, 1)
+            context_layout.addWidget(context_card, 2)
 
-            context_layout.addWidget(QLabel("Fuentes usadas"))
+            sources_card = QFrame()
+            sources_card.setObjectName("PanelCard")
+            sources_layout = QVBoxLayout(sources_card)
+            sources_layout.setContentsMargins(16, 16, 16, 16)
+            sources_layout.setSpacing(10)
+            sources_layout.addWidget(self._section_label("Fuentes usadas"))
             self._sources_view = QPlainTextEdit()
+            self._sources_view.setObjectName("SidebarPanel")
             self._sources_view.setReadOnly(True)
             self._sources_view.setPlaceholderText(
                 "Memoria, conocimiento local y herramientas relevantes del turno."
             )
-            context_layout.addWidget(self._sources_view, 1)
+            sources_layout.addWidget(self._sources_view, 1)
+            context_layout.addWidget(sources_card, 2)
 
-            context_layout.addWidget(QLabel("Historial reciente"))
+            history_card = QFrame()
+            history_card.setObjectName("PanelCard")
+            history_layout = QVBoxLayout(history_card)
+            history_layout.setContentsMargins(16, 16, 16, 16)
+            history_layout.setSpacing(10)
+            history_layout.addWidget(self._section_label("Historial reciente"))
             self._history_list = QListWidget()
+            self._history_list.setObjectName("CompactList")
             self._history_list.setAlternatingRowColors(True)
-            context_layout.addWidget(self._history_list, 1)
+            history_layout.addWidget(self._history_list, 1)
+            context_layout.addWidget(history_card, 2)
 
-            context_layout.addWidget(QLabel("Adjuntos recientes"))
+            recent_attachments_card = QFrame()
+            recent_attachments_card.setObjectName("PanelCard")
+            recent_attachments_layout = QVBoxLayout(recent_attachments_card)
+            recent_attachments_layout.setContentsMargins(16, 16, 16, 16)
+            recent_attachments_layout.setSpacing(10)
+            recent_attachments_layout.addWidget(self._section_label("Adjuntos recientes"))
             self._recent_attachments_list = QListWidget()
+            self._recent_attachments_list.setObjectName("CompactList")
             self._recent_attachments_list.setAlternatingRowColors(True)
-            context_layout.addWidget(self._recent_attachments_list, 1)
+            recent_attachments_layout.addWidget(self._recent_attachments_list, 1)
+            context_layout.addWidget(recent_attachments_card, 2)
 
             splitter.addWidget(chat_panel)
             splitter.addWidget(context_panel)
-            splitter.setSizes([820, 420])
+            splitter.setSizes([860, 420])
 
             self.setCentralWidget(root)
 
@@ -320,15 +472,46 @@ def launch_desktop_app(
             self._daily_action = daily_action
             self.menuBar().addAction(daily_action)
 
+        def _apply_branding(self) -> None:
+            self.setStyleSheet(desktop_stylesheet())
+
+        def _build_logo_label(self, size: int) -> QLabel:
+            label = QLabel()
+            label.setFixedSize(size, size)
+            label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            if self._logo_pixmap is not None and not self._logo_pixmap.isNull():
+                label.setPixmap(
+                    self._logo_pixmap.scaled(
+                        size,
+                        size,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+            return label
+
+        def _section_label(self, text: str) -> QLabel:
+            label = QLabel(text)
+            label.setObjectName("SectionTitle")
+            return label
+
+        def _decorate_button(self, button: QPushButton, *, role: str) -> None:
+            role_names = {
+                "primary": "PrimaryButton",
+                "accent": "AccentButton",
+                "ghost": "GhostButton",
+                "secondary": "",
+            }
+            button.setObjectName(role_names.get(role, ""))
+            if self.windowIcon().isNull():
+                return
+            button.setIcon(self.windowIcon())
+            button.setIconSize(QSize(18, 18))
+
         def _load_header_state(self) -> None:
             self._mode_combo.setCurrentText(self._selected_mode)
             self._profile_combo.setCurrentText(self._selected_profile)
-            self._refresh_status(
-                self._busy_state.status_text(
-                    mode=self._selected_mode,
-                    profile=self._selected_profile,
-                )
-            )
+            self._handle_busy_state_changed(self._busy_state)
 
         def _change_mode(self, mode: str) -> None:
             self._selected_mode = mode
@@ -451,6 +634,33 @@ def launch_desktop_app(
             )
             self._submit_prompt()
 
+        def _send_briefing_prompt(self) -> None:
+            self._input.setPlainText(
+                "dame un briefing ejecutivo del día con foco en prioridades, "
+                "agenda, correos y próximos riesgos"
+            )
+            self._submit_prompt()
+
+        def _send_triage_prompt(self) -> None:
+            self._input.setPlainText(
+                "hazme triage del gmail y dime qué responder hoy, con borradores si hace falta"
+            )
+            self._submit_prompt()
+
+        def _send_study_prompt(self) -> None:
+            if self._attachments:
+                prompt = (
+                    "actúa como study partner sobre estos adjuntos. "
+                    "Dame ideas clave, preguntas y un mini plan de repaso."
+                )
+            else:
+                prompt = (
+                    "actúa como study partner sobre el último documento relevante que "
+                    "hayamos leído y prepara un repaso breve."
+                )
+            self._input.setPlainText(prompt)
+            self._submit_prompt()
+
         def _set_busy(self, busy: bool, *, task: str | None = None) -> None:
             next_task = task or self._busy_state.task
             self._handle_busy_state_changed(
@@ -480,6 +690,10 @@ def launch_desktop_app(
             self._mode_combo.setEnabled(allows_configuration)
             self._profile_combo.setEnabled(allows_configuration)
             self._daily_action.setEnabled(can_dispatch)
+            self._daily_action_button.setEnabled(can_dispatch)
+            self._briefing_action_button.setEnabled(can_dispatch)
+            self._triage_action_button.setEnabled(can_dispatch)
+            self._study_action_button.setEnabled(can_dispatch)
             self._cancel_button.setEnabled(state.cancellable)
             if state.busy:
                 self._progress_bar.setVisible(True)
@@ -655,6 +869,9 @@ def launch_desktop_app(
     import sys
 
     app = QApplication.instance() or QApplication(sys.argv)
+    resolved_logo = logo_path()
+    if resolved_logo.exists():
+        app.setWindowIcon(QIcon(str(resolved_logo)))
     window = DesktopWindow()
     window.show()
     return app.exec()

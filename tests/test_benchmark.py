@@ -9,6 +9,8 @@ from adv_archon.core.benchmark import (
     has_confidence_block,
     run_benchmarks,
     score_grounding,
+    score_latency,
+    score_memory_recall,
 )
 from adv_archon.core.evals import KnowledgeRetrievalEval
 from adv_archon.core.llm_types import LLMResponse, LLMUsage
@@ -93,7 +95,9 @@ def test_evaluate_benchmark_case_rewards_local_grounding_and_citations() -> None
     assert result.passed is True
     assert result.grounding.score == 1.0
     assert result.local_knowledge.score == 1.0
+    assert result.memory_recall.score == 1.0
     assert result.confidence_citations.score == 1.0
+    assert result.latency.score == 1.0
     assert result.confidence_block_present is True
     assert result.citations == (
         "conocimiento local: roadmap-acme.md | /tmp/docs/roadmap-acme.md",
@@ -133,6 +137,8 @@ def test_benchmark_runner_builds_summary_and_captures_failures() -> None:
     assert summary.failed_cases == 1
     assert summary.pass_rate == 0.5
     assert summary.average_score == 0.5
+    assert summary.average_memory_recall == 0.5
+    assert summary.average_latency_score == 0.5
     assert summary.total_duration_seconds == 0.6
     assert summary.average_duration_seconds == 0.3
     assert summary.results[0].provider == "fake"
@@ -161,3 +167,36 @@ def test_run_benchmarks_wraps_runner() -> None:
     assert summary.passed_cases == 1
     assert summary.results[0].response_text == "Hola desde benchmark."
     assert summary.results[0].duration_seconds == 0.4
+
+
+def test_score_memory_recall_matches_seeded_hints() -> None:
+    case = BenchmarkCase(
+        case_id="memory-interests",
+        prompt="que sabes ya de mis intereses actuales",
+        expected_memory_hints=("grimorios",),
+        require_memory=True,
+    )
+
+    metric = score_memory_recall(
+        case,
+        BenchmarkEvidence(
+            response_text="Recuerdo tus intereses.",
+            memory_hits=("Estoy investigando grimorios y simbolismo",),
+        ),
+    )
+
+    assert metric.passed is True
+    assert metric.score == 1.0
+
+
+def test_score_latency_enforces_max_duration_threshold() -> None:
+    case = BenchmarkCase(
+        case_id="latency",
+        prompt="hola",
+        max_duration_seconds=2.0,
+    )
+
+    metric = score_latency(case, duration_seconds=3.0)
+
+    assert metric.passed is False
+    assert metric.score < 1.0

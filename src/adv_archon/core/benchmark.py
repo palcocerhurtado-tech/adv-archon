@@ -19,11 +19,15 @@ _WHITESPACE_RE = re.compile(r"\s+")
 class BenchmarkCase:
     case_id: str
     prompt: str
+    seed_memories: tuple[dict[str, object], ...] = ()
     expected_facts: tuple[str, ...] = ()
     forbidden_facts: tuple[str, ...] = ()
     expected_citation_hints: tuple[str, ...] = ()
+    expected_memory_hints: tuple[str, ...] = ()
     require_local_knowledge: bool = False
     require_confidence_block: bool = False
+    require_memory: bool = False
+    max_duration_seconds: float | None = None
     pass_threshold: float = 0.7
     tags: tuple[str, ...] = ()
 
@@ -34,6 +38,7 @@ class BenchmarkEvidence:
     knowledge_eval: KnowledgeRetrievalEval | None = None
     used_local_knowledge: bool = False
     local_knowledge_hits: tuple[str, ...] = ()
+    memory_hits: tuple[str, ...] = ()
     citations: tuple[str, ...] = ()
     provider: str | None = None
     model: str | None = None
@@ -54,7 +59,9 @@ class BenchmarkCaseResult:
     response_text: str
     grounding: BenchmarkMetric
     local_knowledge: BenchmarkMetric
+    memory_recall: BenchmarkMetric
     confidence_citations: BenchmarkMetric
+    latency: BenchmarkMetric
     overall_score: float
     passed: bool
     duration_seconds: float
@@ -76,7 +83,9 @@ class BenchmarkSummary:
     average_score: float
     average_grounding: float
     average_local_knowledge: float
+    average_memory_recall: float
     average_confidence_citations: float
+    average_latency_score: float
     total_duration_seconds: float
     average_duration_seconds: float
 
@@ -136,28 +145,36 @@ def evaluate_benchmark_case(
     citations = _collect_citations(evidence)
     grounding = score_grounding(case, evidence)
     local_knowledge = score_local_knowledge_usage(case, evidence)
+    memory_recall = score_memory_recall(case, evidence)
     confidence_citations = score_confidence_citations(case, evidence)
+    latency = score_latency(case, duration_seconds=duration_seconds)
     overall_score = round(
         (
             grounding.score
             + local_knowledge.score
+            + memory_recall.score
             + confidence_citations.score
+            + latency.score
         )
-        / 3,
+        / 5,
         4,
     )
     passed = (
         overall_score >= threshold
         and grounding.passed
         and local_knowledge.passed
+        and memory_recall.passed
         and confidence_citations.passed
+        and latency.passed
     )
     return BenchmarkCaseResult(
         case=case,
         response_text=evidence.response_text,
         grounding=grounding,
         local_knowledge=local_knowledge,
+        memory_recall=memory_recall,
         confidence_citations=confidence_citations,
+        latency=latency,
         overall_score=overall_score,
         passed=passed,
         duration_seconds=round(max(0.0, duration_seconds), 4),
@@ -181,9 +198,11 @@ def summarize_benchmark_results(
     average_score = _average(result.overall_score for result in collected)
     average_grounding = _average(result.grounding.score for result in collected)
     average_local_knowledge = _average(result.local_knowledge.score for result in collected)
+    average_memory_recall = _average(result.memory_recall.score for result in collected)
     average_confidence_citations = _average(
         result.confidence_citations.score for result in collected
     )
+    average_latency_score = _average(result.latency.score for result in collected)
     pass_rate = round(passed_cases / total_cases, 4) if total_cases else 0.0
     return BenchmarkSummary(
         results=collected,
@@ -194,7 +213,9 @@ def summarize_benchmark_results(
         average_score=average_score,
         average_grounding=average_grounding,
         average_local_knowledge=average_local_knowledge,
+        average_memory_recall=average_memory_recall,
         average_confidence_citations=average_confidence_citations,
+        average_latency_score=average_latency_score,
         total_duration_seconds=total_duration,
         average_duration_seconds=average_duration,
     )
@@ -353,6 +374,82 @@ def score_confidence_citations(
     )
 
 
+def score_memory_recall(
+    case: BenchmarkCase,
+    evidence: BenchmarkEvidence,
+) -> BenchmarkMetric:
+    if not case.require_memory and not case.expected_memory_hints:
+        return BenchmarkMetric(
+            name="memory_recall",
+            score=1.0,
+            passed=True,
+            details=("memoria no requerida",),
+        )
+
+    threshold = _clamp_score(case.pass_threshold)
+    hits = tuple(_normalize_text(hit) for hit in evidence.memory_hits)
+    details: list[str] = []
+    score = 0.0
+
+    if hits:
+        score += 0.6
+        details.append(f"hits de memoria {len(hits)}")
+    else:
+        details.append("sin hits de memoria")
+
+    if case.expected_memory_hints:
+        matched = tuple(
+            hint
+            for hint in case.expected_memory_hints
+            if any(_normalized_contains(hit, hint) for hit in hits)
+        )
+        score += 0.4 * (len(matched) / len(case.expected_memory_hints))
+        details.append(
+            f"pistas de memoria {len(matched)}/{len(case.expected_memory_hints)}"
+        )
+    elif case.require_memory and hits:
+        score += 0.4
+
+    final_score = round(_clamp_score(score), 4)
+    return BenchmarkMetric(
+        name="memory_recall",
+        score=final_score,
+        passed=final_score >= threshold,
+        details=tuple(details),
+    )
+
+
+def score_latency(
+    case: BenchmarkCase,
+    *,
+    duration_seconds: float,
+) -> BenchmarkMetric:
+    if case.max_duration_seconds is None:
+        return BenchmarkMetric(
+            name="latency",
+            score=1.0,
+            passed=True,
+            details=("sin umbral de latencia",),
+        )
+
+    allowed = max(0.1, case.max_duration_seconds)
+    if duration_seconds <= allowed:
+        return BenchmarkMetric(
+            name="latency",
+            score=1.0,
+            passed=True,
+            details=(f"{duration_seconds:.2f}s <= {allowed:.2f}s",),
+        )
+
+    score = round(_clamp_score(allowed / max(duration_seconds, 0.001)), 4)
+    return BenchmarkMetric(
+        name="latency",
+        score=score,
+        passed=False,
+        details=(f"{duration_seconds:.2f}s > {allowed:.2f}s",),
+    )
+
+
 def has_confidence_block(response_text: str) -> bool:
     header = _normalize_text(CONFIDENCE_BLOCK_HEADER)
     return any(_normalize_text(line) == header for line in response_text.splitlines())
@@ -407,7 +504,9 @@ def _build_error_result(
         response_text="",
         grounding=metric,
         local_knowledge=metric,
+        memory_recall=metric,
         confidence_citations=metric,
+        latency=metric,
         overall_score=0.0,
         passed=False,
         duration_seconds=duration_seconds,
@@ -482,6 +581,8 @@ __all__ = [
     "run_benchmarks",
     "score_confidence_citations",
     "score_grounding",
+    "score_latency",
     "score_local_knowledge_usage",
+    "score_memory_recall",
     "summarize_benchmark_results",
 ]

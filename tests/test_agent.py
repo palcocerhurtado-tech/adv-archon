@@ -96,6 +96,8 @@ class FakeMemoryStore:
         source: str = "agent",
         memory_type: str = "fact",
         namespace: str = "general",
+        category: str = "general",
+        importance: int = 3,
         metadata=None,
     ):
         record = type(
@@ -108,6 +110,8 @@ class FakeMemoryStore:
                 "source": source,
                 "memory_type": memory_type,
                 "namespace": namespace,
+                "category": category,
+                "importance": importance,
                 "metadata": metadata or {},
             },
         )()
@@ -923,6 +927,8 @@ def test_self_memory_query_with_memories_returns_memory_summary(tmp_path: Path) 
                 "tags": ["intereses"],
                 "memory_type": "fact",
                 "namespace": "general",
+                "category": "interests",
+                "importance": 5,
             },
         )()
     ]
@@ -960,6 +966,8 @@ def test_memory_capture_query_saves_memory_and_confirms(tmp_path: Path) -> None:
     assert "grimorios" in result.reply.lower()
     assert store.saved_records
     assert "grimorios" in store.saved_records[0].content.lower()
+    assert store.saved_records[0].category == "interests"
+    assert store.saved_records[0].importance >= 3
 
 
 def test_self_memory_query_uses_persisted_fallback_matches(tmp_path: Path) -> None:
@@ -973,6 +981,8 @@ def test_self_memory_query_uses_persisted_fallback_matches(tmp_path: Path) -> No
                 "tags": ["intereses", "perfil"],
                 "memory_type": "preference",
                 "namespace": "general",
+                "category": "interests",
+                "importance": 5,
             },
         )()
     ]
@@ -1371,6 +1381,33 @@ def test_inspect_turn_exposes_local_knowledge_signals(tmp_path: Path) -> None:
     assert inspection.profile == "general"
     assert inspection.knowledge_eval is not None
     assert inspection.local_knowledge_hits == ("roadmap-acme.md",)
+    assert inspection.memory_hits == ()
+
+
+def test_inspect_turn_exposes_memory_hits(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = replace(
+        _build_state(tmp_path),
+        memories=[
+            type(
+                "Record",
+                (),
+                {
+                    "content": "Pablo investiga grimorios",
+                    "tags": ["study"],
+                    "memory_type": "preference",
+                    "namespace": "general",
+                    "category": "interests",
+                    "importance": 5,
+                },
+            )()
+        ],
+    )
+
+    agent._prepare_turn_state = lambda _user_input: state  # type: ignore[method-assign]
+    inspection = agent.inspect_turn("que sabes ya de mis intereses actuales")
+
+    assert inspection.memory_hits == ("Pablo investiga grimorios",)
 
 
 def test_specialized_meeting_prep_response_renders_structured_brief(tmp_path: Path) -> None:

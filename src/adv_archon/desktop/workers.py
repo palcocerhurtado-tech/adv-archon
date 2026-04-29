@@ -27,6 +27,9 @@ class DesktopBusyState:
     busy: bool = False
     task: str = "idle"
     closing: bool = False
+    detail: str | None = None
+    progress: int | None = None
+    cancellable: bool = False
 
     @property
     def accepts_user_actions(self) -> bool:
@@ -43,6 +46,8 @@ class DesktopBusyState:
     def status_text(self, *, mode: str, profile: str) -> str:
         if self.closing:
             return "Cerrando…"
+        if self.detail:
+            return self.detail
         if self.task == "initializing":
             return "Preparando motor…"
         if self.task == "prompt":
@@ -56,6 +61,10 @@ class DesktopBusyState:
 
 if PYSIDE6_AVAILABLE:
 
+    class DesktopOperationCancelled(RuntimeError):
+        pass
+
+
     class DesktopRuntimeWorker(QObject):  # type: ignore[misc]
         ready = Signal(str)
         busy_state_changed = Signal(object)
@@ -65,6 +74,7 @@ if PYSIDE6_AVAILABLE:
         prompt_finished = Signal(str)
         import_finished = Signal(object)
         failed = Signal(str)
+        cancelled = Signal(str)
         shutdown_finished = Signal()
 
         def __init__(
@@ -88,10 +98,25 @@ if PYSIDE6_AVAILABLE:
             self._profile = initial_profile
             self._runtime: ArchonRuntime | None = None
             self._backend_ready = False
-            self._emit_state(DesktopBusyState(backend_ready=False, busy=True, task="initializing"))
+            self._cancel_requested = False
+            self._emit_state(
+                DesktopBusyState(
+                    backend_ready=False,
+                    busy=True,
+                    task="initializing",
+                    detail="Preparando motor…",
+                )
+            )
 
         def initialize(self) -> None:
-            self._emit_state(DesktopBusyState(backend_ready=False, busy=True, task="initializing"))
+            self._emit_state(
+                DesktopBusyState(
+                    backend_ready=False,
+                    busy=True,
+                    task="initializing",
+                    detail="Preparando motor…",
+                )
+            )
             try:
                 runtime = ArchonRuntime(
                     config=self._config,
@@ -137,16 +162,62 @@ if PYSIDE6_AVAILABLE:
             if runtime is None or not self._backend_ready:
                 self.failed.emit("El backend desktop todavía no está listo.")
                 return
-            self._emit_state(DesktopBusyState(backend_ready=True, busy=True, task="prompt"))
+            self._cancel_requested = False
             attachment_paths = [Path(raw_path) for raw_path in attachments]
+            initial_detail = (
+                "Leyendo adjuntos y preparando contexto…"
+                if attachment_paths
+                else "Analizando petición…"
+            )
+            initial_progress = 15 if attachment_paths else 5
+            self._emit_state(
+                DesktopBusyState(
+                    backend_ready=True,
+                    busy=True,
+                    task="prompt",
+                    detail=initial_detail,
+                    progress=initial_progress,
+                    cancellable=True,
+                )
+            )
             chunks: list[str] = []
+            saw_chunks = False
 
             def on_chunk(chunk: str) -> None:
+                nonlocal saw_chunks
+                self._check_cancelled()
+                if not saw_chunks:
+                    saw_chunks = True
+                    self._emit_state(
+                        DesktopBusyState(
+                            backend_ready=True,
+                            busy=True,
+                            task="prompt",
+                            detail="Generando respuesta…",
+                            progress=85,
+                            cancellable=True,
+                        )
+                    )
                 chunks.append(chunk)
                 self.chunk.emit(chunk)
 
             def on_tool(name: str, arguments: dict[str, object]) -> None:
+                self._check_cancelled()
+                self._emit_state(
+                    DesktopBusyState(
+                        backend_ready=True,
+                        busy=True,
+                        task="prompt",
+                        detail=_tool_detail(name, has_attachments=bool(attachment_paths)),
+                        progress=_tool_progress(name),
+                        cancellable=True,
+                    )
+                )
                 self.tool.emit(name, arguments)
+
+            def on_context(snapshot: object) -> None:
+                self._check_cancelled()
+                self.context.emit(snapshot)
 
             try:
                 response = runtime.send_prompt(
@@ -154,8 +225,12 @@ if PYSIDE6_AVAILABLE:
                     attachments=attachment_paths,
                     on_tool=on_tool,
                     on_chunk=on_chunk,
-                    on_context=self.context.emit,
+                    on_context=on_context,
                 )
+            except DesktopOperationCancelled:
+                self.cancelled.emit("Operación cancelada por el usuario.")
+                self._emit_state(DesktopBusyState(backend_ready=True))
+                return
             except Exception as exc:
                 self._emit_state(DesktopBusyState(backend_ready=True))
                 self.failed.emit(str(exc))
@@ -173,7 +248,13 @@ if PYSIDE6_AVAILABLE:
                 self.failed.emit("El backend desktop todavía no está listo.")
                 return
             self._emit_state(
-                DesktopBusyState(backend_ready=True, busy=True, task="knowledge_import")
+                DesktopBusyState(
+                    backend_ready=True,
+                    busy=True,
+                    task="knowledge_import",
+                    detail="Añadiendo adjuntos al conocimiento…",
+                    progress=35,
+                )
             )
             try:
                 result = runtime.import_paths_to_knowledge([Path(raw_path) for raw_path in paths])
@@ -191,6 +272,7 @@ if PYSIDE6_AVAILABLE:
                     busy=False,
                     task="idle",
                     closing=True,
+                    detail="Cerrando…",
                 )
             )
             if self._runtime is not None:
@@ -199,11 +281,65 @@ if PYSIDE6_AVAILABLE:
             self.shutdown_finished.emit()
             QThread.currentThread().quit()
 
+        def cancel_prompt(self) -> None:
+            self._cancel_requested = True
+            self._emit_state(
+                DesktopBusyState(
+                    backend_ready=self._backend_ready,
+                    busy=True,
+                    task="prompt",
+                    detail="Cancelando petición…",
+                    progress=self._last_progress_hint(),
+                )
+            )
+
         def _emit_state(self, state: DesktopBusyState) -> None:
             self.busy_state_changed.emit(state)
+
+        def _check_cancelled(self) -> None:
+            if self._cancel_requested:
+                raise DesktopOperationCancelled
+
+        def _last_progress_hint(self) -> int | None:
+            return 90 if self._backend_ready else None
 
 else:
 
     class DesktopRuntimeWorker:  # type: ignore[no-redef]
         def __init__(self, *_args: Any, **_kwargs: Any) -> None:
             raise RuntimeError("PySide6 no está instalada. No se puede crear el worker desktop.")
+
+
+def _tool_progress(name: str) -> int:
+    return {
+        "read_file": 35,
+        "knowledge_search": 45,
+        "vault_search": 45,
+        "web_search": 55,
+        "web_fetch": 65,
+        "browser_open": 60,
+        "browser_extract": 70,
+        "calendar_upcoming": 50,
+        "gmail_search": 55,
+        "drive_search": 55,
+        "notes_create": 80,
+    }.get(name, 60)
+
+
+def _tool_detail(name: str, *, has_attachments: bool) -> str:
+    details = {
+        "read_file": "Leyendo documento local…",
+        "knowledge_search": "Buscando en tu conocimiento local…",
+        "vault_search": "Buscando en tus notas Markdown…",
+        "web_search": "Buscando contexto externo…",
+        "web_fetch": "Leyendo fuente web…",
+        "browser_open": "Abriendo página en navegador…",
+        "browser_extract": "Extrayendo datos de la página…",
+        "calendar_upcoming": "Consultando calendario…",
+        "gmail_search": "Triando Gmail…",
+        "drive_search": "Buscando en Drive…",
+        "notes_create": "Guardando en Notes…",
+    }
+    if name == "read_file" and has_attachments:
+        return "Leyendo adjuntos…"
+    return details.get(name, "Procesando contexto…")

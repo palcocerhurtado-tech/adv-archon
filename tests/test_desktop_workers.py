@@ -13,12 +13,20 @@ def test_busy_state_blocks_actions_until_backend_is_ready() -> None:
 
 
 def test_busy_state_reports_prompt_processing() -> None:
-    state = DesktopBusyState(backend_ready=True, busy=True, task="prompt")
+    state = DesktopBusyState(
+        backend_ready=True,
+        busy=True,
+        task="prompt",
+        detail="Leyendo adjuntos…",
+        progress=25,
+        cancellable=True,
+    )
 
     assert state.accepts_user_actions is False
     assert state.can_dispatch_requests is False
     assert state.allows_configuration is False
-    assert state.status_text(mode="local", profile="general") == "Procesando petición…"
+    assert state.status_text(mode="local", profile="general") == "Leyendo adjuntos…"
+    assert state.cancellable is True
 
 
 def test_busy_state_reports_clean_shutdown() -> None:

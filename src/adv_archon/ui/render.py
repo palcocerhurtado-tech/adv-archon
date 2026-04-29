@@ -77,6 +77,8 @@ class Renderer:
         text.append("/meeting [query]\n")
         text.append("/triage [query]\n")
         text.append("/study [query|path]\n")
+        text.append("/memory [status|categories|list|remember|edit|forget]\n")
+        text.append("/automation [status|presets|install|tasks]\n")
         text.append("/run <cmd>\n")
         text.append("/python <code>\n")
         text.append("/recall <query>\n")

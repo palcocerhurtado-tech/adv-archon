@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import plistlib
 from datetime import datetime
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from adv_archon.core.tasks import TaskRecord, TaskStore, _compute_next_due
+from adv_archon.core.tasks import LaunchAgentRecord, TaskRecord, TaskStore, _compute_next_due
 
 
 def test_task_store_create_search_and_status_transitions(tmp_path: Path) -> None:
@@ -57,6 +58,73 @@ def test_task_store_due_tasks_respects_requested_time(tmp_path: Path) -> None:
     )
 
     assert [item.id for item in due] == [record.id]
+
+
+def test_task_store_upsert_persists_automation_metadata(tmp_path: Path) -> None:
+    store = TaskStore(
+        tmp_path / "tasks.db",
+        timezone_name="Europe/Madrid",
+        notifications_enabled=False,
+    )
+
+    created = store.upsert_task(
+        title="Bloque de estudio",
+        due_text="2026-04-21 19:30",
+        prompt="Repasar grimorios",
+        recurrence="daily",
+        category="study",
+        source="automation:study",
+        metadata={"focus": "grimorios"},
+    )
+    updated = store.upsert_task(
+        title="Bloque de estudio",
+        due_text="2026-04-22 19:30",
+        prompt="Repasar simbolismo",
+        recurrence="daily",
+        category="study",
+        source="automation:study",
+        metadata={"focus": "simbolismo"},
+    )
+
+    listed = store.list_tasks(source="automation:study")
+
+    assert created.id == updated.id
+    assert len(listed) == 1
+    assert listed[0].category == "study"
+    assert listed[0].source == "automation:study"
+    assert listed[0].metadata == {"focus": "simbolismo"}
+    assert listed[0].prompt == "Repasar simbolismo"
+
+
+def test_install_named_launch_agent_supports_calendar_schedule(tmp_path: Path) -> None:
+    store = TaskStore(
+        tmp_path / "tasks.db",
+        timezone_name="Europe/Madrid",
+        notifications_enabled=False,
+    )
+
+    record = store.install_named_launch_agent(
+        label="com.adv-archon.test-automation",
+        program_arguments=["/usr/bin/env", "echo", "hola"],
+        start_calendar_interval=[{"Hour": 8, "Minute": 0}, {"Hour": 18, "Minute": 0}],
+        launch_agents_dir=tmp_path / "LaunchAgents",
+        stdout_path=tmp_path / "logs" / "automation.out.log",
+        stderr_path=tmp_path / "logs" / "automation.err.log",
+        load=False,
+    )
+
+    plist_payload = plistlib.loads(record.plist_path.read_bytes())
+
+    assert isinstance(record, LaunchAgentRecord)
+    assert record.start_interval is None
+    assert plist_payload["Label"] == "com.adv-archon.test-automation"
+    assert plist_payload["ProgramArguments"] == ["/usr/bin/env", "echo", "hola"]
+    assert plist_payload["StartCalendarInterval"] == [
+        {"Hour": 8, "Minute": 0},
+        {"Hour": 18, "Minute": 0},
+    ]
+    assert plist_payload["StandardOutPath"].endswith("automation.out.log")
+    assert plist_payload["StandardErrorPath"].endswith("automation.err.log")
 
 
 def test_compute_next_due_supports_daily_and_weekdays() -> None:

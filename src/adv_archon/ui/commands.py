@@ -11,15 +11,16 @@ from adv_archon.core.daily import DailyBrief, DailyReport, build_daily_brief, bu
 from adv_archon.core.knowledge import KnowledgeStore
 from adv_archon.core.llm import LLMRouter, ProviderMode
 from adv_archon.core.logging import AppLogger
-from adv_archon.core.memory import MemoryRecord, MemoryStore
+from adv_archon.core.memory import MEMORY_CATEGORIES, MemoryRecord, MemoryStore
 from adv_archon.core.profiles import ProfileManager
-from adv_archon.core.tasks import TaskStore
+from adv_archon.core.tasks import TaskRecord, TaskStore
 from adv_archon.tools.google_workspace import GoogleWorkspaceTools
 from adv_archon.tools.guarded_files import GuardedFileTools
 from adv_archon.tools.knowledge_tools import KnowledgeTools
 from adv_archon.tools.personal import PersonalTools
 from adv_archon.tools.python_sandbox import PythonSandboxTool
 from adv_archon.tools.shell import AutoModeManager, ShellTool, format_shell_result
+from adv_archon.tools.task_tools import TaskTools
 from adv_archon.tools.web import WebTools
 from adv_archon.ui.render import Renderer
 from adv_archon.voice.stt import WhisperSpeechToText
@@ -39,6 +40,7 @@ class CommandServices:
     renderer: Renderer
     memory: MemoryStore
     task_store: TaskStore
+    task_tools: TaskTools
     personal_tools: PersonalTools
     google_workspace_tools: GoogleWorkspaceTools
     knowledge_store: KnowledgeStore
@@ -268,6 +270,12 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.logger.log("slash_study", prompt=prompt)
         return CommandResult(handled=True, injected_prompt=prompt)
 
+    if command == "/memory":
+        return _handle_memory_command(argument, services=services)
+
+    if command == "/automation":
+        return _handle_automation_command(argument, services=services)
+
     if command == "/run":
         if not argument:
             services.renderer.show_error("Uso: /run <cmd>")
@@ -352,9 +360,154 @@ def _format_memory_records(records: list[MemoryRecord]) -> str:
     for record in records:
         tags = f" | tags: {', '.join(record.tags)}" if record.tags else ""
         score = f" | score: {record.score:.2f}" if record.score is not None else ""
-        descriptor = f"{record.memory_type}/{record.namespace}"
+        descriptor = (
+            f"{record.memory_type}/{record.namespace}"
+            f" | category: {record.category}"
+            f" | importance: {record.importance}"
+        )
         lines.append(f"- [#{record.id}] ({descriptor}) {record.content}{tags}{score}")
     return "\n".join(lines)
+
+
+def _handle_memory_command(argument: str, *, services: CommandServices) -> CommandResult:
+    if not argument or argument == "status":
+        records = services.memory.list_memories(limit=8)
+        services.renderer.show_info(_format_memory_overview(records))
+        return CommandResult(handled=True)
+
+    subcommand, _, remainder = argument.partition(" ")
+    subcommand = subcommand.strip().lower()
+    remainder = remainder.strip()
+
+    if subcommand == "categories":
+        services.renderer.show_info(
+            "Categorías de memoria disponibles: " + ", ".join(sorted(MEMORY_CATEGORIES))
+        )
+        return CommandResult(handled=True)
+
+    if subcommand == "list":
+        category, query = _parse_memory_list_args(remainder)
+        records = services.memory.list_memories(
+            limit=12,
+            category=None if category in {None, "all"} else category,
+            query=query,
+        )
+        services.renderer.show_info(
+            _format_memory_records(records) if records else "No encuentro recuerdos."
+        )
+        return CommandResult(handled=True)
+
+    if subcommand == "remember":
+        category, content = _parse_memory_remember_args(remainder)
+        if not content:
+            services.renderer.show_error("Uso: /memory remember <categoria> | <texto>")
+            return CommandResult(handled=True)
+        record = services.memory.remember(
+            content,
+            tags=[category, "manual"],
+            source="slash-memory",
+            memory_type="preference" if category in {"interests", "preferences"} else "fact",
+            namespace="general",
+            category=category,
+            importance=4,
+            metadata={"captured_from": "slash-memory"},
+        )
+        services.logger.log(
+            "slash_memory_remember",
+            memory_id=record.id,
+            category=record.category,
+            importance=record.importance,
+        )
+        services.renderer.show_info(
+            f"He guardado [#{record.id}] en {record.category}: {record.content}"
+        )
+        return CommandResult(handled=True)
+
+    if subcommand == "edit":
+        memory_id, edit_content, options = _parse_memory_edit_args(remainder)
+        if memory_id is None:
+            services.renderer.show_error(
+                "Uso: /memory edit <id> | <texto> | [category=...] | [importance=1-5]"
+            )
+            return CommandResult(handled=True)
+        updated = services.memory.update_memory(
+            memory_id,
+            content=edit_content,
+            category=cast(str | None, options.get("category")),
+            importance=cast(int | None, options.get("importance")),
+        )
+        services.logger.log(
+            "slash_memory_edit",
+            memory_id=updated.id,
+            category=updated.category,
+            importance=updated.importance,
+        )
+        services.renderer.show_info(
+            "He actualizado "
+            f"[#{updated.id}] ({updated.category}, importancia {updated.importance})."
+        )
+        return CommandResult(handled=True)
+
+    if subcommand == "forget":
+        if not remainder:
+            services.renderer.show_error("Uso: /memory forget <query|id>")
+            return CommandResult(handled=True)
+        candidates = services.memory.find_matches(remainder, limit=12)
+        if not candidates:
+            services.renderer.show_info("No he encontrado recuerdos que coincidan.")
+            return CommandResult(handled=True)
+        services.renderer.show_info(_format_memory_records(candidates))
+        if not services.confirm(f"¿Borro {len(candidates)} recuerdo(s)?"):
+            services.renderer.show_info("Cancelado.")
+            return CommandResult(handled=True)
+        deleted = services.memory.forget_by_ids([record.id for record in candidates])
+        services.logger.log("slash_memory_forget", query=remainder, deleted=deleted)
+        services.renderer.show_info(f"He borrado {deleted} recuerdo(s).")
+        return CommandResult(handled=True)
+
+    services.renderer.show_error(
+        "Uso: /memory [status|categories|list [categoria|all] [query]|"
+        "remember <categoria> | <texto>|edit <id> | <texto> | "
+        "[category=...] | [importance=1-5]|forget <query|id>]"
+    )
+    return CommandResult(handled=True)
+
+
+def _handle_automation_command(argument: str, *, services: CommandServices) -> CommandResult:
+    if not argument or argument == "status":
+        presets = services.task_tools.task_list_automation_presets().payload["presets"]
+        tasks = services.task_store.list_tasks(limit=20)
+        services.renderer.show_info(_format_automation_status(presets, tasks))
+        return CommandResult(handled=True)
+
+    subcommand, _, remainder = argument.partition(" ")
+    subcommand = subcommand.strip().lower()
+    remainder = remainder.strip()
+
+    if subcommand == "presets":
+        presets = services.task_tools.task_list_automation_presets().payload["presets"]
+        services.renderer.show_info(_format_automation_status(presets, []))
+        return CommandResult(handled=True)
+
+    if subcommand == "install":
+        result = services.task_tools.task_install_executive_automation(
+            study_focus=remainder or "tu linea actual de estudio"
+        )
+        services.logger.log(
+            "slash_automation_install",
+            launch_agents=len(result.payload.get("launch_agents", [])),
+            tasks=len(result.payload.get("tasks", [])),
+        )
+        services.renderer.show_info(_format_automation_install_result(result.payload))
+        return CommandResult(handled=True)
+
+    if subcommand == "tasks":
+        tasks = services.task_store.list_tasks(limit=20)
+        services.renderer.show_info(_format_automation_tasks(tasks))
+        return CommandResult(handled=True)
+
+    services.renderer.show_error("Uso: /automation [status|presets|install [foco]|tasks]")
+    return CommandResult(handled=True)
 
 
 def _format_profile(profile: object) -> str:
@@ -450,3 +603,151 @@ def _parse_log_limit(argument: str) -> int:
         return max(1, int(argument))
     except ValueError:
         return 10
+
+
+def _parse_memory_list_args(argument: str) -> tuple[str | None, str | None]:
+    if not argument:
+        return None, None
+    head, _, tail = argument.partition(" ")
+    category = head.strip().lower()
+    if category in MEMORY_CATEGORIES or category == "all":
+        return category, tail.strip() or None
+    return None, argument.strip()
+
+
+def _parse_memory_remember_args(argument: str) -> tuple[str, str]:
+    if "|" not in argument:
+        return "general", argument.strip()
+    category, _, content = argument.partition("|")
+    normalized = category.strip().lower() or "general"
+    if normalized not in MEMORY_CATEGORIES:
+        normalized = "general"
+    return normalized, content.strip()
+
+
+def _parse_memory_edit_args(
+    argument: str,
+) -> tuple[int | None, str | None, dict[str, object]]:
+    if not argument:
+        return None, None, {}
+    parts = [part.strip() for part in argument.split("|") if part.strip()]
+    if not parts:
+        return None, None, {}
+    try:
+        memory_id = int(parts[0].split()[0])
+    except ValueError:
+        return None, None, {}
+    content: str | None = None
+    options: dict[str, object] = {}
+    for part in parts[1:]:
+        if "=" in part:
+            key, _, value = part.partition("=")
+            key = key.strip().lower()
+            value = value.strip()
+            if key == "category" and value in MEMORY_CATEGORIES:
+                options["category"] = value
+            elif key == "importance":
+                try:
+                    options["importance"] = max(1, min(5, int(value)))
+                except ValueError:
+                    continue
+            continue
+        if content is None:
+            content = str(part)
+    return memory_id, content, options
+
+
+def _format_memory_overview(records: list[MemoryRecord]) -> str:
+    if not records:
+        return "No tengo memoria persistente visible ahora mismo."
+    counts: dict[str, int] = {category: 0 for category in sorted(MEMORY_CATEGORIES)}
+    for record in records:
+        counts[record.category] = counts.get(record.category, 0) + 1
+    lines = ["Estado de memoria:"]
+    lines.extend(f"- {category}: {count}" for category, count in counts.items() if count)
+    lines.append("Recuerdos destacados:")
+    for record in records[:5]:
+        lines.append(
+            f"- [#{record.id}] ({record.category}, imp {record.importance}) {record.content}"
+        )
+    return "\n".join(lines)
+
+
+def _format_automation_status(
+    presets: object,
+    tasks: Sequence[TaskRecord],
+) -> str:
+    lines = ["Automatización ejecutiva:"]
+    if isinstance(presets, list) and presets:
+        preset = presets[0]
+        if isinstance(preset, dict):
+            lines.append(f"- preset: {preset.get('name', 'Executive Assistant')}")
+            description = str(preset.get("description", "")).strip()
+            if description:
+                lines.append(description)
+            workflows = preset.get("launch_workflows", [])
+            if isinstance(workflows, list):
+                lines.append("Workflows:")
+                for workflow in workflows:
+                    if not isinstance(workflow, dict):
+                        continue
+                    title = str(workflow.get("title", workflow.get("key", "workflow")))
+                    times = workflow.get("times") or []
+                    interval = workflow.get("interval_minutes")
+                    if times:
+                        lines.append(f"- {title} | {', '.join(str(item) for item in times)}")
+                    elif interval:
+                        lines.append(f"- {title} | cada {interval} min")
+    automation_tasks = [
+        task
+        for task in tasks
+        if getattr(task, "source", None)
+        and "automation:" in str(getattr(task, "source", ""))
+    ]
+    if automation_tasks:
+        lines.append("Tareas persistentes instaladas:")
+        for task in automation_tasks[:8]:
+            lines.append(
+                f"- [#{task.id}] {task.title} | {task.due_at} | {task.category or 'general'}"
+            )
+    else:
+        lines.append("- No detecto tareas de automatización instaladas todavía.")
+    return "\n".join(lines)
+
+
+def _format_automation_install_result(payload: dict[str, object]) -> str:
+    lines = [
+        "Automatización ejecutiva instalada.",
+        f"- bundle: {payload.get('bundle', 'executive_assistant')}",
+    ]
+    launch_agents = payload.get("launch_agents", [])
+    if isinstance(launch_agents, list):
+        lines.append(f"- launch agents: {len(launch_agents)}")
+        for item in launch_agents[:4]:
+            if isinstance(item, dict):
+                lines.append(f"  {item.get('label')} | {item.get('plist_path')}")
+    tasks = payload.get("tasks", [])
+    if isinstance(tasks, list):
+        lines.append(f"- tareas persistentes: {len(tasks)}")
+        for item in tasks[:4]:
+            if isinstance(item, dict):
+                lines.append(f"  {item.get('title')} | {item.get('due_at')}")
+    return "\n".join(lines)
+
+
+def _format_automation_tasks(tasks: Sequence[TaskRecord]) -> str:
+    automation_tasks = [
+        task
+        for task in tasks
+        if getattr(task, "source", None)
+        and "automation:" in str(getattr(task, "source", ""))
+    ]
+    if not automation_tasks:
+        return "No detecto tareas persistentes de automatización."
+    lines = ["Tareas de automatización:"]
+    for task in automation_tasks:
+        lines.append(
+            f"- [#{task.id}] {task.title} | {task.status} | {task.due_at} | "
+            f"{task.category or 'general'}"
+        )
+    return "\n".join(lines)

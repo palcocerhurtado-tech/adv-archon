@@ -7,7 +7,7 @@ import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from rich.console import Console
 
@@ -23,6 +23,11 @@ from adv_archon.core.config import AppConfig, load_app_config
 from adv_archon.core.daily import DailyBrief, DailyReport, build_daily_brief, build_daily_report
 from adv_archon.core.eval_store import EvalStore
 from adv_archon.core.evals import evaluate_knowledge_retrieval
+from adv_archon.core.executive_automation import (
+    build_executive_automation_bundle,
+    install_executive_automation,
+    list_executive_automation_presets,
+)
 from adv_archon.core.knowledge import KnowledgeStore, install_knowledge_launch_agent
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.logging import AppLogger
@@ -31,6 +36,7 @@ from adv_archon.core.research import install_research_launch_agent, run_research
 from adv_archon.core.tasks import TaskStore
 from adv_archon.core.web_library import WebLibraryStore
 from adv_archon.desktop.app import launch_desktop_app
+from adv_archon.desktop.bundle import create_macos_app_bundle
 from adv_archon.tools.google_workspace import GoogleWorkspaceTools
 from adv_archon.tools.personal import PersonalTools
 from adv_archon.ui.render import Renderer
@@ -80,6 +86,23 @@ def desktop_main() -> int:
         system_prompt=system_prompt,
         incognito=False,
     )
+
+
+def _handle_desktop_bundle(
+    *,
+    renderer: Renderer,
+    bundle_args: list[str],
+) -> int:
+    destination_dir = (
+        Path(bundle_args[0]).expanduser() if bundle_args else Path.home() / "Applications"
+    )
+    result = create_macos_app_bundle(destination_dir=destination_dir)
+    renderer.show_info(
+        "Bundle desktop creado.\n"
+        f"- app: {result.app_path}\n"
+        f"- launcher: {result.launcher_path}"
+    )
+    return 0
 
 
 def _build_logger(config_root: Path, *, prefix: str, persist: bool) -> AppLogger:
@@ -204,7 +227,54 @@ def _handle_tasks(
             )
         renderer.show_info("\n".join(lines))
         return 0
-    renderer.show_error("Uso: adv-archon tasks [list [open|all|done|due|cancelled]|run-due]")
+    if command == "presets":
+        presets = list_executive_automation_presets()
+        lines = ["Presets de automatización ejecutiva:"]
+        for preset in presets:
+            lines.append(f"- {preset['name']} | {preset['description']}")
+            for workflow in preset["launch_workflows"]:
+                if workflow["times"]:
+                    lines.append(
+                        f"  {workflow['title']} | {', '.join(workflow['times'])}"
+                    )
+                elif workflow["interval_minutes"]:
+                    lines.append(
+                        f"  {workflow['title']} | cada {workflow['interval_minutes']} min"
+                    )
+            for task in preset["task_templates"]:
+                lines.append(
+                    f"  tarea: {task['title']} | {task['time']} | {task['category']}"
+                )
+        renderer.show_info("\n".join(lines))
+        return 0
+    if command == "install-executive":
+        adv_command = shutil.which("adv-archon") or shutil.which("adv")
+        if adv_command is None:
+            renderer.show_error("No encuentro `adv-archon` en PATH.")
+            return 1
+        study_focus = " ".join(task_args[1:]).strip() or "tu linea actual de estudio"
+        bundle = build_executive_automation_bundle(study_focus=study_focus)
+        installed = install_executive_automation(
+            store=store,
+            adv_command=adv_command,
+            bundle=bundle,
+            timezone_name=config.tasks.default_timezone,
+        )
+        lines = [
+            "Automatización ejecutiva instalada.",
+            f"- launch agents: {len(installed.launch_agents)}",
+            f"- tareas persistentes: {len(installed.tasks)}",
+            f"- foco de estudio: {study_focus}",
+        ]
+        lines.extend(f"  {record.label}" for record in installed.launch_agents)
+        lines.extend(f"  {task.title} | {task.due_at}" for task in installed.tasks)
+        renderer.show_info("\n".join(lines))
+        return 0
+    renderer.show_error(
+        "Uso: adv-archon tasks "
+        "[list [open|all|done|due|cancelled]|run-due|presets|"
+        "install-executive [foco]]"
+    )
     return 1
 
 
@@ -545,7 +615,9 @@ def _handle_benchmark(
         )
         return 0
 
-    renderer.show_error("Uso: adv-archon benchmark [status|init|run [cases.json]]")
+    renderer.show_error(
+        "Uso: adv-archon benchmark [status|init|run [cases.json]]"
+    )
     return 1
 
 
@@ -570,6 +642,30 @@ def _build_benchmark_executor(
             incognito=incognito,
         )
         try:
+            runtime = app._runtime
+            for seed in case.seed_memories:
+                tags_value = seed.get("tags", ())
+                tags = (
+                    [str(item) for item in tags_value]
+                    if isinstance(tags_value, list)
+                    else []
+                )
+                importance_value = seed.get("importance", 3)
+                importance = (
+                    int(importance_value)
+                    if isinstance(importance_value, int | float | str)
+                    else 3
+                )
+                runtime.memory_store.remember(
+                    str(seed.get("content", "")),
+                    tags,
+                    source="benchmark",
+                    memory_type=str(seed.get("memory_type", "fact")),
+                    namespace=str(seed.get("namespace", "general")),
+                    category=str(seed.get("category", "general")),
+                    importance=importance,
+                    metadata={"seeded_for_case": case.case_id},
+                )
             inspection = app._agent.inspect_turn(case.prompt)
             result = app._agent.run_turn(case.prompt)
             return BenchmarkEvidence(
@@ -577,6 +673,7 @@ def _build_benchmark_executor(
                 knowledge_eval=inspection.knowledge_eval,
                 used_local_knowledge=bool(inspection.local_knowledge_hits),
                 local_knowledge_hits=inspection.local_knowledge_hits,
+                memory_hits=inspection.memory_hits,
                 provider=result.usage.provider,
                 model=result.usage.model,
                 usage=result.usage.usage,
@@ -621,10 +718,17 @@ def _load_benchmark_cases(
         prompt = str(item.get("prompt", ""))
         for placeholder, value in replacements.items():
             prompt = prompt.replace(placeholder, value)
+        raw_seed_memories = item.get("seed_memories", [])
+        seed_memories = tuple(
+            cast(dict[str, object], entry)
+            for entry in raw_seed_memories
+            if isinstance(entry, dict)
+        )
         cases.append(
             BenchmarkCase(
                 case_id=str(item.get("case_id", f"case-{len(cases) + 1}")),
                 prompt=prompt,
+                seed_memories=seed_memories,
                 expected_facts=tuple(str(value) for value in item.get("expected_facts", [])),
                 forbidden_facts=tuple(
                     str(value) for value in item.get("forbidden_facts", [])
@@ -634,6 +738,15 @@ def _load_benchmark_cases(
                 ),
                 require_local_knowledge=bool(item.get("require_local_knowledge", False)),
                 require_confidence_block=bool(item.get("require_confidence_block", False)),
+                require_memory=bool(item.get("require_memory", False)),
+                expected_memory_hints=tuple(
+                    str(value) for value in item.get("expected_memory_hints", [])
+                ),
+                max_duration_seconds=(
+                    float(item["max_duration_seconds"])
+                    if item.get("max_duration_seconds") is not None
+                    else None
+                ),
                 pass_threshold=float(item.get("pass_threshold", 0.7)),
                 tags=tuple(str(value) for value in item.get("tags", [])),
             )
@@ -705,7 +818,9 @@ def _render_benchmark_summary(
         f"- score medio: {summary.average_score:.2f}",
         f"- grounding medio: {summary.average_grounding:.2f}",
         f"- conocimiento local medio: {summary.average_local_knowledge:.2f}",
+        f"- memoria media: {summary.average_memory_recall:.2f}",
         f"- citas/confianza medio: {summary.average_confidence_citations:.2f}",
+        f"- latencia media: {summary.average_latency_score:.2f}",
         f"- duracion total s: {summary.total_duration_seconds:.2f}",
         f"- casos usados: {cases_path}",
     ]
@@ -788,6 +903,12 @@ def main() -> int:
             project_root=project_root,
             incognito=args.incognito,
             benchmark_args=args.paths,
+        )
+
+    if args.prompt == "desktop-bundle":
+        return _handle_desktop_bundle(
+            renderer=renderer,
+            bundle_args=args.paths,
         )
 
     system_prompt = load_system_prompt(config.system_prompt_path)

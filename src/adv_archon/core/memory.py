@@ -17,6 +17,17 @@ class EmbeddingEncoder(Protocol):
     def encode_texts(self, texts: Sequence[str]) -> np.ndarray: ...
 
 
+MEMORY_CATEGORIES = {
+    "general",
+    "interests",
+    "projects",
+    "people",
+    "preferences",
+}
+DEFAULT_MEMORY_CATEGORY = "general"
+DEFAULT_MEMORY_IMPORTANCE = 3
+
+
 @dataclass(slots=True)
 class MemoryRecord:
     id: int
@@ -25,6 +36,8 @@ class MemoryRecord:
     source: str
     memory_type: str
     namespace: str
+    category: str
+    importance: int
     metadata: dict[str, Any]
     created_at: str
     updated_at: str
@@ -77,6 +90,8 @@ class MemoryStore:
         source: str = "manual",
         memory_type: str = "fact",
         namespace: str = "general",
+        category: str | None = None,
+        importance: int | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> MemoryRecord:
         if not self._persist:
@@ -89,17 +104,29 @@ class MemoryStore:
         clean_memory_type = memory_type.strip() or "fact"
         clean_namespace = namespace.strip() or "general"
         clean_metadata = metadata or {}
+        clean_category = _normalize_category(
+            category
+            or clean_metadata.get("category")
+            or _infer_category(
+                memory_type=clean_memory_type,
+                namespace=clean_namespace,
+            )
+        )
+        clean_importance = _normalize_importance(
+            importance if importance is not None else clean_metadata.get("importance")
+        )
         vector = self._encode_text(
             clean_content,
             clean_tags,
             memory_type=clean_memory_type,
             namespace=clean_namespace,
+            category=clean_category,
         )
         timestamp = datetime.now(UTC).isoformat()
         existing = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
-                   created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, category,
+                   importance, metadata_json, created_at, updated_at, embedding_json
             FROM memories
             WHERE content = ?
             """,
@@ -115,12 +142,14 @@ class MemoryStore:
                     source,
                     memory_type,
                     namespace,
+                    category,
+                    importance,
                     metadata_json,
                     embedding_json,
                     created_at,
                     updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     clean_content,
@@ -128,6 +157,8 @@ class MemoryStore:
                     source,
                     clean_memory_type,
                     clean_namespace,
+                    clean_category,
+                    clean_importance,
                     json.dumps(clean_metadata, ensure_ascii=False),
                     json.dumps(vector.tolist()),
                     timestamp,
@@ -141,12 +172,17 @@ class MemoryStore:
             merged_tags = _normalize_tags(
                 [*json.loads(existing["tags_json"]), *clean_tags]
             )
+            merged_metadata = {
+                **json.loads(str(existing["metadata_json"])),
+                **clean_metadata,
+            }
             memory_id = int(existing["id"])
             self._conn.execute(
                 """
                 UPDATE memories
                 SET tags_json = ?, source = ?, memory_type = ?, namespace = ?,
-                    metadata_json = ?, embedding_json = ?, updated_at = ?
+                    category = ?, importance = ?, metadata_json = ?,
+                    embedding_json = ?, updated_at = ?
                 WHERE id = ?
                 """,
                 (
@@ -154,7 +190,9 @@ class MemoryStore:
                     source,
                     clean_memory_type,
                     clean_namespace,
-                    json.dumps(clean_metadata, ensure_ascii=False),
+                    clean_category,
+                    clean_importance,
+                    json.dumps(merged_metadata, ensure_ascii=False),
                     json.dumps(vector.tolist()),
                     timestamp,
                     memory_id,
@@ -176,18 +214,31 @@ class MemoryStore:
         limit: int = 5,
         memory_type: str | None = None,
         namespace: str | None = None,
+        category: str | None = None,
+        min_importance: int | None = None,
     ) -> list[MemoryRecord]:
         rows = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
-                   created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, category,
+                   importance, metadata_json, created_at, updated_at, embedding_json
             FROM memories
             WHERE (? IS NULL OR memory_type = ?)
               AND (? IS NULL OR namespace = ?)
+              AND (? IS NULL OR category = ?)
+              AND (? IS NULL OR importance >= ?)
             ORDER BY updated_at DESC
             """
             ,
-            (memory_type, memory_type, namespace, namespace),
+            (
+                memory_type,
+                memory_type,
+                namespace,
+                namespace,
+                _normalize_category(category) if category is not None else None,
+                _normalize_category(category) if category is not None else None,
+                min_importance,
+                min_importance,
+            ),
         ).fetchall()
         if not rows:
             return []
@@ -213,6 +264,7 @@ class MemoryStore:
                 lexical_bonus += 0.1
             if any(lowered_query in tag.lower() for tag in tags):
                 lexical_bonus += 0.05
+            importance_bonus = _importance_bonus(int(row["importance"]))
             ranked.append(
                 MemoryRecord(
                     id=int(row["id"]),
@@ -221,10 +273,12 @@ class MemoryStore:
                     source=str(row["source"]),
                     memory_type=str(row["memory_type"]),
                     namespace=str(row["namespace"]),
+                    category=str(row["category"]),
+                    importance=int(row["importance"]),
                     metadata=json.loads(str(row["metadata_json"])),
                     created_at=str(row["created_at"]),
                     updated_at=str(row["updated_at"]),
-                    score=round(float(score + lexical_bonus), 4),
+                    score=round(float(score + lexical_bonus + importance_bonus), 4),
                 )
             )
 
@@ -239,18 +293,138 @@ class MemoryStore:
         pattern = f"%{query_or_id.lower()}%"
         rows = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
-                   created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, category,
+                   importance, metadata_json, created_at, updated_at, embedding_json
             FROM memories
-            WHERE lower(content) LIKE ? OR lower(tags_json) LIKE ?
-            ORDER BY updated_at DESC
+            WHERE lower(content) LIKE ? OR lower(tags_json) LIKE ? OR lower(category) LIKE ?
+            ORDER BY importance DESC, updated_at DESC
             LIMIT ?
             """,
-            (pattern, pattern, limit),
+            (pattern, pattern, pattern, limit),
         ).fetchall()
         if rows:
             return [self._row_to_record(row) for row in rows]
         return self.recall(query_or_id, limit=limit)
+
+    def list_memories(
+        self,
+        *,
+        limit: int = 20,
+        query: str | None = None,
+        memory_type: str | None = None,
+        namespace: str | None = None,
+        category: str | None = None,
+        min_importance: int | None = None,
+    ) -> list[MemoryRecord]:
+        clauses = ["1 = 1"]
+        params: list[Any] = []
+        if memory_type is not None:
+            clauses.append("memory_type = ?")
+            params.append(memory_type)
+        if namespace is not None:
+            clauses.append("namespace = ?")
+            params.append(namespace)
+        if category is not None:
+            clauses.append("category = ?")
+            params.append(_normalize_category(category))
+        if min_importance is not None:
+            clauses.append("importance >= ?")
+            params.append(_normalize_importance(min_importance))
+        if query:
+            pattern = f"%{query.lower()}%"
+            clauses.append(
+                "(lower(content) LIKE ? OR lower(tags_json) LIKE ? OR lower(category) LIKE ?)"
+            )
+            params.extend([pattern, pattern, pattern])
+        params.append(limit)
+        rows = self._conn.execute(
+            f"""
+            SELECT id, content, tags_json, source, memory_type, namespace, category,
+                   importance, metadata_json, created_at, updated_at, embedding_json
+            FROM memories
+            WHERE {" AND ".join(clauses)}
+            ORDER BY importance DESC, updated_at DESC
+            LIMIT ?
+            """,
+            tuple(params),
+        ).fetchall()
+        return [self._row_to_record(row) for row in rows]
+
+    def update_memory(
+        self,
+        memory_id: int,
+        *,
+        content: str | None = None,
+        tags: Sequence[str] | None = None,
+        source: str | None = None,
+        memory_type: str | None = None,
+        namespace: str | None = None,
+        category: str | None = None,
+        importance: int | None = None,
+        metadata: dict[str, Any] | None = None,
+    ) -> MemoryRecord:
+        if not self._persist:
+            raise PermissionError("El modo incógnito no permite editar memoria persistente.")
+        existing = self.get_by_id(memory_id)
+        if existing is None:
+            raise LookupError(f"No existe ninguna memoria con id {memory_id}.")
+
+        next_content = content.strip() if content is not None else existing.content
+        if not next_content:
+            raise ValueError("No se puede guardar una memoria vacía.")
+        next_tags = _normalize_tags(tags) if tags is not None else existing.tags
+        next_memory_type = (memory_type or existing.memory_type).strip() or "fact"
+        next_namespace = (namespace or existing.namespace).strip() or "general"
+        next_category = _normalize_category(category or existing.category)
+        next_importance = _normalize_importance(
+            importance if importance is not None else existing.importance
+        )
+        next_metadata = dict(existing.metadata)
+        if metadata is not None:
+            next_metadata.update(metadata)
+
+        vector = self._encode_text(
+            next_content,
+            next_tags,
+            memory_type=next_memory_type,
+            namespace=next_namespace,
+            category=next_category,
+        )
+        updated_at = datetime.now(UTC).isoformat()
+        self._conn.execute(
+            """
+            UPDATE memories
+            SET content = ?, tags_json = ?, source = ?, memory_type = ?, namespace = ?,
+                category = ?, importance = ?, metadata_json = ?, embedding_json = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                next_content,
+                json.dumps(next_tags, ensure_ascii=False),
+                source or existing.source,
+                next_memory_type,
+                next_namespace,
+                next_category,
+                next_importance,
+                json.dumps(next_metadata, ensure_ascii=False),
+                json.dumps(vector.tolist()),
+                updated_at,
+                memory_id,
+            ),
+        )
+        self._conn.commit()
+        record = self.get_by_id(memory_id)
+        if record is None:
+            raise RuntimeError("No se pudo recuperar la memoria actualizada.")
+        if self._logger is not None:
+            self._logger.log(
+                "memory_updated",
+                memory_id=record.id,
+                category=record.category,
+                importance=record.importance,
+            )
+        return record
 
     def forget_by_ids(self, ids: Sequence[int]) -> int:
         if not self._persist:
@@ -271,8 +445,8 @@ class MemoryStore:
     def get_by_id(self, memory_id: int) -> MemoryRecord | None:
         row = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
-                   created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, category,
+                   importance, metadata_json, created_at, updated_at, embedding_json
             FROM memories
             WHERE id = ?
             """,
@@ -298,8 +472,8 @@ class MemoryStore:
         )
         rows = self._conn.execute(
             """
-            SELECT id, content, tags_json, source, memory_type, namespace, metadata_json,
-                   created_at, updated_at, embedding_json
+            SELECT id, content, tags_json, source, memory_type, namespace, category,
+                   importance, metadata_json, created_at, updated_at, embedding_json
             FROM memories
             WHERE lower(content) LIKE ?
                OR lower(content) LIKE ?
@@ -358,6 +532,8 @@ class MemoryStore:
                 source TEXT NOT NULL,
                 memory_type TEXT NOT NULL DEFAULT 'fact',
                 namespace TEXT NOT NULL DEFAULT 'general',
+                category TEXT NOT NULL DEFAULT 'general',
+                importance INTEGER NOT NULL DEFAULT 3,
                 metadata_json TEXT NOT NULL DEFAULT '{}',
                 embedding_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
@@ -367,11 +543,19 @@ class MemoryStore:
         )
         _ensure_column(conn, "memories", "memory_type", "TEXT NOT NULL DEFAULT 'fact'")
         _ensure_column(conn, "memories", "namespace", "TEXT NOT NULL DEFAULT 'general'")
+        _ensure_column(conn, "memories", "category", "TEXT NOT NULL DEFAULT 'general'")
+        _ensure_column(conn, "memories", "importance", "INTEGER NOT NULL DEFAULT 3")
         _ensure_column(conn, "memories", "metadata_json", "TEXT NOT NULL DEFAULT '{}'")
         conn.execute(
             """
             CREATE INDEX IF NOT EXISTS idx_memories_updated_at
             ON memories (updated_at DESC)
+            """
+        )
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_memories_category_importance
+            ON memories (category, importance DESC, updated_at DESC)
             """
         )
         conn.commit()
@@ -383,12 +567,14 @@ class MemoryStore:
         *,
         memory_type: str = "fact",
         namespace: str = "general",
+        category: str = DEFAULT_MEMORY_CATEGORY,
     ) -> np.ndarray:
         joined_tags = ", ".join(tags)
         fragments = [
             content,
             f"Type: {memory_type}",
             f"Namespace: {namespace}",
+            f"Category: {category}",
         ]
         if joined_tags:
             fragments.append(f"Tags: {joined_tags}")
@@ -405,6 +591,8 @@ class MemoryStore:
             source=str(row["source"]),
             memory_type=str(row["memory_type"]),
             namespace=str(row["namespace"]),
+            category=str(row["category"]),
+            importance=int(row["importance"]),
             metadata=json.loads(str(row["metadata_json"])),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
@@ -414,6 +602,38 @@ class MemoryStore:
 def _normalize_tags(tags: Sequence[str]) -> list[str]:
     normalized = {tag.strip() for tag in tags if tag.strip()}
     return sorted(normalized)
+
+
+def _normalize_category(category: str) -> str:
+    normalized = category.strip().lower()
+    if not normalized:
+        return DEFAULT_MEMORY_CATEGORY
+    if normalized not in MEMORY_CATEGORIES:
+        return DEFAULT_MEMORY_CATEGORY
+    return normalized
+
+
+def _normalize_importance(importance: Any) -> int:
+    if importance is None:
+        return DEFAULT_MEMORY_IMPORTANCE
+    try:
+        numeric = int(importance)
+    except (TypeError, ValueError):
+        return DEFAULT_MEMORY_IMPORTANCE
+    return max(1, min(5, numeric))
+
+
+def _infer_category(*, memory_type: str, namespace: str) -> str:
+    normalized_namespace = namespace.strip().lower()
+    if normalized_namespace in MEMORY_CATEGORIES:
+        return normalized_namespace
+    if memory_type.strip().lower() == "preference":
+        return "preferences"
+    return DEFAULT_MEMORY_CATEGORY
+
+
+def _importance_bonus(importance: int) -> float:
+    return (importance - DEFAULT_MEMORY_IMPORTANCE) * 0.04
 
 
 def _normalize_vector(vector: np.ndarray) -> np.ndarray:

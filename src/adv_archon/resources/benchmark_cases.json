@@ -6,6 +6,7 @@
     "expected_citation_hints": ["README.md"],
     "require_local_knowledge": true,
     "require_confidence_block": true,
+    "max_duration_seconds": 20,
     "pass_threshold": 0.7,
     "tags": ["docs", "local", "grounding"]
   },
@@ -15,6 +16,7 @@
     "expected_facts": ["benchmark"],
     "require_local_knowledge": true,
     "require_confidence_block": true,
+    "max_duration_seconds": 20,
     "pass_threshold": 0.7,
     "tags": ["knowledge", "benchmark"]
   },
@@ -25,7 +27,28 @@
     "expected_citation_hints": ["ARCHITECTURE.md"],
     "require_local_knowledge": true,
     "require_confidence_block": true,
+    "max_duration_seconds": 20,
     "pass_threshold": 0.7,
     "tags": ["architecture", "local"]
+  },
+  {
+    "case_id": "memory-interests",
+    "prompt": "que sabes ya de mis intereses actuales ?",
+    "seed_memories": [
+      {
+        "content": "Estoy investigando grimorios, simbolismo y textos esotéricos",
+        "tags": ["interests", "study"],
+        "memory_type": "preference",
+        "namespace": "general",
+        "category": "interests",
+        "importance": 5
+      }
+    ],
+    "expected_facts": ["grimorios", "simbolismo"],
+    "expected_memory_hints": ["grimorios", "simbolismo"],
+    "require_memory": true,
+    "max_duration_seconds": 12,
+    "pass_threshold": 0.7,
+    "tags": ["memory", "personal"]
   }
 ]

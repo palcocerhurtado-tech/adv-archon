@@ -7,6 +7,11 @@ from adv_archon.core.attachments import normalize_attachment_paths
 from adv_archon.core.config import AppConfig
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
+from adv_archon.desktop.presenters import (
+    build_history_entry,
+    format_sources_summary,
+    merge_recent_items,
+)
 
 
 def launch_desktop_app(
@@ -31,6 +36,7 @@ def launch_desktop_app(
             QMainWindow,
             QMessageBox,
             QPlainTextEdit,
+            QProgressBar,
             QPushButton,
             QSplitter,
             QTextEdit,
@@ -100,6 +106,7 @@ def launch_desktop_app(
         import_requested = Signal(object)
         mode_requested = Signal(str)
         profile_requested = Signal(str)
+        cancel_requested = Signal()
         shutdown_requested = Signal()
 
         def __init__(self) -> None:
@@ -116,6 +123,12 @@ def launch_desktop_app(
             self._selected_mode = llm.mode
             self._selected_profile = self._profile_manager.active_profile
             self._attachments: list[Path] = []
+            self._recent_history_entries: list[str] = []
+            self._recent_attachment_entries: list[str] = []
+            self._active_tool_names: list[str] = []
+            self._last_snapshot: TurnContextSnapshot | None = None
+            self._pending_prompt = ""
+            self._pending_attachments: list[Path] = []
             self._current_chunked_reply = False
             self._busy_state = DesktopBusyState(backend_ready=False, busy=True, task="initializing")
             self._close_requested = False
@@ -134,6 +147,7 @@ def launch_desktop_app(
             self.import_requested.connect(self._backend_worker.import_paths)
             self.mode_requested.connect(self._backend_worker.set_mode)
             self.profile_requested.connect(self._backend_worker.set_profile)
+            self.cancel_requested.connect(self._backend_worker.cancel_prompt)
             self.shutdown_requested.connect(self._backend_worker.shutdown)
             self._backend_thread.started.connect(self._backend_worker.initialize)
             self._backend_worker.ready.connect(self._handle_backend_ready)
@@ -144,6 +158,7 @@ def launch_desktop_app(
             self._backend_worker.prompt_finished.connect(self._handle_prompt_finished)
             self._backend_worker.import_finished.connect(self._handle_import_finished)
             self._backend_worker.failed.connect(self._handle_worker_error)
+            self._backend_worker.cancelled.connect(self._handle_worker_cancelled)
             self._backend_worker.shutdown_finished.connect(self._handle_shutdown_finished)
             self._backend_thread.finished.connect(self._handle_backend_thread_finished)
             self._backend_thread.finished.connect(self._backend_worker.deleteLater)
@@ -200,6 +215,11 @@ def launch_desktop_app(
             header.addWidget(self._status_label)
             layout.addLayout(header)
 
+            self._progress_bar = QProgressBar()
+            self._progress_bar.setRange(0, 0)
+            self._progress_bar.setVisible(True)
+            layout.addWidget(self._progress_bar)
+
             splitter = QSplitter(Qt.Orientation.Horizontal)
             layout.addWidget(splitter, 1)
 
@@ -248,9 +268,12 @@ def launch_desktop_app(
             send_column = QVBoxLayout()
             self._send_button = QPushButton("Enviar")
             self._send_button.clicked.connect(self._submit_prompt)
+            self._cancel_button = QPushButton("Cancelar")
+            self._cancel_button.clicked.connect(self._cancel_active_task)
             self._clear_button = QPushButton("Limpiar adjuntos")
             self._clear_button.clicked.connect(self._clear_attachments)
             send_column.addWidget(self._send_button)
+            send_column.addWidget(self._cancel_button)
             send_column.addWidget(self._clear_button)
             send_column.addStretch(1)
             composer.addLayout(send_column)
@@ -268,9 +291,27 @@ def launch_desktop_app(
             )
             context_layout.addWidget(self._context_view, 1)
 
+            context_layout.addWidget(QLabel("Fuentes usadas"))
+            self._sources_view = QPlainTextEdit()
+            self._sources_view.setReadOnly(True)
+            self._sources_view.setPlaceholderText(
+                "Memoria, conocimiento local y herramientas relevantes del turno."
+            )
+            context_layout.addWidget(self._sources_view, 1)
+
+            context_layout.addWidget(QLabel("Historial reciente"))
+            self._history_list = QListWidget()
+            self._history_list.setAlternatingRowColors(True)
+            context_layout.addWidget(self._history_list, 1)
+
+            context_layout.addWidget(QLabel("Adjuntos recientes"))
+            self._recent_attachments_list = QListWidget()
+            self._recent_attachments_list.setAlternatingRowColors(True)
+            context_layout.addWidget(self._recent_attachments_list, 1)
+
             splitter.addWidget(chat_panel)
             splitter.addWidget(context_panel)
-            splitter.setSizes([860, 360])
+            splitter.setSizes([820, 420])
 
             self.setCentralWidget(root)
 
@@ -393,6 +434,11 @@ def launch_desktop_app(
                 return
             attachments = list(self._attachments)
             self._input.clear()
+            self._pending_prompt = prompt
+            self._pending_attachments = attachments
+            self._active_tool_names = []
+            self._last_snapshot = None
+            self._refresh_sources_view()
             self._append_user(prompt, attachments)
             self._append_assistant_prefix()
             self._current_chunked_reply = False
@@ -413,6 +459,9 @@ def launch_desktop_app(
                     busy=busy,
                     task=next_task if busy else "idle",
                     closing=self._busy_state.closing,
+                    progress=self._busy_state.progress if busy else None,
+                    detail=self._busy_state.detail if busy else None,
+                    cancellable=busy and next_task == "prompt",
                 )
             )
 
@@ -431,6 +480,18 @@ def launch_desktop_app(
             self._mode_combo.setEnabled(allows_configuration)
             self._profile_combo.setEnabled(allows_configuration)
             self._daily_action.setEnabled(can_dispatch)
+            self._cancel_button.setEnabled(state.cancellable)
+            if state.busy:
+                self._progress_bar.setVisible(True)
+                if state.progress is None:
+                    self._progress_bar.setRange(0, 0)
+                else:
+                    self._progress_bar.setRange(0, 100)
+                    self._progress_bar.setValue(max(0, min(100, state.progress)))
+            else:
+                self._progress_bar.setRange(0, 100)
+                self._progress_bar.setValue(100)
+                self._progress_bar.setVisible(False)
             self._refresh_status(
                 state.status_text(
                     mode=self._selected_mode,
@@ -457,12 +518,15 @@ def launch_desktop_app(
             self._transcript.ensureCursorVisible()
 
         def _append_tool_event(self, name: str, arguments: object) -> None:
+            self._active_tool_names = merge_recent_items(self._active_tool_names, [name], limit=8)
+            self._refresh_sources_view()
             if not config.ui.show_tool_input:
                 return
             self._append_context_line(f"[tool:{name}] {arguments}")
 
         def _show_context_snapshot(self, snapshot: object) -> None:
             if isinstance(snapshot, TurnContextSnapshot):
+                self._last_snapshot = snapshot
                 lines = [
                     f"Intent: {snapshot.intent}",
                     f"Perfil: {snapshot.profile}",
@@ -480,8 +544,10 @@ def launch_desktop_app(
                     lines.append("Conocimiento local:")
                     lines.extend(f"- {item}" for item in snapshot.knowledge_hits)
                 self._context_view.setPlainText("\n".join(lines))
+                self._refresh_sources_view()
                 return
             self._context_view.setPlainText(str(snapshot))
+            self._refresh_sources_view()
 
         def _handle_prompt_finished(self, text: str) -> None:
             if not self._current_chunked_reply and text:
@@ -490,6 +556,7 @@ def launch_desktop_app(
             self._transcript.moveCursor(QTextCursor.MoveOperation.End)
             self._transcript.insertPlainText("\n\n")
             self._transcript.ensureCursorVisible()
+            self._remember_desktop_history(text)
             self._attachments = []
             self._render_attachments()
             self._set_busy(False)
@@ -508,6 +575,12 @@ def launch_desktop_app(
 
         def _handle_worker_error(self, message: str) -> None:
             self._append_system(f"Error: {message}")
+            self._transcript.moveCursor(QTextCursor.MoveOperation.End)
+            self._transcript.insertPlainText("\n\n")
+            self._set_busy(False)
+
+        def _handle_worker_cancelled(self, message: str) -> None:
+            self._append_system(message)
             self._transcript.moveCursor(QTextCursor.MoveOperation.End)
             self._transcript.insertPlainText("\n\n")
             self._set_busy(False)
@@ -535,6 +608,49 @@ def launch_desktop_app(
             self._transcript.setPlainText(merged)
             self._transcript.moveCursor(QTextCursor.MoveOperation.End)
             self._transcript.ensureCursorVisible()
+
+        def _cancel_active_task(self) -> None:
+            if not self._busy_state.cancellable:
+                return
+            self.cancel_requested.emit()
+
+        def _refresh_sources_view(self) -> None:
+            snapshot = self._last_snapshot
+            memory_hits = snapshot.memory_hits if snapshot is not None else ()
+            knowledge_hits = snapshot.knowledge_hits if snapshot is not None else ()
+            self._sources_view.setPlainText(
+                format_sources_summary(
+                    tool_names=self._active_tool_names,
+                    memory_hits=memory_hits,
+                    knowledge_hits=knowledge_hits,
+                )
+            )
+
+        def _remember_desktop_history(self, response_text: str) -> None:
+            if self._pending_prompt:
+                entry = build_history_entry(
+                    self._pending_prompt,
+                    attachments=self._pending_attachments,
+                    response_text=response_text,
+                )
+                self._recent_history_entries = merge_recent_items(
+                    self._recent_history_entries,
+                    [entry],
+                    limit=12,
+                )
+                self._history_list.clear()
+                self._history_list.addItems(self._recent_history_entries)
+            if self._pending_attachments:
+                labels = [path.name or str(path) for path in self._pending_attachments]
+                self._recent_attachment_entries = merge_recent_items(
+                    self._recent_attachment_entries,
+                    labels,
+                    limit=12,
+                )
+                self._recent_attachments_list.clear()
+                self._recent_attachments_list.addItems(self._recent_attachment_entries)
+            self._pending_prompt = ""
+            self._pending_attachments = []
 
     import sys
 

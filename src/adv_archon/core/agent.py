@@ -352,6 +352,7 @@ class AgentTurnInspection:
     profile: str
     knowledge_eval: KnowledgeRetrievalEval | None
     local_knowledge_hits: tuple[str, ...]
+    memory_hits: tuple[str, ...] = ()
 
 
 @dataclass(slots=True)
@@ -581,6 +582,7 @@ class Agent:
             profile=state.intent.profile,
             knowledge_eval=state.knowledge_eval,
             local_knowledge_hits=tuple(record.title for record in state.knowledge_hits[:5]),
+            memory_hits=tuple(record.content for record in state.memories[:5]),
         )
 
     def stream_final_response(
@@ -1951,7 +1953,9 @@ class Agent:
                 "Esto es lo que tengo ahora mismo en memoria sobre ti o tus intereses:"
             ]
             for record in relevant_memories[:5]:
-                lines.append(f"- {record.content}")
+                lines.append(
+                    f"- [{record.category} | imp {record.importance}] {record.content}"
+                )
             lines.append(
                 "\nSi quieres, puedo usar esto para recomendarte lecturas, proyectos o "
                 "siguientes pasos."
@@ -1984,7 +1988,16 @@ class Agent:
 
         collected: list[MemoryRecord] = []
         seen_ids: set[int] = set()
-        for query in ("intereses", "perfil", "investigando", "gusta", "prefieres"):
+        for query in (
+            "intereses",
+            "preferences",
+            "projects",
+            "people",
+            "perfil",
+            "investigando",
+            "gusta",
+            "prefieres",
+        ):
             try:
                 matches = self._memory_store.find_matches(query, limit=limit)
             except Exception:
@@ -2027,17 +2040,25 @@ class Agent:
                 "`recuerda que estoy investigando grimorios y simbolismo`."
             )
         else:
+            category = _infer_memory_category(memory_text)
+            importance = _infer_memory_importance(memory_text)
             record = self._memory_store.remember(
                 memory_text,
-                tags=["intereses", "perfil"],
+                tags=[category, "perfil"],
                 source="agent",
                 memory_type="preference",
                 namespace="general",
-                metadata={"captured_from": "chat"},
+                category=category,
+                importance=importance,
+                metadata={
+                    "captured_from": "chat",
+                    "category": category,
+                    "importance": importance,
+                },
             )
             text = (
                 "He guardado esto en memoria para tenerlo en cuenta a partir de ahora:\n"
-                f"- {record.content}"
+                f"- [{record.category}] {record.content}"
             )
 
         return LLMResponse(
@@ -2847,6 +2868,28 @@ def _extract_memory_capture_fact(text: str) -> str:
             return original[len(prefix) :].strip(" .,:;")
 
     return original.strip(" .,:;")
+
+
+def _infer_memory_category(text: str) -> str:
+    normalized = _normalize_text(text)
+    if _contains_any(normalized, {"investigando", "interesa", "grimorios", "simbolismo"}):
+        return "interests"
+    if _contains_any(normalized, {"proyecto", "roadmap", "cliente", "archon"}):
+        return "projects"
+    if _contains_any(normalized, {"ana", "persona", "equipo", "contacto"}):
+        return "people"
+    if _contains_any(normalized, {"prefiero", "prefieres", "tono", "respuestas", "idioma"}):
+        return "preferences"
+    return "general"
+
+
+def _infer_memory_importance(text: str) -> int:
+    normalized = _normalize_text(text)
+    if _contains_any(normalized, {"muy importante", "clave", "prioridad", "fundamental"}):
+        return 5
+    if _contains_any(normalized, {"importante", "relevante", "tener en cuenta"}):
+        return 4
+    return 3
 
 
 def _looks_like_meeting_prep_request(text: str) -> bool:

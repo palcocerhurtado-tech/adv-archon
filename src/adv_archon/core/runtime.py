@@ -272,6 +272,7 @@ class ArchonRuntime:
             renderer=renderer,
             memory=self.memory_store,
             task_store=self.task_store,
+            task_tools=self.task_tools,
             personal_tools=self.personal_tools,
             google_workspace_tools=self.google_workspace_tools,
             knowledge_store=self.knowledge_store,

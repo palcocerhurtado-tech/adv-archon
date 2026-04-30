@@ -149,6 +149,7 @@ class LLMRouter:
                 api_key=self._config.gemini_api_key,
                 model=model,
                 temperature=self._config.temperature,
+                timeout=float(self._config.gemini_timeout_seconds),
             )
         return OllamaClient(
             base_url=self._config.ollama_base_url,

@@ -349,7 +349,10 @@ class TaskStore:
                 text=True,
             )
             if completed.returncode != 0:
-                raise RuntimeError(completed.stderr.strip() or "No he podido cargar el launch agent.")
+                raise RuntimeError(
+                    completed.stderr.strip()
+                    or "No he podido cargar el launch agent."
+                )
         if self._logger is not None:
             self._logger.log(
                 "task_launch_agent_installed",

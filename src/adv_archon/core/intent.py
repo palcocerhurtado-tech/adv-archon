@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import unicodedata
 from dataclasses import dataclass
 
 from adv_archon.core.context import RuntimeContext
@@ -177,11 +178,142 @@ PLAN_KEYWORDS = {
     "monta",
     "construye",
 }
+REASONING_KEYWORDS = {
+    "razona",
+    "razonamiento",
+    "razonar",
+    "deduce",
+    "deducir",
+    "infiere",
+    "inferir",
+    "step by step",
+    "paso a paso",
+    "explica por qué",
+    "explica porque",
+    "por qué funciona",
+    "por que funciona",
+    "demuestra",
+    "demostrar",
+    "prueba que",
+    "complejidad",
+    "algoritmo",
+    "optimiza",
+    "optimizar",
+    "arquitectura",
+    "diseña",
+    "disenar",
+    "tradeoff",
+    "trade-off",
+    "ventajas y desventajas",
+    "pros y contras",
+    "deep",
+    "think",
+    "piensa",
+    "reflexiona",
+}
+
+
+COMPLIANCE_STRONG_KEYWORDS = {
+    "normativa",
+    "pgou",
+    "urbanismo",
+    "urbanistica",
+    "licencia obras",
+    "licencia de obras",
+    "retranqueo",
+    "retranqueos",
+    "altura maxima",
+    "edificabilidad",
+    "ocupacion",
+    "parcela",
+    "uso residencial",
+    "calificacion",
+}
+COMPLIANCE_PLAN_KEYWORDS = {
+    "plano",
+    "planos",
+    "edificio",
+    "edificacion",
+    "vivienda",
+    "viviendas",
+    "proyecto arquitectonico",
+}
+COMPLIANCE_REPORT_KEYWORDS = {
+    "cumple normativa",
+    "cumplimiento normativa",
+    "informe urbanistico",
+}
+COMPLIANCE_KEYWORDS = (
+    COMPLIANCE_STRONG_KEYWORDS
+    | COMPLIANCE_PLAN_KEYWORDS
+    | COMPLIANCE_REPORT_KEYWORDS
+)
+
+_MUNICIPALITY_PATTERNS = [
+    re.compile(
+        r"(?:en|de|para|del municipio de?|municipio|ciudad de?|ayuntamiento de?)\s+"
+        r"([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s\-]{2,40}?)(?:\s*[,\.\n]|$)",
+        re.IGNORECASE,
+    ),
+    re.compile(
+        r"(?:plano|proyecto|edificio|vivienda|obra)\s+(?:en|de)\s+"
+        r"([A-ZÁÉÍÓÚÜÑ][a-záéíóúüñA-ZÁÉÍÓÚÜÑ\s\-]{2,40}?)(?:\s*[,\.\n]|$)",
+        re.IGNORECASE,
+    ),
+]
+
+_KNOWN_MUNICIPALITIES = {
+    "madrid", "barcelona", "valencia", "sevilla", "zaragoza", "málaga", "malaga",
+    "murcia", "palma", "las palmas", "bilbao", "alicante", "córdoba", "cordoba",
+    "valladolid", "vigo", "gijón", "gijon", "granada", "elche", "oviedo",
+    "badalona", "terrassa", "jerez", "sabadell", "santa cruz de tenerife",
+    "pamplona", "almería", "almeria", "fuenlabrada", "leganés", "leganes",
+    "san sebastián", "san sebastian", "donostia", "santander", "burgos",
+    "albacete", "alcalá de henares", "alcala de henares", "getafe", "hospitalet",
+    "castellón", "castellon", "logroño", "logro", "badajoz", "huelva",
+    "salamanca", "marbella", "lleida", "tarragona", "mataró", "mataro",
+}
+
+
+def extract_municipality(text: str) -> str | None:
+    """Extract a Spanish municipality name from natural language text."""
+    lowered = _normalize(text)
+    for muni in _KNOWN_MUNICIPALITIES:
+        if muni in lowered:
+            return muni.title()
+    for pattern in _MUNICIPALITY_PATTERNS:
+        m = pattern.search(text)
+        if m:
+            candidate = m.group(1).strip()
+            if 3 <= len(candidate) <= 50 and not candidate.lower().startswith(
+                ("un ", "una ", "el ", "la ", "los ", "las ", "este ", "esta ")
+            ):
+                return candidate.strip().title()
+    return None
+
+
+def _normalize(text: str) -> str:
+    nfd = unicodedata.normalize("NFD", text.lower())
+    return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
+
+def looks_like_compliance_request(text: str) -> bool:
+    normalized = _normalize(text)
+    has_plan = _contains_any(normalized, COMPLIANCE_PLAN_KEYWORDS)
+    has_strong = _contains_any(normalized, COMPLIANCE_STRONG_KEYWORDS)
+    has_report = _contains_any(normalized, COMPLIANCE_REPORT_KEYWORDS)
+    has_municipality = extract_municipality(text) is not None
+    return (
+        (has_plan and (has_strong or has_report))
+        or (has_municipality and (has_strong or has_report))
+        or ("pgou" in normalized and has_municipality)
+    )
 
 
 IntentCategory = (
     "chat",
     "coding",
+    "compliance",
     "documents",
     "web",
     "shell",
@@ -234,6 +366,7 @@ class IntentRouter:
         category_scores = {
             "chat": 0,
             "coding": 0,
+            "compliance": 0,
             "documents": 0,
             "web": 0,
             "shell": 0,
@@ -244,6 +377,13 @@ class IntentRouter:
         if _contains_any(text, CODE_KEYWORDS):
             category_scores["coding"] += 3
             reasons.append("keywords de codigo")
+        if looks_like_compliance_request(user_input):
+            category_scores["compliance"] += 4
+            reasons.append("keywords de normativa/plano arquitectónico")
+        if _contains_any(text, REASONING_KEYWORDS):
+            category_scores["coding"] += 2
+            category_scores["research"] += 2
+            reasons.append("keywords de razonamiento profundo")
         if _contains_any(text, DOCUMENT_KEYWORDS):
             category_scores["documents"] += 3
             reasons.append("keywords de documentos")
@@ -265,6 +405,8 @@ class IntentRouter:
             category_scores["documents"] += 2
             category_scores["coding"] += 1
             reasons.append("hay paths o ficheros en el prompt")
+            if category_scores["compliance"] > 0:
+                category_scores["compliance"] += 2
 
         if context is not None and context.git.repo_root is not None:
             category_scores["coding"] += 1
@@ -288,7 +430,7 @@ class IntentRouter:
             reasons.append("perfil activo aplicado")
 
         profile = self._choose_profile(category, text, context)
-        needs_plan = category in {"coding", "assistant", "research"} or _contains_any(
+        needs_plan = category in {"coding", "assistant", "compliance", "research"} or _contains_any(
             text, PLAN_KEYWORDS
         ) or _contains_any(
             text, BROWSER_KEYWORDS
@@ -320,6 +462,8 @@ class IntentRouter:
     ) -> str:
         if category == "coding":
             return "coding"
+        if category == "compliance":
+            return "work"
         if category in {"web", "research"}:
             return "research"
         if category == "assistant":

@@ -14,7 +14,12 @@ authors = [
 ]
 dependencies = [
   "dateparser>=1.2.2",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.34.0",
+  "python-multipart>=0.0.20",
+  "passlib[bcrypt]>=1.7.4",
   "ddgs>=9.6.1",
+  "fpdf2>=2.8.0",
   "faster-whisper>=1.1.1",
   "google-api-python-client>=2.169.0",
   "google-auth-oauthlib>=1.2.2",
@@ -58,6 +63,7 @@ wakeword = [
 adv-archon = "adv_archon.main:main"
 adv = "adv_archon.main:main"
 adv-archon-desktop = "adv_archon.main:desktop_main"
+adv-archon-api = "adv_archon.api.server:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }

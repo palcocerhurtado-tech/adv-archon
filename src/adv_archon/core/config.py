@@ -78,6 +78,7 @@ class PathsConfig:
     google_token_file: Path = field(init=False)
     sessions_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
+    pgou_db: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.config_file = self.root / "config.toml"
@@ -95,6 +96,7 @@ class PathsConfig:
         self.google_token_file = self.root / "google-token.json"
         self.sessions_dir = self.root / "sessions"
         self.logs_dir = self.root / "logs"
+        self.pgou_db = self.root / "pgou.db"
 
 
 @dataclass(slots=True)
@@ -106,12 +108,15 @@ class LLMConfig:
     planner_local_model: str | None = None
     document_local_model: str | None = None
     coding_local_model: str | None = None
+    reasoning_local_model: str | None = None
     fast_cloud_model: str | None = None
     planner_cloud_model: str | None = None
     document_cloud_model: str | None = None
     coding_cloud_model: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: int = 180
+    ollama_num_ctx: int = 8192
+    ollama_keep_alive: str = "-1"
     gemini_api_key: str | None = None
     temperature: float = 0.2
     redact_cloud_pii: bool = False
@@ -328,6 +333,10 @@ def load_app_config(
             _lookup(data, "llm", "coding_local_model", default="")
         ).strip()
         or None,
+        reasoning_local_model=str(
+            _lookup(data, "llm", "reasoning_local_model", default="")
+        ).strip()
+        or None,
         fast_cloud_model=str(_lookup(data, "llm", "fast_cloud_model", default="")).strip()
         or None,
         planner_cloud_model=str(
@@ -348,6 +357,8 @@ def load_app_config(
             os.getenv("ADV_ARCHON_OLLAMA_TIMEOUT_SECONDS")
             or _lookup(data, "llm", "ollama_timeout_seconds", default=180)
         ),
+        ollama_num_ctx=int(_lookup(data, "llm", "ollama_num_ctx", default=8192)),
+        ollama_keep_alive=str(_lookup(data, "llm", "ollama_keep_alive", default="-1")),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         temperature=float(_lookup(data, "llm", "temperature", default=0.2)),
         redact_cloud_pii=bool(_lookup(data, "privacy", "redact_cloud_pii", default=False)),

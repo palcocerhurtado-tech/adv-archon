@@ -12,9 +12,11 @@ import trafilatura
 from adv_archon.core.resilience import ConcurrencyPolicy, ResilientExecutor, RetryPolicy
 
 try:
-    from ddgs import DDGS  # type: ignore[import-not-found]
+    from ddgs import DDGS as _DDGS
 except ModuleNotFoundError:  # pragma: no cover - compatibilidad con instalaciones antiguas
-    from duckduckgo_search import DDGS
+    from duckduckgo_search import DDGS as _DDGS  # type: ignore[import-not-found,no-redef]
+
+DDGS = _DDGS
 
 USER_AGENT = "ADV-ARCHON/0.1 (+https://local-only)"
 SHOP_PATH_HINTS = (

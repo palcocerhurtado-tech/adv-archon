@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from adv_archon.core.context import GitContext, RuntimeContext, WorkingSet
-from adv_archon.core.intent import IntentRouter
+from adv_archon.core.intent import IntentRouter, looks_like_compliance_request
 
 
 def test_intent_router_detects_coding_repo_context() -> None:
@@ -58,6 +58,32 @@ def test_intent_router_detects_browser_automation_query() -> None:
 
     assert analysis.needs_plan is True
     assert "keywords de navegador/automatizacion" in analysis.reasons
+
+
+def test_intent_router_detects_explicit_pgou_request() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze(
+        "analiza este plano contra el PGOU de Madrid y dime si cumple normativa"
+    )
+
+    assert analysis.category == "compliance"
+    assert analysis.profile == "work"
+    assert analysis.needs_plan is True
+
+
+def test_generic_architecture_pdf_stays_in_documents_lane() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze("resume ~/Desktop/arquitectura-del-renacimiento.pdf")
+
+    assert analysis.category == "documents"
+
+
+def test_compliance_detection_requires_stronger_signals() -> None:
+    assert looks_like_compliance_request("quiero el PGOU de Madrid") is True
+    assert looks_like_compliance_request("resume este libro de arquitectura") is False
+    assert looks_like_compliance_request("plano de vivienda en Madrid") is False
 
 
 def test_intent_router_does_not_force_knowledge_for_calendar_tasks_query() -> None:

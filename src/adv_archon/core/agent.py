@@ -3580,8 +3580,12 @@ def _task_kind_for_intent(intent: str) -> TaskKind:
         return "fast"
     if intent == "coding":
         return "coding"
+    if intent == "compliance":
+        return "reasoning"
     if intent == "documents":
         return "documents"
+    if intent == "research":
+        return "reasoning"
     if intent == "shell":
         return "fast"
     if intent == "web":

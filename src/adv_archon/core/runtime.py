@@ -171,8 +171,12 @@ class ArchonRuntime:
         )
         self.web_library_tools = WebLibraryTools(self.web_library_store)
         from adv_archon.core.pgou_store import PGOUStore
+        from adv_archon.core.geo_store import GeoStore
+        from adv_archon.tools.geo_tools import GeoTools
         self.pgou_store = PGOUStore(config.paths.pgou_db, encoder=encoder)
         self.urban_compliance_tools = UrbanComplianceTools(self.pgou_store, llm)
+        self.geo_store = GeoStore(config.paths.geo_db)
+        self.geo_tools = GeoTools(self.geo_store, self.pgou_store)
         self.task_store = TaskStore(
             config.paths.tasks_db,
             timezone_name=config.tasks.default_timezone,
@@ -309,6 +313,7 @@ class ArchonRuntime:
             tts=self.tts,
             stt=self.stt,
             urban_compliance_tools=self.urban_compliance_tools,
+            geo_tools=self.geo_tools,
         )
 
     def apply_profile(self, profile_name: str) -> None:
@@ -508,6 +513,15 @@ class ArchonRuntime:
                 )
             )
         for definition in _build_urban_compliance_tool_specs(self.urban_compliance_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
+        for definition in _build_geo_tool_specs(self.geo_tools):
             specs.append(
                 ToolSpec(
                     name=definition["name"],
@@ -733,5 +747,55 @@ def _build_urban_compliance_tool_specs(
             ),
             "schema": {"type": "object", "properties": {}, "required": []},
             "fn": tools.pgou_catalogue,
+        },
+    ]
+
+
+def _build_geo_tool_specs(tools: Any) -> list[dict]:
+    return [
+        {
+            "name": "resolve_coordinates",
+            "description": (
+                "Resolve GPS coordinates (latitude, longitude) to a Spanish municipality, "
+                "province, autonomous community, and cadastral reference. "
+                "Use this when the user provides coordinates, a location pin, or asks "
+                "'what can be built here / what is the PGOU for these coordinates'."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "latitude": {
+                        "type": "number",
+                        "description": "Decimal latitude (e.g. 40.4168 for Madrid).",
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "description": "Decimal longitude (e.g. -3.7038 for Madrid).",
+                    },
+                    "refresh": {
+                        "type": "boolean",
+                        "description": "Force a fresh lookup, ignoring the cache.",
+                    },
+                },
+                "required": ["latitude", "longitude"],
+            },
+            "fn": tools.resolve_coordinates,
+        },
+        {
+            "name": "site_compliance_context",
+            "description": (
+                "Full site context for a compliance check: resolves coordinates to a municipality, "
+                "checks whether PGOU normativa is already indexed, and tells you the next step. "
+                "Use this as the first tool when an architect provides coordinates for a plot."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                },
+                "required": ["latitude", "longitude"],
+            },
+            "fn": tools.site_compliance_context,
         },
     ]

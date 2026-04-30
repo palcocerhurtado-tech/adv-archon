@@ -80,7 +80,8 @@ class Renderer:
         text.append("/memory [status|categories|list|remember|edit|forget]\n")
         text.append("/automation [status|presets|install|tasks]\n")
         text.append(
-            "/pgou [status|catalogue|fetch [<municipio>|--all]|add <municipio>|"
+            "/pgou [status|catalogue|locate <lat> <lon>|"
+            "fetch [<municipio>|--all]|add <municipio>|"
             "check <plano.pdf> <municipio>|report <plano.pdf> <municipio>|"
             "delete <municipio>]\n"
         )

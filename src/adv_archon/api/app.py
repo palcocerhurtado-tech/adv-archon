@@ -9,6 +9,7 @@ from adv_archon.api.deps import set_globals
 from adv_archon.api.routes.account import router as account_router
 from adv_archon.api.routes.admin import router as admin_router
 from adv_archon.api.routes.compliance import router as compliance_router
+from adv_archon.api.routes.location import router as location_router
 from adv_archon.api.store import ApiStore
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
 
@@ -41,6 +42,7 @@ def create_app(
     set_globals(api_store, compliance_tools, admin_key_prefix)
 
     app.include_router(compliance_router)
+    app.include_router(location_router)
     app.include_router(account_router)
     app.include_router(admin_router)
 

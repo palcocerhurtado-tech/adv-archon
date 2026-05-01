@@ -331,6 +331,22 @@ URL_RE = re.compile(r"https?://\S+")
 QUOTED_PATH_RE = re.compile(r"""['"]((?:~|/)[^'"]+)['"]""")
 UNQUOTED_PATH_RE = re.compile(r"((?:~|/)[^\n,;]+)")
 
+PGOU_STATUS_KEYWORDS = {
+    "municipios", "municipio", "catalogo", "catálogo", "indexados", "indexado",
+    "pgou", "normativas", "normativa", "disponibles", "disponible",
+    "planeamiento", "urbanismo", "estado", "cuales", "cuáles", "listado",
+    "lista", "muestra", "muestrame", "enumerame", "hay", "tengo",
+}
+PGOU_FETCH_KEYWORDS = {
+    "descarga", "descargar", "obtén", "obten", "indexa", "indexar",
+    "añade", "anade", "agrega", "importa", "actualiza", "fetch",
+}
+PGOU_SEARCH_KEYWORDS = {
+    "busca normativa", "que dice", "qué dice", "normativa de",
+    "regulacion de", "regulación de", "altura maxima", "altura máxima",
+    "retranqueo", "ocupacion", "ocupación", "edificabilidad", "uso permitido",
+}
+
 
 @dataclass(slots=True)
 class ToolSpec:
@@ -852,6 +868,36 @@ class Agent:
         normalized = _normalize_text(user_input)
         executed = set(executed_tools)
 
+        # ── PGOU / urban compliance rules (resolved locally, no LLM planning needed) ──
+        wants_pgou_status = _contains_any(normalized, PGOU_STATUS_KEYWORDS)
+        wants_pgou_fetch = _contains_any(normalized, PGOU_FETCH_KEYWORDS)
+        wants_pgou_search = any(kw in normalized for kw in PGOU_SEARCH_KEYWORDS)
+
+        if wants_pgou_status and "pgou_status" in self._tools and "pgou_status" not in executed:
+            return {
+                "kind": "tool",
+                "tool_name": "pgou_status",
+                "arguments": {},
+                "step_summary": "consultar catálogo PGOU indexado",
+            }
+
+        if wants_pgou_fetch and "pgou_fetch_all" in self._tools and "pgou_fetch_all" not in executed:
+            return {
+                "kind": "tool",
+                "tool_name": "pgou_fetch_all",
+                "arguments": {"skip_indexed": True},
+                "step_summary": "actualizar catálogo PGOU completo",
+            }
+
+        if wants_pgou_search and "pgou_catalogue" in self._tools and "pgou_catalogue" not in executed:
+            return {
+                "kind": "tool",
+                "tool_name": "pgou_catalogue",
+                "arguments": {},
+                "step_summary": "consultar catálogo y normativa urbanística",
+            }
+
+        # ── Standard planning rules ───────────────────────────────────────────
         wants_calendar = _contains_any(normalized, CALENDAR_KEYWORDS)
         wants_tasks = _contains_any(normalized, TASK_KEYWORDS)
         wants_reminders = _contains_any(normalized, REMINDER_APP_KEYWORDS)

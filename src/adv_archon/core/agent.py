@@ -830,25 +830,35 @@ class Agent:
             plan={"kind": "tool", "step_summary": "planificar siguiente paso"},
             tool_observations=[],
         )
-        planner_prompt = (
-            f"{self._system_prompt}\n\n"
-            f"{packet.render_for_model()}\n\n"
-            "You are ADV ARCHON's intent router and operator planner.\n"
-            "Decide whether to answer directly or call exactly one tool next.\n"
-            "If the task needs multiple steps, choose the best next tool only.\n"
-            "Prefer dedicated personal-assistant tools over shell_exec whenever available.\n"
-            "Keep step_summary sober, short, and operational.\n"
-            "For note-taking requests about local folders, books, or files, prefer "
-            "read_file, list_dir, or knowledge_search first, then create the note.\n"
-            "Never use shell_exec for calendar, reminders, notes, contacts, email drafts, "
-            "persistent tasks, or browser automation if there is a dedicated tool for it.\n"
-            "Available tools:\n"
-            f"{json.dumps(self._tool_manifest(), ensure_ascii=False, indent=2)}\n\n"
-            "Return JSON only with one of these shapes:\n"
-            '{"kind":"answer","step_summary":"reply directly"}\n'
-            '{"kind":"tool","tool_name":"<tool_name>","arguments":{"key":"value"},'
-            '"step_summary":"<short next step>"}\n'
-        )
+        if self._llm.mode == "local":
+            # Minimal planner prompt — large manifests slow down local inference.
+            tool_names = list(self._tools.keys())
+            planner_prompt = (
+                f"Task: {user_input}\n"
+                f"Tools available: {', '.join(tool_names)}\n"
+                "Return JSON only:\n"
+                '{"kind":"answer"} or {"kind":"tool","tool_name":"<name>","arguments":{}}\n'
+            )
+        else:
+            planner_prompt = (
+                f"{self._system_prompt}\n\n"
+                f"{packet.render_for_model()}\n\n"
+                "You are ADV ARCHON's intent router and operator planner.\n"
+                "Decide whether to answer directly or call exactly one tool next.\n"
+                "If the task needs multiple steps, choose the best next tool only.\n"
+                "Prefer dedicated personal-assistant tools over shell_exec whenever available.\n"
+                "Keep step_summary sober, short, and operational.\n"
+                "For note-taking requests about local folders, books, or files, prefer "
+                "read_file, list_dir, or knowledge_search first, then create the note.\n"
+                "Never use shell_exec for calendar, reminders, notes, contacts, email drafts, "
+                "persistent tasks, or browser automation if there is a dedicated tool for it.\n"
+                "Available tools:\n"
+                f"{json.dumps(self._tool_manifest(), ensure_ascii=False, indent=2)}\n\n"
+                "Return JSON only with one of these shapes:\n"
+                '{"kind":"answer","step_summary":"reply directly"}\n'
+                '{"kind":"tool","tool_name":"<tool_name>","arguments":{"key":"value"},'
+                '"step_summary":"<short next step>"}\n'
+            )
         response = self._llm.complete(
             self._build_messages(),
             system_prompt=planner_prompt,
@@ -1608,19 +1618,29 @@ class Agent:
             plan={"kind": "answer", "step_summary": "responder"},
             tool_observations=tool_observations,
         )
-        final_prompt = (
-            f"{self._system_prompt}\n\n"
-            f"{packet.render_for_model()}\n\n"
-            "Write the final answer for the user. "
-            "Use the tool results already in the conversation when relevant. "
-            "When useful, mention what context you used in one short line. "
-            "Prefer grounded statements over broad claims. "
-            "If local knowledge was used, stay close to the evidence. "
-            "If a tool reported an error, explain it briefly and concretely. "
-            "Do not claim you retried unless you actually retried. "
-            "Do not ask the user whether you should retry unless the next step truly "
-            "requires their confirmation or an external permission change."
-        )
+        is_local = self._llm.mode == "local"
+        if is_local:
+            # Compact prompt for local model: fewer tokens → faster inference.
+            final_prompt = (
+                "Eres ADV ARCHON, asistente de arquitectura. "
+                "Responde en español, breve y directo. "
+                "Usa solo los datos del contexto.\n\n"
+                f"{packet.render_compact()}"
+            )
+        else:
+            final_prompt = (
+                f"{self._system_prompt}\n\n"
+                f"{packet.render_for_model()}\n\n"
+                "Write the final answer for the user. "
+                "Use the tool results already in the conversation when relevant. "
+                "When useful, mention what context you used in one short line. "
+                "Prefer grounded statements over broad claims. "
+                "If local knowledge was used, stay close to the evidence. "
+                "If a tool reported an error, explain it briefly and concretely. "
+                "Do not claim you retried unless you actually retried. "
+                "Do not ask the user whether you should retry unless the next step truly "
+                "requires their confirmation or an external permission change."
+            )
         response = self._llm.stream_complete(
             self._build_messages(),
             system_prompt=final_prompt,

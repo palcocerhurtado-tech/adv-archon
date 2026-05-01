@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import httpx
 
@@ -15,12 +15,26 @@ class OllamaClient:
     model: str
     temperature: float
     timeout: float = 60.0
-    num_ctx: int = 8192
+    num_ctx: int = 2048       # 2048 is plenty for most queries; 4x faster than 8192
     keep_alive: str = "-1"
+    num_predict: int = 768    # cap output tokens — avoids runaway generation
+    num_thread: int = 0       # 0 = Ollama auto-selects (all physical cores)
 
     def _keep_alive_value(self) -> int | str:
-        """Return keep_alive as int -1 when the string is '-1', else as-is."""
         return -1 if self.keep_alive.strip() == "-1" else self.keep_alive
+
+    def _options(self) -> dict[str, object]:
+        opts: dict[str, object] = {
+            "temperature": self.temperature,
+            "num_ctx": self.num_ctx,
+            "num_predict": self.num_predict,
+            "top_k": 20,          # narrow sampling → faster + more focused
+            "top_p": 0.85,
+            "repeat_penalty": 1.1,
+        }
+        if self.num_thread:
+            opts["num_thread"] = self.num_thread
+        return opts
 
     def complete(
         self,
@@ -29,12 +43,12 @@ class OllamaClient:
         system_prompt: str,
         response_mime_type: str | None = None,
     ) -> tuple[str, LLMUsage]:
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": False,
             "keep_alive": self._keep_alive_value(),
-            "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
+            "options": self._options(),
         }
         if response_mime_type == "application/json":
             payload["format"] = "json"
@@ -53,12 +67,12 @@ class OllamaClient:
         system_prompt: str,
         on_chunk: Callable[[str], None] | None = None,
     ) -> tuple[str, LLMUsage]:
-        payload = {
+        payload: dict[str, object] = {
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": True,
             "keep_alive": self._keep_alive_value(),
-            "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
+            "options": self._options(),
         }
         chunks: list[str] = []
         usage = LLMUsage()
@@ -111,5 +125,8 @@ def _coerce_int(value: object) -> int:
     if isinstance(value, float):
         return int(value)
     if isinstance(value, str):
-        return int(value)
+        try:
+            return int(value)
+        except ValueError:
+            return 0
     return 0

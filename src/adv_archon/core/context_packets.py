@@ -54,3 +54,12 @@ class ContextPacket:
             lines.append("Tool observations:")
             lines.extend(f"- {item}" for item in self.tool_items)
         return "\n".join(lines)
+
+    def render_compact(self) -> str:
+        """Minimal context for local LLM — fewer tokens, same essential facts."""
+        lines = [f"[{self.intent}] {self.task}"]
+        if self.tool_items:
+            lines.append("Data: " + " | ".join(self.tool_items))
+        elif self.knowledge_items:
+            lines.append("KB: " + self.knowledge_items[0])
+        return "\n".join(lines)

@@ -117,11 +117,11 @@ class LLMConfig:
     coding_cloud_model: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: int = 180
-    ollama_num_ctx: int = 8192
+    ollama_num_ctx: int = 2048       # 2048 fast; raise to 4096 for long docs
     ollama_keep_alive: str = "-1"
     gemini_api_key: str | None = None
     gemini_timeout_seconds: int = 300
-    temperature: float = 0.2
+    temperature: float = 0.0         # deterministic → no re-sampling overhead
     redact_cloud_pii: bool = False
     force_local_private_context: bool = True
     task_routing_enabled: bool = True

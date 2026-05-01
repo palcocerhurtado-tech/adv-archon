@@ -192,17 +192,17 @@ if PYSIDE6_AVAILABLE:
             for attempt in range(self._warmup_retries + 1):
                 try:
                     import httpx
-                    payload = {
+                    # POST /api/generate with empty prompt + keep_alive=-1 loads
+                    # the model into RAM without generating any tokens.
+                    # keep_alive=-1 (integer) keeps it loaded indefinitely.
+                    payload: dict[str, Any] = {
                         "model": self._model,
-                        "messages": [
-                            {"role": "user", "content": "ok"}
-                        ],
+                        "prompt": "",
                         "stream": False,
-                        "keep_alive": "-1",   # keep model hot indefinitely
-                        "options": {"num_ctx": 512, "temperature": 0.0},
+                        "keep_alive": -1,
                     }
                     with httpx.Client(timeout=self._timeout) as client:
-                        r = client.post(f"{self._base_url}/api/chat", json=payload)
+                        r = client.post(f"{self._base_url}/api/generate", json=payload)
                         r.raise_for_status()
                     self.progress.emit("Modelo precargado y listo en RAM")
                     return True

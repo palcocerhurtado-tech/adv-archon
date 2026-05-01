@@ -2633,19 +2633,9 @@ class Agent:
         tool_observations: Sequence[ToolObservation],
         on_chunk: ChunkCallback | None,
     ) -> LLMResponse:
-        block = self._build_confidence_block(state=state, tool_observations=tool_observations)
-        if not block:
-            return response
-        if on_chunk is not None:
-            on_chunk(block)
-        return LLMResponse(
-            text=f"{response.text}{block}",
-            usage=response.usage,
-            provider=response.provider,
-            model=response.model,
-            redaction_applied=response.redaction_applied,
-            redaction_items=response.redaction_items,
-        )
+        # Confidence metadata is surfaced in the desktop context panel (HERRAMIENTAS /
+        # FUENTES). Appending it to the chat text creates noise — skip it.
+        return response
 
     def _build_confidence_block(
         self,

@@ -265,6 +265,46 @@ QComboBox QAbstractItemView {{
     border-radius: 8px; color: {TEXT}; padding: 4px;
     selection-background-color: {ACCENT_DIM};
 }}
+/* ListWidget — historial, adjuntos recientes */
+QListWidget {{
+    background: transparent; border: none; color: {TEXT_SUB};
+    font-size: 12px; outline: none;
+}}
+QListWidget::item {{
+    padding: 4px 6px; border-radius: 6px;
+}}
+QListWidget::item:selected {{
+    background: {ACCENT_DIM}; color: {ACCENT};
+}}
+QListWidget::item:hover {{
+    background: {SURFACE_UP};
+}}
+/* PlainTextEdit inside panels — read-only context/sources views */
+QPlainTextEdit {{
+    background: transparent; color: {TEXT_SUB}; border: none;
+    font-size: 12px; line-height: 1.55;
+    selection-background-color: {ACCENT_DIM};
+    selection-color: {TEXT};
+}}
+/* AutoTextEdit inside message bubbles (read-only QTextEdit) */
+QTextEdit[readOnly="true"] {{
+    background: transparent; border: none; color: {TEXT};
+    font-size: 13px; line-height: 1.65;
+    selection-background-color: {ACCENT_DIM};
+    selection-color: {TEXT};
+}}
+/* Menu bar */
+QMenuBar {{
+    background: {SURFACE}; color: {TEXT_SUB};
+    border-bottom: 1px solid {BORDER}; font-size: 12px;
+}}
+QMenuBar::item:selected {{ background: {SURFACE_UP}; color: {TEXT}; }}
+QMenu {{
+    background: {SURFACE_HIGH}; border: 1px solid {BORDER_MED};
+    border-radius: 8px; color: {TEXT}; padding: 4px;
+}}
+QMenu::item {{ padding: 6px 20px; border-radius: 6px; }}
+QMenu::item:selected {{ background: {ACCENT_DIM}; color: {ACCENT}; }}
 """
 
 

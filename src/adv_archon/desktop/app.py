@@ -9,12 +9,19 @@ from adv_archon.core.config import AppConfig
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.desktop.branding import desktop_stylesheet, logo_path
+from adv_archon.desktop.compliance_session import (
+    ComplianceSession,
+    build_compliance_prompt,
+    build_municipality_ask_prompt,
+    extract_municipality_hint,
+)
 from adv_archon.desktop.presenters import (
     build_history_entry,
     format_sources_summary,
     merge_recent_items,
     recommended_window_size,
 )
+from adv_archon.desktop.warmup_agent import start_warmup_agent
 
 
 def launch_desktop_app(
@@ -180,6 +187,9 @@ def launch_desktop_app(
             else:
                 self.resize(1280, 860)
 
+            self._compliance = ComplianceSession()
+            self._warmup_agent_ref: tuple[Any, Any] | None = None
+
             self._confirm_bridge   = ConfirmBridge()
             self._confirm_bridge.requested.connect(self._show_confirmation_dialog)
             self._profile_manager  = ProfileManager(
@@ -243,6 +253,7 @@ def launch_desktop_app(
             self._fit_to_screen()
             self._append_system("Preparando motor…")
             self._backend_thread.start()
+            self._start_warmup_agent()
 
         # ── Lifecycle ─────────────────────────────────────────────────────────
         def closeEvent(self, ev) -> None:
@@ -476,6 +487,15 @@ def launch_desktop_app(
             self._import_button.setVisible(False)
             btn_col.addWidget(self._import_button)
 
+            self._analyze_button = QPushButton("Analizar plano")
+            self._analyze_button.setObjectName("Primary")
+            self._analyze_button.setToolTip(
+                "Analizar cumplimiento normativo del plano PDF adjunto contra el PGOU"
+            )
+            self._analyze_button.clicked.connect(self._trigger_compliance_analysis)
+            self._analyze_button.setVisible(False)
+            btn_col.addWidget(self._analyze_button)
+
             btn_col.addStretch(1)
             input_row.addLayout(btn_col)
             fl.addLayout(input_row)
@@ -536,6 +556,29 @@ def launch_desktop_app(
             self._recent_attachments_list = QListWidget()
             self._recent_attachments_list.setMaximumHeight(90)
             pl.addWidget(self._recent_attachments_list)
+
+            # Compliance result card (hidden until analysis completes)
+            self._compliance_card = QFrame()
+            self._compliance_card.setObjectName("Card")
+            self._compliance_card.setVisible(False)
+            cc = QVBoxLayout(self._compliance_card)
+            cc.setContentsMargins(10, 10, 10, 10)
+            cc.setSpacing(6)
+            comp_hdr = QLabel("INFORME NORMATIVO")
+            comp_hdr.setObjectName("Eyebrow")
+            cc.addWidget(comp_hdr)
+            self._compliance_summary_lbl = QLabel("")
+            self._compliance_summary_lbl.setObjectName("Sub")
+            self._compliance_summary_lbl.setWordWrap(True)
+            cc.addWidget(self._compliance_summary_lbl)
+            self._compliance_stats_lbl = QLabel("")
+            self._compliance_stats_lbl.setObjectName("Faint")
+            cc.addWidget(self._compliance_stats_lbl)
+            self._export_button = QPushButton("Exportar PDF")
+            self._export_button.setObjectName("Primary")
+            self._export_button.clicked.connect(self._export_compliance_report)
+            cc.addWidget(self._export_button)
+            pl.addWidget(self._compliance_card)
 
             return panel
 
@@ -688,6 +731,7 @@ def launch_desktop_app(
                 self._add_message_bubble("assistant", text)
             self._current_stream_edit = None
             self._current_stream_text = ""
+            self._handle_compliance_result_from_text(text)
             self._remember_desktop_history(text)
             self._attachments = []
             self._render_attachment_pills()
@@ -796,6 +840,11 @@ def launch_desktop_app(
         def _add_attachments(self, paths: list[Path]) -> None:
             self._attachments = normalize_attachment_paths([*self._attachments, *paths])
             self._render_attachment_pills()
+            # Trigger compliance flow for first PDF found
+            for p in paths:
+                if p.suffix.lower() == ".pdf" and self._compliance.state == "idle":
+                    self._on_pdf_attached(p)
+                    break
 
         def _remove_attachment(self, path: Path) -> None:
             self._attachments = [a for a in self._attachments if a != path]
@@ -823,6 +872,9 @@ def launch_desktop_app(
                 self._pills_row.insertWidget(self._pills_row.count() - 1, pill)
             has = bool(self._attachments)
             self._import_button.setVisible(has)
+            if not has:
+                self._compliance.reset()
+            self._refresh_compliance_ui()
             self._handle_busy_state_changed(self._busy_state)
 
         def _import_attachments_to_kb(self) -> None:
@@ -852,6 +904,8 @@ def launch_desktop_app(
             self._append_user(prompt, attachments)
             self._append_assistant_prefix()
             self._current_stream_text = ""
+            # Capture municipality hint from user text before sending
+            self._try_extract_municipality_from_input(prompt)
             self._set_busy(True, task="prompt")
             self.prompt_requested.emit(prompt, [str(p) for p in attachments])
 
@@ -932,6 +986,7 @@ def launch_desktop_app(
             self._send_button.setEnabled(can_send)
             self._add_button.setEnabled(accepts)
             self._import_button.setEnabled(can_send and has_attach)
+            self._analyze_button.setEnabled(can_send and self._compliance.can_run)
             self._mode_combo.setEnabled(allows_cfg)
             self._profile_combo.setEnabled(allows_cfg)
             self._daily_action.setEnabled(can_send)
@@ -1009,6 +1064,152 @@ def launch_desktop_app(
             div = QFrame()
             div.setObjectName("Divider")
             return div
+
+        # ── Warmup agent (Phase 7B) ───────────────────────────────────────────
+        def _start_warmup_agent(self) -> None:
+            if self._selected_mode != "local":
+                return
+            try:
+                ref = start_warmup_agent(
+                    base_url=config.llm.ollama_base_url,
+                    model=config.llm.ollama_model,
+                    timeout=float(config.llm.ollama_timeout_seconds),
+                    on_progress=self._handle_warmup_progress,
+                    on_model_found=self._handle_warmup_model_found,
+                    on_ready=self._handle_warmup_ready,
+                    on_failed=self._handle_warmup_failed,
+                )
+                self._warmup_agent_ref = ref
+            except Exception:
+                pass  # warmup is optional; never block startup
+
+        def _handle_warmup_progress(self, message: str) -> None:
+            self._append_system(f"[warmup] {message}")
+
+        def _handle_warmup_model_found(self, model_name: str) -> None:
+            self._append_system(f"Modelo local: {model_name}")
+
+        def _handle_warmup_ready(self, elapsed: float) -> None:
+            self._append_system(
+                f"Modelo listo en {elapsed:.1f}s — respuestas locales a plena velocidad."
+            )
+            self._warmup_agent_ref = None
+
+        def _handle_warmup_failed(self, error: str) -> None:
+            self._add_notice(f"Warmup: {error}", object_name="Warn")
+            self._warmup_agent_ref = None
+
+        # ── Compliance flow (Phase 7) ─────────────────────────────────────────
+        def _on_pdf_attached(self, path: Path) -> None:
+            """Called whenever a PDF is added to the attachment list."""
+            self._compliance.attach_pdf(path)
+            hint = extract_municipality_hint(path)
+            if hint:
+                self._compliance.set_municipality(hint)
+            self._refresh_compliance_ui()
+            # Ask the user to confirm the municipality via the chat
+            prompt = build_municipality_ask_prompt(path, hint=hint)
+            self._append_system(prompt)
+
+        def _trigger_compliance_analysis(self) -> None:
+            """Send the compliance prompt to the agent."""
+            if self._compliance.pdf_path is None:
+                return
+            if not self._compliance.municipality:
+                self._append_system(
+                    "Indica el municipio en el chat antes de analizar el plano."
+                )
+                return
+            self._compliance.mark_running()
+            self._refresh_compliance_ui()
+            prompt = build_compliance_prompt(
+                self._compliance.pdf_path,
+                self._compliance.municipality,
+            )
+            self._input.setPlainText(prompt)
+            self._submit_prompt()
+
+        def _refresh_compliance_ui(self) -> None:
+            state = self._compliance.state
+            pdf_attached = self._compliance.pdf_path is not None
+            has_muni = bool(self._compliance.municipality)
+            can_run  = self._compliance.can_run
+
+            # "Analizar plano" button: visible when PDF is attached
+            self._analyze_button.setVisible(pdf_attached and self._busy_state.backend_ready)
+            self._analyze_button.setEnabled(can_run and not self._busy_state.busy)
+
+            # Compliance result card
+            if state == "done" and self._compliance.has_result:
+                self._compliance_card.setVisible(True)
+                self._compliance_summary_lbl.setText(
+                    self._compliance.summary[:180] + "…"
+                    if len(self._compliance.summary) > 180
+                    else self._compliance.summary
+                )
+                ok  = self._compliance.ok_count
+                wrn = self._compliance.warning_count
+                vio = self._compliance.violation_count
+                self._compliance_stats_lbl.setText(
+                    f"OK {ok}  ·  Revisar {wrn}  ·  Incumple {vio}"
+                )
+                self._export_button.setEnabled(True)
+            else:
+                self._compliance_card.setVisible(False)
+
+        def _handle_compliance_result_from_text(self, text: str) -> None:
+            """
+            Parse the LLM response to detect if a compliance check completed.
+            Looks for 'plan_compliance_check' result signals in the final text.
+            """
+            if self._compliance.state != "running":
+                return
+            lowered = text.lower()
+            if any(kw in lowered for kw in ("cumple", "incumple", "revisar", "análisis")):
+                # Extract approximate summary from response text
+                summary_snippet = text[:300].replace("\n", " ").strip()
+                self._compliance.mark_done(
+                    result={
+                        "summary": summary_snippet,
+                        "annotations": [],   # populated by tool result in real flow
+                    }
+                )
+                self._refresh_compliance_ui()
+
+        def _export_compliance_report(self) -> None:
+            if self._compliance.pdf_path is None or not self._compliance.municipality:
+                return
+            prompt = (
+                f"Exporta el informe de cumplimiento normativo del plano "
+                f"'{self._compliance.pdf_path.name}' del municipio "
+                f"{self._compliance.municipality} como PDF profesional "
+                f"usando plan_compliance_export."
+            )
+            self._input.setPlainText(prompt)
+            self._submit_prompt()
+
+        # ── Municipality extraction from chat ────────────────────────────────
+        def _try_extract_municipality_from_input(self, text: str) -> None:
+            """
+            When the user types a municipality name in response to the PDF prompt,
+            capture it and update the compliance session.
+            """
+            if self._compliance.state != "pdf_attached":
+                return
+            from adv_archon.desktop.compliance_session import _MUNI_PATTERN
+            match = _MUNI_PATTERN.search(text)
+            if match:
+                for group in ("muni1", "muni2", "muni3"):
+                    val = match.group(group)
+                    if val:
+                        self._compliance.set_municipality(val.strip())
+                        self._refresh_compliance_ui()
+                        return
+            # Heuristic: if the message is short (< 5 words), treat it as a municipality name
+            words = text.strip().split()
+            if 1 <= len(words) <= 4 and text[0].isupper():
+                self._compliance.set_municipality(text.strip())
+                self._refresh_compliance_ui()
 
     # ── Launch ────────────────────────────────────────────────────────────────
     import sys

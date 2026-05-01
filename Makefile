@@ -1,7 +1,8 @@
 PYTHON ?= python3
 UV ?= uv
 
-.PHONY: setup dev test lint format install uninstall
+.PHONY: setup dev test lint format install uninstall \
+        bundle-macos bundle-macos-universal bundle-macos-signed
 
 setup:
 	$(UV) sync --dev
@@ -25,3 +26,12 @@ install:
 uninstall:
 	./scripts/uninstall.sh
 
+# ── macOS standalone .app (PyInstaller, free — no Apple account required) ─────
+bundle-macos:
+	@./scripts/build_macos.sh
+
+bundle-macos-universal:
+	@./scripts/build_macos.sh --universal
+
+bundle-macos-signed:
+	@./scripts/build_macos.sh --sign

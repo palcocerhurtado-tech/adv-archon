@@ -172,11 +172,23 @@ class ArchonRuntime:
         self.web_library_tools = WebLibraryTools(self.web_library_store)
         from adv_archon.core.pgou_store import PGOUStore
         from adv_archon.core.geo_store import GeoStore
+        from adv_archon.core.scraper_daemon import ScraperDaemon
         from adv_archon.tools.geo_tools import GeoTools
         self.pgou_store = PGOUStore(config.paths.pgou_db, encoder=encoder)
         self.urban_compliance_tools = UrbanComplianceTools(self.pgou_store, llm)
         self.geo_store = GeoStore(config.paths.geo_db)
         self.geo_tools = GeoTools(self.geo_store, self.pgou_store)
+        # Background scraper daemon — keeps PGOU data fresh automatically
+        self.scraper_daemon = ScraperDaemon(
+            pgou_store=self.pgou_store,
+            scraper=self.urban_compliance_tools._scraper,
+            interval_hours=config.pgou.refresh_interval_hours
+                if hasattr(config, "pgou") and hasattr(config.pgou, "refresh_interval_hours")
+                else 24.0,
+            max_age_days=30,
+        )
+        if not incognito:
+            self.scraper_daemon.start()
         self.task_store = TaskStore(
             config.paths.tasks_db,
             timezone_name=config.tasks.default_timezone,
@@ -330,6 +342,8 @@ class ArchonRuntime:
 
     def shutdown(self) -> None:
         self.tts.stop()
+        with suppress(Exception):
+            self.scraper_daemon.stop()
         with suppress(Exception):
             self.browser_tools.browser_close()
 

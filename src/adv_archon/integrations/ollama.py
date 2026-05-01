@@ -18,6 +18,10 @@ class OllamaClient:
     num_ctx: int = 8192
     keep_alive: str = "-1"
 
+    def _keep_alive_value(self) -> int | str:
+        """Return keep_alive as int -1 when the string is '-1', else as-is."""
+        return -1 if self.keep_alive.strip() == "-1" else self.keep_alive
+
     def complete(
         self,
         messages: Iterable[LLMMessage],
@@ -29,7 +33,7 @@ class OllamaClient:
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": False,
-            "keep_alive": self.keep_alive,
+            "keep_alive": self._keep_alive_value(),
             "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
         }
         if response_mime_type == "application/json":
@@ -53,7 +57,7 @@ class OllamaClient:
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": True,
-            "keep_alive": self.keep_alive,
+            "keep_alive": self._keep_alive_value(),
             "options": {"temperature": self.temperature, "num_ctx": self.num_ctx},
         }
         chunks: list[str] = []

@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 from adv_archon.core.context import RuntimeContext
 from adv_archon.core.costs import UsageLedger
@@ -64,6 +64,7 @@ class CommandServices:
     tts: MacTextToSpeech
     stt: WhisperSpeechToText
     urban_compliance_tools: UrbanComplianceTools
+    geo_tools: Any  # GeoTools — imported lazily to avoid circular
 
 
 def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
@@ -540,6 +541,35 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
             services.renderer.show_info("\n".join(lines))
         return CommandResult(handled=True)
 
+    if subcommand == "locate":
+        if not remainder:
+            services.renderer.show_error(
+                "Uso: /pgou locate <lat> <lon>\n"
+                "Ejemplo: /pgou locate 40.4168 -3.7038"
+            )
+            return CommandResult(handled=True)
+        parts = remainder.split()
+        if len(parts) < 2:
+            services.renderer.show_error(
+                "Necesito latitud y longitud.\n"
+                "Ejemplo: /pgou locate 40.4168 -3.7038"
+            )
+            return CommandResult(handled=True)
+        try:
+            lat, lon = float(parts[0]), float(parts[1])
+        except ValueError:
+            services.renderer.show_error("Latitud y longitud deben ser números decimales.")
+            return CommandResult(handled=True)
+        prompt = (
+            f"Resuelve las coordenadas GPS ({lat}, {lon}) para determinar "
+            "en qué municipio español se encuentran y qué normativa urbanística (PGOU) aplica. "
+            "Usa la herramienta site_compliance_context con esas coordenadas. "
+            "Luego explica el municipio, provincia, referencia catastral si está disponible, "
+            "y si el PGOU ya está indexado o hay que descargarlo primero."
+        )
+        services.logger.log("slash_pgou_locate", lat=lat, lon=lon)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
     if subcommand == "add":
         if not remainder:
             services.renderer.show_error(
@@ -659,9 +689,10 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
         return CommandResult(handled=True)
 
     services.renderer.show_error(
-        "Uso: /pgou [status | catalogue | fetch [<municipio>|--all] | "
-        "add <municipio> | check <plano.pdf> <municipio> | "
-        "report <plano.pdf> <municipio> | delete <municipio>]"
+        "Uso: /pgou [status | catalogue | locate <lat> <lon> | "
+        "fetch [<municipio>|--all] | add <municipio> | "
+        "check <plano.pdf> <municipio> | report <plano.pdf> <municipio> | "
+        "delete <municipio>]"
     )
     return CommandResult(handled=True)
 

@@ -274,6 +274,10 @@ class FakeWebTools:
         )
 
 
+class FakeUrbanComplianceTools:
+    pass
+
+
 def build_services() -> CommandServices:
     return CommandServices(
         llm=FakeLLM(),
@@ -302,6 +306,7 @@ def build_services() -> CommandServices:
         on_profile_changed=lambda _profile: None,
         tts=FakeTTS(),
         stt=FakeSTT(),
+        urban_compliance_tools=FakeUrbanComplianceTools(),
     )
 
 

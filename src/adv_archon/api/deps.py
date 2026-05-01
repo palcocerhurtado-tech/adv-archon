@@ -35,11 +35,15 @@ def get_compliance_tools() -> UrbanComplianceTools:
     return _compliance_tools
 
 
-# ── Auth dependencies ─────────────────────────────────────────────────────────
+ApiStoreDep = Annotated[ApiStore, Depends(get_api_store)]
+ComplianceToolsDep = Annotated[UrbanComplianceTools, Depends(get_compliance_tools)]
+ApiKeyHeader = Annotated[str | None, Header(alias="X-API-Key")]
 
+
+# ── Auth dependencies ─────────────────────────────────────────────────────────
 def _resolve_key(
-    x_api_key: Annotated[str | None, Header(alias="X-API-Key")] = None,
-    store: ApiStore = Depends(get_api_store),
+    store: ApiStoreDep,
+    x_api_key: ApiKeyHeader = None,
 ) -> ApiKey:
     if not x_api_key:
         raise HTTPException(

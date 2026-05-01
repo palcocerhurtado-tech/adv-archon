@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -132,10 +133,8 @@ def _extract_measurements(data: PlanData) -> None:
         if num_str in _FLOOR_ORDINALS:
             data.floors.append(_FLOOR_ORDINALS[num_str])
         else:
-            try:
+            with suppress(ValueError):
                 data.floors.append(int(num_str))
-            except ValueError:
-                pass
 
     for m in _SETBACK_RE.finditer(text):
         val = _parse_float(m.group(1))

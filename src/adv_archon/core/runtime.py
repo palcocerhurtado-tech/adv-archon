@@ -3,12 +3,18 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
+from typing import Any
 
 from adv_archon.core.agent import Agent, ToolSpec, TurnContextSnapshot
 from adv_archon.core.attachments import format_prompt_with_attachments
 from adv_archon.core.config import AppConfig
 from adv_archon.core.context import RuntimeContext, capture_runtime_context
 from adv_archon.core.costs import UsageLedger
+from adv_archon.core.intent import (
+    _normalize,
+    extract_municipality,
+    looks_like_compliance_request,
+)
 from adv_archon.core.knowledge import KnowledgeIndexResult, KnowledgeStore
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMResponse
@@ -30,8 +36,8 @@ from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
-from adv_archon.tools.web import WebTools
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
+from adv_archon.tools.web import WebTools
 from adv_archon.tools.web_library_tools import (
     WebLibraryTools,
     build_web_library_tool_specs,
@@ -165,8 +171,24 @@ class ArchonRuntime:
         )
         self.web_library_tools = WebLibraryTools(self.web_library_store)
         from adv_archon.core.pgou_store import PGOUStore
+        from adv_archon.core.geo_store import GeoStore
+        from adv_archon.core.scraper_daemon import ScraperDaemon
+        from adv_archon.tools.geo_tools import GeoTools
         self.pgou_store = PGOUStore(config.paths.pgou_db, encoder=encoder)
         self.urban_compliance_tools = UrbanComplianceTools(self.pgou_store, llm)
+        self.geo_store = GeoStore(config.paths.geo_db)
+        self.geo_tools = GeoTools(self.geo_store, self.pgou_store)
+        # Background scraper daemon — keeps PGOU data fresh automatically
+        self.scraper_daemon = ScraperDaemon(
+            pgou_store=self.pgou_store,
+            scraper=self.urban_compliance_tools._scraper,
+            interval_hours=config.pgou.refresh_interval_hours
+                if hasattr(config, "pgou") and hasattr(config.pgou, "refresh_interval_hours")
+                else 24.0,
+            max_age_days=30,
+        )
+        if not incognito:
+            self.scraper_daemon.start()
         self.task_store = TaskStore(
             config.paths.tasks_db,
             timezone_name=config.tasks.default_timezone,
@@ -303,6 +325,7 @@ class ArchonRuntime:
             tts=self.tts,
             stt=self.stt,
             urban_compliance_tools=self.urban_compliance_tools,
+            geo_tools=self.geo_tools,
         )
 
     def apply_profile(self, profile_name: str) -> None:
@@ -319,6 +342,8 @@ class ArchonRuntime:
 
     def shutdown(self) -> None:
         self.tts.stop()
+        with suppress(Exception):
+            self.scraper_daemon.stop()
         with suppress(Exception):
             self.browser_tools.browser_close()
 
@@ -510,29 +535,32 @@ class ArchonRuntime:
                     fn=definition["fn"],
                 )
             )
+        for definition in _build_geo_tool_specs(self.geo_tools):
+            specs.append(
+                ToolSpec(
+                    name=definition["name"],
+                    description=definition["description"],
+                    schema=definition["schema"],
+                    fn=definition["fn"],
+                )
+            )
         return specs
 
 
 def _maybe_build_compliance_prompt(
     prompt: str,
-    attachments: list,
-    compliance_tools: "UrbanComplianceTools",
+    attachments: Sequence[Path | str],
+    compliance_tools: UrbanComplianceTools,
 ) -> str:
     """If the request looks like a plan compliance check, build a rich operator prompt."""
-    from adv_archon.core.intent import COMPLIANCE_KEYWORDS, extract_municipality, _normalize
 
     pdf_paths = [
-        str(p) for p in attachments
-        if str(p).lower().endswith(".pdf")
+        str(path) for path in attachments if str(path).lower().endswith(".pdf")
     ]
     if not pdf_paths:
         return prompt
 
-    text_lower = _normalize(prompt)
-    is_compliance = any(kw.replace("á","a").replace("é","e").replace("í","i")
-                        .replace("ó","o").replace("ú","u") in text_lower
-                        for kw in COMPLIANCE_KEYWORDS)
-    if not is_compliance:
+    if not looks_like_compliance_request(prompt):
         return prompt
 
     municipality = extract_municipality(prompt)
@@ -541,7 +569,8 @@ def _maybe_build_compliance_prompt(
     if municipality is None:
         return (
             f"{prompt}\n\n"
-            "INSTRUCCIÓN INTERNA: Se ha detectado un plano PDF y keywords de normativa urbanística. "
+            "INSTRUCCIÓN INTERNA: Se ha detectado un plano PDF y keywords de "
+            "normativa urbanística. "
             "Pregunta al usuario en qué municipio se ubica el proyecto antes de continuar "
             "con el análisis de cumplimiento normativo."
         )
@@ -566,13 +595,24 @@ def _maybe_build_compliance_prompt(
             "parámetros (altura, superficies, retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
         )
 
-    wants_pdf = any(w in _normalize(prompt) for w in
-                    ("informe", "pdf", "exporta", "genera", "descarga", "report", "documento"))
+    wants_pdf = any(
+        word in _normalize(prompt)
+        for word in (
+            "informe",
+            "pdf",
+            "exporta",
+            "genera",
+            "descarga",
+            "report",
+            "documento",
+        )
+    )
 
     tool_name = "plan_compliance_export" if wants_pdf else "plan_compliance_check"
     extra = (
         " El informe PDF se guardará en el Escritorio automáticamente."
-        if wants_pdf else
+        if wants_pdf
+        else
         " Presenta el informe con tabla de parámetros (altura, superficies, "
         "retranqueos, usos) indicando ✓/⚠/✗ para cada uno."
     )
@@ -588,8 +628,8 @@ def _maybe_build_compliance_prompt(
 
 
 def _build_urban_compliance_tool_specs(
-    tools: "UrbanComplianceTools",
-) -> list[dict]:
+    tools: UrbanComplianceTools,
+) -> list[dict[str, Any]]:
     return [
         {
             "name": "pgou_add",
@@ -651,7 +691,8 @@ def _build_urban_compliance_tool_specs(
             "name": "plan_compliance_export",
             "description": (
                 "Run a full compliance check on an architectural plan PDF and export the result "
-                "as a professional PDF report ready to share with clients or submit to the council. "
+                "as a professional PDF report ready to share with clients or submit to "
+                "the council. "
                 "Saves the PDF to the Desktop by default."
             ),
             "schema": {
@@ -720,5 +761,55 @@ def _build_urban_compliance_tool_specs(
             ),
             "schema": {"type": "object", "properties": {}, "required": []},
             "fn": tools.pgou_catalogue,
+        },
+    ]
+
+
+def _build_geo_tool_specs(tools: Any) -> list[dict]:
+    return [
+        {
+            "name": "resolve_coordinates",
+            "description": (
+                "Resolve GPS coordinates (latitude, longitude) to a Spanish municipality, "
+                "province, autonomous community, and cadastral reference. "
+                "Use this when the user provides coordinates, a location pin, or asks "
+                "'what can be built here / what is the PGOU for these coordinates'."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "latitude": {
+                        "type": "number",
+                        "description": "Decimal latitude (e.g. 40.4168 for Madrid).",
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "description": "Decimal longitude (e.g. -3.7038 for Madrid).",
+                    },
+                    "refresh": {
+                        "type": "boolean",
+                        "description": "Force a fresh lookup, ignoring the cache.",
+                    },
+                },
+                "required": ["latitude", "longitude"],
+            },
+            "fn": tools.resolve_coordinates,
+        },
+        {
+            "name": "site_compliance_context",
+            "description": (
+                "Full site context for a compliance check: resolves coordinates to a municipality, "
+                "checks whether PGOU normativa is already indexed, and tells you the next step. "
+                "Use this as the first tool when an architect provides coordinates for a plot."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "latitude": {"type": "number"},
+                    "longitude": {"type": "number"},
+                },
+                "required": ["latitude", "longitude"],
+            },
+            "fn": tools.site_compliance_context,
         },
     ]

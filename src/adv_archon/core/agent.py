@@ -21,7 +21,6 @@ from adv_archon.core.gmail_triage import build_reply_draft, triage_mailbox
 from adv_archon.core.intent import (
     IntentAnalysis,
     IntentRouter,
-    extract_municipality,
     looks_like_capability_query,
 )
 from adv_archon.core.knowledge import KnowledgeRecord, KnowledgeSearchResult, KnowledgeStore

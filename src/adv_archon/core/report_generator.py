@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -112,7 +111,13 @@ def generate_compliance_pdf(
     pdf.cell(0, 10, "INFORME DE CUMPLIMIENTO NORMATIVO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
     pdf.set_font(pdf._fn, "", 12)
     pdf.set_text_color(*_C_DARK)
-    pdf.cell(0, 7, f"Municipio: {municipality}", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.cell(
+        0,
+        7,
+        _clean_text(f"Municipio: {municipality}"),
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
     pdf.ln(3)
 
     # ── Metadata table ───────────────────────────────────────────────────────
@@ -178,8 +183,15 @@ def _meta_table(pdf: ArchonPDF, plan_name: str, municipality: str, generated_at:
         pdf.cell(col_w[0], 7, f"  {label}", border=1, fill=True)
         pdf.set_font(pdf._fn, "", 9)
         pdf.set_fill_color(*_C_WHITE)
-        pdf.cell(col_w[1], 7, f"  {value}", border=1, fill=True,
-                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(
+            col_w[1],
+            7,
+            f"  {_clean_text(value)}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
 
 
 def _summary_box(pdf: ArchonPDF, summary: str) -> None:
@@ -199,7 +211,7 @@ def _annotations_table(pdf: ArchonPDF, annotations: list[dict[str, Any]]) -> Non
     pdf.set_fill_color(*_C_HEADER_BG)
     pdf.set_text_color(*_C_WHITE)
     pdf.set_font(pdf._fn, "B", 8)
-    for header, w in zip(headers, col_w):
+    for header, w in zip(headers, col_w, strict=True):
         pdf.cell(w, 7, f"  {header}", border=1, fill=True)
     pdf.ln()
     pdf.set_text_color(*_C_BLACK)
@@ -279,7 +291,7 @@ def _legend(pdf: ArchonPDF) -> None:
             {_C_OK: "ok", _C_WARN: "warning", _C_ERR: "violation", _C_INFO: "info"}[color]
         ], fill=True, align="C")
         pdf.set_text_color(*_C_BLACK)
-        pdf.cell(80, 5, f"  {label}")
+        pdf.cell(80, 5, f"  {_clean_text(label)}")
         pdf.ln(5)
 
 

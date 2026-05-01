@@ -102,22 +102,28 @@ class InstalledExecutiveAutomation:
 
 def build_executive_automation_bundle(
     *,
-    morning_time: ClockTime | str = ClockTime(8, 0),
-    triage_times: tuple[ClockTime | str, ...] = (
-        ClockTime(9, 0),
-        ClockTime(14, 0),
-        ClockTime(18, 0),
-    ),
-    study_time: ClockTime | str = ClockTime(19, 30),
-    nightly_review_time: ClockTime | str = ClockTime(21, 30),
+    morning_time: ClockTime | str | None = None,
+    triage_times: tuple[ClockTime | str, ...] | None = None,
+    study_time: ClockTime | str | None = None,
+    nightly_review_time: ClockTime | str | None = None,
     study_focus: str = "tu linea actual de estudio",
     meeting_prep_window_minutes: int = 45,
     meeting_prep_poll_minutes: int = 15,
 ) -> ExecutiveAutomationBundle:
-    morning = _coerce_clock_time(morning_time)
-    triage = tuple(_coerce_clock_time(item) for item in triage_times)
-    study = _coerce_clock_time(study_time)
-    nightly = _coerce_clock_time(nightly_review_time)
+    morning = _coerce_clock_time(morning_time or ClockTime(8, 0))
+    triage = tuple(
+        _coerce_clock_time(item)
+        for item in (
+            triage_times
+            or (
+                ClockTime(9, 0),
+                ClockTime(14, 0),
+                ClockTime(18, 0),
+            )
+        )
+    )
+    study = _coerce_clock_time(study_time or ClockTime(19, 30))
+    nightly = _coerce_clock_time(nightly_review_time or ClockTime(21, 30))
     clean_focus = study_focus.strip() or "tu linea actual de estudio"
 
     launch_workflows = (
@@ -261,7 +267,11 @@ def install_executive_automation(
 
     for template in active_bundle.task_templates:
         source = f"automation:{active_bundle.key}:{template.key}"
-        task_metadata = {"bundle": active_bundle.key, "preset": template.key, **(template.metadata or {})}
+        task_metadata = {
+            "bundle": active_bundle.key,
+            "preset": template.key,
+            **(template.metadata or {}),
+        }
         tasks.append(
             store.upsert_task(
                 title=template.title,

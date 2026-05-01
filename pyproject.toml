@@ -51,6 +51,7 @@ dev = [
   "pytest>=8.3.5",
   "pytest-asyncio>=1.0.0",
   "ruff>=0.11.7",
+  "pyinstaller>=6.0",
 ]
 desktop = [
   "PySide6>=6.8.0",

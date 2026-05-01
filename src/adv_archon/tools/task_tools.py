@@ -203,7 +203,9 @@ class TaskTools:
             "¿Confirmas?"
         )
         if not self._confirm(question):
-            raise PermissionError("Instalacion de automatizacion ejecutiva cancelada por el usuario.")
+            raise PermissionError(
+                "Instalacion de automatizacion ejecutiva cancelada por el usuario."
+            )
         bundle = build_executive_automation_bundle(
             morning_time=morning_time,
             triage_times=triage_schedule,

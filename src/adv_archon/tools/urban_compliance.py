@@ -7,10 +7,10 @@ from typing import Any
 
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage
-from adv_archon.core.pgou_store import PGOUStore
+from adv_archon.core.pgou_store import PGOUChunk, PGOUStore
 from adv_archon.core.report_generator import generate_compliance_pdf
-from adv_archon.tools.urban_plan import PlanData, plan_to_summary, read_plan
 from adv_archon.tools.pgou_scraper import PGOUScraper
+from adv_archon.tools.urban_plan import PlanData, plan_to_summary, read_plan
 
 
 @dataclass(slots=True)
@@ -362,7 +362,7 @@ def _build_search_query(plan: PlanData) -> str:
     return " ".join(parts)
 
 
-def _format_normativa(chunks: list) -> str:
+def _format_normativa(chunks: list[PGOUChunk]) -> str:
     if not chunks:
         return "No se encontraron fragmentos relevantes de normativa indexada."
     sections: list[str] = []
@@ -389,6 +389,7 @@ _STATUS_MAP = {
 
 def _parse_annotations(text: str) -> list[ComplianceAnnotation]:
     annotations: list[ComplianceAnnotation] = []
+    markers = ("✓", "⚠", "✗", "CUMPLE", "INCUMPLE", "POSIBLE", "REQUIERE")
     lines = text.split("\n")
     for line in lines:
         line_stripped = line.strip()
@@ -399,7 +400,7 @@ def _parse_annotations(text: str) -> list[ComplianceAnnotation]:
             if marker in line_stripped.lower():
                 status = s
                 break
-        if any(m in line_stripped for m in ("✓", "⚠", "✗", "CUMPLE", "INCUMPLE", "POSIBLE", "REQUIERE")):
+        if any(marker in line_stripped for marker in markers):
             annotations.append(
                 ComplianceAnnotation(
                     article_ref="",
@@ -417,6 +418,6 @@ def _extract_summary(text: str) -> str:
         idx = lower.find(marker)
         if idx >= 0:
             snippet = text[idx : idx + 600]
-            lines = [l.strip() for l in snippet.split("\n") if l.strip()]
+            lines = [line.strip() for line in snippet.split("\n") if line.strip()]
             return "\n".join(lines[:5])
     return text[:400]

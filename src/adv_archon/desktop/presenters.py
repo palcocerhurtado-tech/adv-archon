@@ -1,7 +1,57 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from dataclasses import dataclass
 from pathlib import Path
+
+
+@dataclass(frozen=True, slots=True)
+class OnboardingCard:
+    title: str
+    body: str
+    prompt: str
+
+
+def recommended_window_size(
+    available_width: int,
+    available_height: int,
+) -> tuple[int, int]:
+    width = min(1460, max(1180, int(available_width * 0.9)))
+    height = min(940, max(760, int(available_height * 0.84)))
+    width = min(width, max(980, available_width - 40))
+    height = min(height, max(680, available_height - 40))
+    return width, height
+
+
+def onboarding_cards() -> tuple[OnboardingCard, ...]:
+    return (
+        OnboardingCard(
+            title="Briefing ejecutivo",
+            body="Cruza agenda, Gmail, Drive, notas y pendientes para arrancar el día con foco.",
+            prompt="dame un briefing ejecutivo del día",
+        ),
+        OnboardingCard(
+            title="Study partner",
+            body=(
+                "Convierte libros y PDFs en resúmenes, preguntas, planes de "
+                "repaso y notas útiles."
+            ),
+            prompt=(
+                "actúa como study partner sobre el último documento relevante y "
+                "prepárame un repaso breve"
+            ),
+        ),
+        OnboardingCard(
+            title="Operaciones personales",
+            body=(
+                "Usa memoria, recordatorios, automatizaciones y contexto local "
+                "desde lenguaje natural."
+            ),
+            prompt=(
+                "qué debería hacer hoy mezclando agenda, tareas, recordatorios y notas"
+            ),
+        ),
+    )
 
 
 def format_sources_summary(
@@ -76,3 +126,12 @@ def _compact(text: str, *, limit: int) -> str:
         return normalized
     return normalized[: max(0, limit - 1)].rstrip() + "…"
 
+
+__all__ = [
+    "OnboardingCard",
+    "build_history_entry",
+    "format_sources_summary",
+    "merge_recent_items",
+    "onboarding_cards",
+    "recommended_window_size",
+]

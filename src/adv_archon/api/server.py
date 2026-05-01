@@ -3,8 +3,13 @@ from __future__ import annotations
 
 import argparse
 import os
-import sys
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from adv_archon.api.store import ApiStore
+
+if TYPE_CHECKING:
+    from adv_archon.core.llm import LLMRouter
 
 
 def main() -> None:
@@ -12,7 +17,11 @@ def main() -> None:
         prog="adv-archon-api",
         description="ADV ARCHON — REST API de cumplimiento urbanístico",
     )
-    parser.add_argument("--host", default="0.0.0.0", help="Dirección de escucha (default: 0.0.0.0)")
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="Dirección de escucha (default: 0.0.0.0)",
+    )
     parser.add_argument("--port", type=int, default=8000, help="Puerto (default: 8000)")
     parser.add_argument("--reload", action="store_true", help="Activar auto-reload (desarrollo)")
     parser.add_argument(
@@ -32,7 +41,11 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    data_dir = Path(args.data_dir).expanduser() if args.data_dir else Path.home() / ".adv-archon"
+    data_dir = (
+        Path(args.data_dir).expanduser()
+        if args.data_dir
+        else Path.home() / ".adv-archon"
+    )
     data_dir.mkdir(parents=True, exist_ok=True)
 
     _boot(
@@ -125,7 +138,7 @@ def _ensure_admin_key(api_store: ApiStore, raw: str | None) -> tuple[str, str]:
     return prefix, raw_new
 
 
-def _build_llm_router(data_dir: Path):
+def _build_llm_router(data_dir: Path) -> LLMRouter:
     """Build an LLMRouter from env + config.toml if available."""
     from adv_archon.core.config import LLMConfig, load_app_config
     from adv_archon.core.llm import LLMRouter

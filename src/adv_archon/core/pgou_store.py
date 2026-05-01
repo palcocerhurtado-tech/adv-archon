@@ -6,7 +6,6 @@ import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -131,7 +130,8 @@ class PGOUStore:
             )
         else:
             cur = self._conn.execute(
-                "INSERT INTO pgou_municipalities (name, canonical, source, chunk_count, indexed_at) "
+                "INSERT INTO pgou_municipalities "
+                "(name, canonical, source, chunk_count, indexed_at) "
                 "VALUES (?, ?, ?, 0, ?)",
                 (municipality.strip().title(), canonical, source, now),
             )
@@ -152,7 +152,8 @@ class PGOUStore:
 
             self._conn.execute(
                 "INSERT INTO pgou_chunks "
-                "(municipality_id, municipality, article_ref, title, text, chunk_index, source, embedding_json) "
+                "(municipality_id, municipality, article_ref, title, text, "
+                "chunk_index, source, embedding_json) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     muni_id,
@@ -167,7 +168,8 @@ class PGOUStore:
             )
 
         self._conn.execute(
-            "UPDATE pgou_municipalities SET chunk_count = ?, source = ?, indexed_at = ? WHERE id = ?",
+            "UPDATE pgou_municipalities "
+            "SET chunk_count = ?, source = ?, indexed_at = ? WHERE id = ?",
             (len(chunks), source, now, muni_id),
         )
         self._conn.commit()

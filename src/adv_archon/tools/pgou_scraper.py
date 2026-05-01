@@ -4,7 +4,8 @@ from __future__ import annotations
 import io
 import re
 import time
-from dataclasses import dataclass, field
+import unicodedata
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -325,15 +326,17 @@ SOURCES: list[MuniSource] = [
 ]
 # fmt: on
 
+
+def _canonicalize_name(name: str) -> str:
+    nfd = unicodedata.normalize("NFD", name.lower().strip())
+    ascii_name = "".join(char for char in nfd if unicodedata.category(char) != "Mn")
+    return re.sub(r"[^a-z0-9]+", "_", ascii_name).strip("_")
+
+
 # Index by canonical name for fast lookup
 _SOURCES_BY_CANONICAL: dict[str, MuniSource] = {}
 for _s in SOURCES:
-    import unicodedata as _uc
-    import re as _re
-    _nfd = _uc.normalize("NFD", _s.name.lower().strip())
-    _canon = _re.sub(r"[^a-z0-9]+", "_",
-                     "".join(c for c in _nfd if _uc.category(c) != "Mn")).strip("_")
-    _SOURCES_BY_CANONICAL[_canon] = _s
+    _SOURCES_BY_CANONICAL[_canonicalize_name(_s.name)] = _s
 
 
 # ---------------------------------------------------------------------------
@@ -461,11 +464,7 @@ class PGOUScraper:
     # ------------------------------------------------------------------ #
 
     def _find_source(self, municipality: str) -> MuniSource | None:
-        import unicodedata
-        nfd = unicodedata.normalize("NFD", municipality.lower().strip())
-        canonical = re.sub(r"[^a-z0-9]+", "_",
-                           "".join(c for c in nfd if unicodedata.category(c) != "Mn")).strip("_")
-        return _SOURCES_BY_CANONICAL.get(canonical)
+        return _SOURCES_BY_CANONICAL.get(_canonicalize_name(municipality))
 
     def _fetch(self, source: MuniSource) -> FetchResult:
         try:
@@ -506,7 +505,11 @@ class PGOUScraper:
             if progress_cb:
                 progress_cb(f"  Probando {url[:80]}...")
             try:
-                with httpx.Client(headers=_HEADERS, timeout=_TIMEOUT, follow_redirects=True) as client:
+                with httpx.Client(
+                    headers=_HEADERS,
+                    timeout=_TIMEOUT,
+                    follow_redirects=True,
+                ) as client:
                     r = client.get(url)
                     r.raise_for_status()
                 ct = r.headers.get("content-type", "").lower()

@@ -130,7 +130,7 @@ class ApiStore:
         ).fetchone()
         if row is None:
             return None
-        current = row["credits"]
+        current = int(row["credits"])
         if current < 0:   # unlimited admin key
             return current
         new_balance = current + amount
@@ -140,6 +140,14 @@ class ApiStore:
         self._conn.commit()
         return new_balance
 
+    def get_credits(self, prefix: str) -> int | None:
+        row = self._conn.execute(
+            "SELECT credits FROM api_keys WHERE prefix = ?", (prefix,)
+        ).fetchone()
+        if row is None:
+            return None
+        return int(row["credits"])
+
     # ------------------------------------------------------------------ #
     # Credit operations                                                     #
     # ------------------------------------------------------------------ #
@@ -148,7 +156,14 @@ class ApiStore:
         """Unlimited keys (credits == -1) always pass."""
         return key.credits < 0 or key.credits >= amount
 
-    def deduct_credits(self, key: ApiKey, amount: int, *, endpoint: str, municipality: str = "") -> None:
+    def deduct_credits(
+        self,
+        key: ApiKey,
+        amount: int,
+        *,
+        endpoint: str,
+        municipality: str = "",
+    ) -> None:
         if key.credits >= 0:
             self._conn.execute(
                 "UPDATE api_keys SET credits = credits - ? WHERE prefix = ?",

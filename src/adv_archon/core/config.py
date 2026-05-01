@@ -79,6 +79,7 @@ class PathsConfig:
     sessions_dir: Path = field(init=False)
     logs_dir: Path = field(init=False)
     pgou_db: Path = field(init=False)
+    geo_db: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.config_file = self.root / "config.toml"
@@ -97,6 +98,7 @@ class PathsConfig:
         self.sessions_dir = self.root / "sessions"
         self.logs_dir = self.root / "logs"
         self.pgou_db = self.root / "pgou.db"
+        self.geo_db = self.root / "geo.db"
 
 
 @dataclass(slots=True)
@@ -118,6 +120,7 @@ class LLMConfig:
     ollama_num_ctx: int = 8192
     ollama_keep_alive: str = "-1"
     gemini_api_key: str | None = None
+    gemini_timeout_seconds: int = 300
     temperature: float = 0.2
     redact_cloud_pii: bool = False
     force_local_private_context: bool = True
@@ -360,6 +363,10 @@ def load_app_config(
         ollama_num_ctx=int(_lookup(data, "llm", "ollama_num_ctx", default=8192)),
         ollama_keep_alive=str(_lookup(data, "llm", "ollama_keep_alive", default="-1")),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
+        gemini_timeout_seconds=int(
+            os.getenv("ADV_ARCHON_GEMINI_TIMEOUT_SECONDS")
+            or _lookup(data, "llm", "gemini_timeout_seconds", default=300)
+        ),
         temperature=float(_lookup(data, "llm", "temperature", default=0.2)),
         redact_cloud_pii=bool(_lookup(data, "privacy", "redact_cloud_pii", default=False)),
         force_local_private_context=bool(

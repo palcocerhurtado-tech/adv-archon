@@ -120,7 +120,7 @@ class WhisperSpeechToText:
                 "Falta `pvporcupine`. Instálalo para activar la wake-word."
             ) from exc
         try:
-            import sounddevice as sd  # type: ignore[import-not-found]
+            import sounddevice as sd  # type: ignore[import-untyped]
         except ImportError as exc:
             raise RuntimeError(
                 "Falta `sounddevice`. Instálalo para capturar audio del micrófono."
@@ -155,7 +155,7 @@ class WhisperSpeechToText:
     def _load_model(self) -> Any:
         if self._model is None:
             try:
-                from faster_whisper import WhisperModel  # type: ignore[import-not-found]
+                from faster_whisper import WhisperModel  # type: ignore[import-untyped]
             except ImportError as exc:
                 raise RuntimeError(
                     "Falta `faster-whisper`. Instálalo para usar `/listen`."

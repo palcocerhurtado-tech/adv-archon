@@ -1,9 +1,9 @@
 """Admin endpoints: key management, municipality indexing, system status."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 
-from adv_archon.api.deps import AdminKey, get_api_store, get_compliance_tools
+from adv_archon.api.deps import AdminKey, ApiStoreDep, ComplianceToolsDep
 from adv_archon.api.models import (
     AddCreditsRequest,
     AddCreditsResponse,
@@ -16,8 +16,6 @@ from adv_archon.api.models import (
     FetchMunicipalityResponse,
     KeyListEntry,
 )
-from adv_archon.api.store import ApiStore
-from adv_archon.tools.urban_compliance import UrbanComplianceTools
 
 router = APIRouter(prefix="/v1/admin", tags=["admin"])
 
@@ -25,8 +23,8 @@ router = APIRouter(prefix="/v1/admin", tags=["admin"])
 @router.get("/status", response_model=AdminStatusResponse)
 def admin_status(
     _key: AdminKey,
-    store: ApiStore = Depends(get_api_store),
-    tools: UrbanComplianceTools = Depends(get_compliance_tools),
+    store: ApiStoreDep,
+    tools: ComplianceToolsDep,
 ) -> AdminStatusResponse:
     """System-wide stats: municipalities, keys, usage."""
     munis = tools._store.list_municipalities()
@@ -51,7 +49,7 @@ def admin_status(
 def create_key(
     req: CreateKeyRequest,
     _key: AdminKey,
-    store: ApiStore = Depends(get_api_store),
+    store: ApiStoreDep,
 ) -> CreateKeyResponse:
     """Create a new API key. The raw key is returned once — store it safely."""
     raw = store.create_key(req.owner, credits=req.credits)
@@ -67,7 +65,7 @@ def create_key(
 @router.get("/keys", response_model=list[KeyListEntry])
 def list_keys(
     _key: AdminKey,
-    store: ApiStore = Depends(get_api_store),
+    store: ApiStoreDep,
 ) -> list[KeyListEntry]:
     """List all API keys (hashes not exposed)."""
     return [
@@ -87,7 +85,7 @@ def list_keys(
 def deactivate_key(
     prefix: str,
     _key: AdminKey,
-    store: ApiStore = Depends(get_api_store),
+    store: ApiStoreDep,
 ) -> None:
     """Revoke an API key."""
     if not store.deactivate_key(prefix):
@@ -99,7 +97,7 @@ def add_credits(
     prefix: str,
     req: AddCreditsRequest,
     _key: AdminKey,
-    store: ApiStore = Depends(get_api_store),
+    store: ApiStoreDep,
 ) -> AddCreditsResponse:
     """Add credits to an existing key."""
     new_balance = store.add_credits(prefix, req.amount)
@@ -114,7 +112,7 @@ def add_credits(
 def fetch_municipality(
     req: FetchMunicipalityRequest,
     _key: AdminKey,
-    tools: UrbanComplianceTools = Depends(get_compliance_tools),
+    tools: ComplianceToolsDep,
 ) -> FetchMunicipalityResponse:
     """Auto-download and index PGOU for a municipality from the catalogue."""
     if req.skip_if_indexed and tools._store.get_municipality(req.municipality) is not None:
@@ -138,11 +136,15 @@ def fetch_municipality(
     )
 
 
-@router.post("/municipalities", response_model=AddMunicipalityResponse, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/municipalities",
+    response_model=AddMunicipalityResponse,
+    status_code=status.HTTP_201_CREATED,
+)
 def add_municipality(
     req: AddMunicipalityRequest,
     _key: AdminKey,
-    tools: UrbanComplianceTools = Depends(get_compliance_tools),
+    tools: ComplianceToolsDep,
 ) -> AddMunicipalityResponse:
     """Manually index PGOU text for a municipality."""
     result = tools.pgou_add(req.municipality, req.text, req.source)
@@ -163,7 +165,7 @@ def add_municipality(
 def delete_municipality(
     name: str,
     _key: AdminKey,
-    tools: UrbanComplianceTools = Depends(get_compliance_tools),
+    tools: ComplianceToolsDep,
 ) -> None:
     """Remove indexed PGOU for a municipality."""
     if not tools._store.delete_municipality(name):

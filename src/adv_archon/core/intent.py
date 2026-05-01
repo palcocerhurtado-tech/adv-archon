@@ -213,41 +213,41 @@ REASONING_KEYWORDS = {
 }
 
 
-COMPLIANCE_KEYWORDS = {
-    "plano",
-    "planos",
+COMPLIANCE_STRONG_KEYWORDS = {
     "normativa",
     "pgou",
     "urbanismo",
-    "urbanística",
     "urbanistica",
-    "edificio",
-    "edificacion",
-    "edificación",
-    "vivienda",
-    "viviendas",
-    "proyecto arquitectónico",
-    "proyecto arquitectonico",
     "licencia obras",
     "licencia de obras",
     "retranqueo",
     "retranqueos",
     "altura maxima",
-    "altura máxima",
     "edificabilidad",
     "ocupacion",
-    "ocupación",
     "parcela",
     "uso residencial",
     "calificacion",
-    "calificación",
+}
+COMPLIANCE_PLAN_KEYWORDS = {
+    "plano",
+    "planos",
+    "edificio",
+    "edificacion",
+    "vivienda",
+    "viviendas",
+    "proyecto arquitectonico",
+}
+COMPLIANCE_REPORT_KEYWORDS = {
     "cumple normativa",
     "cumplimiento normativa",
-    "informe urbanístico",
     "informe urbanistico",
-    "arquitecto",
-    "arquitectura",
 }
+COMPLIANCE_KEYWORDS = (
+    COMPLIANCE_STRONG_KEYWORDS
+    | COMPLIANCE_PLAN_KEYWORDS
+    | COMPLIANCE_REPORT_KEYWORDS
+)
 
 _MUNICIPALITY_PATTERNS = [
     re.compile(
@@ -295,6 +295,19 @@ def extract_municipality(text: str) -> str | None:
 def _normalize(text: str) -> str:
     nfd = unicodedata.normalize("NFD", text.lower())
     return "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+
+
+def looks_like_compliance_request(text: str) -> bool:
+    normalized = _normalize(text)
+    has_plan = _contains_any(normalized, COMPLIANCE_PLAN_KEYWORDS)
+    has_strong = _contains_any(normalized, COMPLIANCE_STRONG_KEYWORDS)
+    has_report = _contains_any(normalized, COMPLIANCE_REPORT_KEYWORDS)
+    has_municipality = extract_municipality(text) is not None
+    return (
+        (has_plan and (has_strong or has_report))
+        or (has_municipality and (has_strong or has_report))
+        or ("pgou" in normalized and has_municipality)
+    )
 
 
 IntentCategory = (
@@ -364,7 +377,7 @@ class IntentRouter:
         if _contains_any(text, CODE_KEYWORDS):
             category_scores["coding"] += 3
             reasons.append("keywords de codigo")
-        if _contains_any(text, COMPLIANCE_KEYWORDS):
+        if looks_like_compliance_request(user_input):
             category_scores["compliance"] += 4
             reasons.append("keywords de normativa/plano arquitectónico")
         if _contains_any(text, REASONING_KEYWORDS):

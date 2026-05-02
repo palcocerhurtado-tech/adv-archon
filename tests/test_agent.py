@@ -232,6 +232,24 @@ def _build_agent(tmp_path: Path) -> Agent:
                 fn=lambda **_kwargs: None,
             ),
             ToolSpec(
+                name="resolve_coordinates",
+                description="geo resolve",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="site_compliance_context",
+                description="geo compliance context",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
+                name="plan_compliance_check_by_coordinates",
+                description="geo compliance check",
+                schema={},
+                fn=lambda **_kwargs: None,
+            ),
+            ToolSpec(
                 name="browser_open",
                 description="browser",
                 schema={},
@@ -312,6 +330,46 @@ def test_rule_based_plan_uses_notes_connector_for_note_queries(tmp_path: Path) -
     assert plan is not None
     assert plan["tool_name"] == "notes_search"
     assert plan["arguments"]["query"] == "propuesta acme"
+
+
+def test_rule_based_plan_routes_coordinates_to_site_context(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "qué normativa urbanística aplica a la obra en 40.4168, -3.7038",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "site_compliance_context"
+    assert plan["arguments"] == {"latitude": 40.4168, "longitude": -3.7038}
+
+
+def test_rule_based_plan_routes_pdf_and_coordinates_to_compliance_check(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        (
+            "analiza el cumplimiento de este plano con las coordenadas 40.4168 -3.7038\n\n"
+            "Adjuntos disponibles:\n"
+            "- /tmp/plano-demo.pdf\n\n"
+            "Ábrelos si resultan útiles."
+        ),
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "plan_compliance_check_by_coordinates"
+    assert plan["arguments"] == {
+        "plan_path": "/tmp/plano-demo.pdf",
+        "latitude": 40.4168,
+        "longitude": -3.7038,
+        "auto_fetch": True,
+    }
 
 
 def test_rule_based_plan_routes_direct_note_creation(tmp_path: Path) -> None:
@@ -1157,6 +1215,28 @@ def test_prepare_turn_state_skips_memory_and_knowledge_for_web_document_compare_
     assert state.knowledge_search_result is None
 
 
+def test_prepare_turn_state_skips_memory_and_knowledge_for_geo_pgou_request(
+    tmp_path: Path,
+) -> None:
+    agent = Agent(
+        llm=FakeLLM(),  # type: ignore[arg-type]
+        system_prompt="system",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        memory_store=ExplodingMemoryStore(),  # type: ignore[arg-type]
+        knowledge_store=ExplodingKnowledgeStore(),  # type: ignore[arg-type]
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    state = agent._prepare_turn_state(
+        "qué normativa aplica a estas coordenadas 40.4168 -3.7038"
+    )
+
+    assert state.memories == []
+    assert state.knowledge_hits == []
+    assert state.knowledge_search_result is None
+
+
 def test_deterministic_document_response_uses_compact_prompt(tmp_path: Path) -> None:
     llm = RecordingLLM()
     agent = Agent(
@@ -1227,6 +1307,60 @@ def test_deterministic_related_documents_response_lists_candidates(tmp_path: Pat
     assert response is not None
     assert "Goetia Menor.pdf" in response.text
     assert "Grimorio de Honorio.pdf" in response.text
+
+
+def test_deterministic_location_response_formats_pgou_context(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+
+    response = agent._deterministic_location_response(
+        user_input="qué normativa aplica en 40.4168 -3.7038",
+        tool_name="site_compliance_context",
+        payload={
+            "ok": True,
+            "municipality": "Madrid",
+            "province": "Madrid",
+            "autonomous_community": "Comunidad de Madrid",
+            "display_location": "Madrid, Comunidad de Madrid",
+            "resolution": "nominatim",
+            "confidence": "high",
+            "cadastral_ref": "1234567VK4713S0001AB",
+            "cadastral_address": "Calle Mayor 1",
+            "cadastral_use": "Residencial",
+            "pgou_indexed": True,
+            "next_step": (
+                "La normativa PGOU de Madrid ya está indexada. "
+                "Puedes usar plan_compliance_check directamente."
+            ),
+            "legal_readiness": "preliminary-ready",
+            "legal_summary": (
+                "Ya hay base suficiente para un análisis preliminar, pero faltan "
+                "comprobaciones sectoriales antes de considerar viable la actuación."
+            ),
+            "legal_checks": [
+                {
+                    "code": "parcel-zoning",
+                    "title": "Ordenanza y zona de parcela",
+                    "status": "pending_review",
+                    "authority": "Planeamiento municipal",
+                    "detail": "Falta fijar la ordenanza concreta.",
+                    "recommended_action": "Cruzar la parcela con la ficha y la ordenanza.",
+                    "confidence": "medium",
+                }
+            ],
+            "reasons": [
+                "Municipio resuelto por Nominatim: Madrid",
+                "Referencia catastral obtenida: 1234567VK4713S0001AB",
+            ],
+        },
+    )
+
+    assert response is not None
+    assert "Ubicación resuelta: Madrid, Comunidad de Madrid." in response.text
+    assert "- PGOU indexado: sí" in response.text
+    assert "- Estado jurídico preliminar: listo para análisis preliminar" in response.text
+    assert "plan_compliance_check" in response.text
+    assert "Referencia catastral: 1234567VK4713S0001AB" in response.text
+    assert "Comprobaciones y afecciones a revisar" in response.text
 
 
 def test_build_context_snapshot_uses_sober_checkpoint_and_confidence(tmp_path: Path) -> None:

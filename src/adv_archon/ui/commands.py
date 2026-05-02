@@ -565,7 +565,8 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
             "en qué municipio español se encuentran y qué normativa urbanística (PGOU) aplica. "
             "Usa la herramienta site_compliance_context con esas coordenadas. "
             "Luego explica el municipio, provincia, referencia catastral si está disponible, "
-            "y si el PGOU ya está indexado o hay que descargarlo primero."
+            "si el PGOU ya está indexado o hay que descargarlo primero, y qué advertencias "
+            "sectoriales o comprobaciones jurídicas siguen pendientes sobre la parcela."
         )
         services.logger.log("slash_pgou_locate", lat=lat, lon=lon)
         return CommandResult(handled=True, injected_prompt=prompt)
@@ -613,6 +614,41 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
             f"Luego presenta el informe de forma clara y ordenada."
         )
         services.logger.log("slash_pgou_check", plan_path=plan_path, municipality=municipality)
+        return CommandResult(handled=True, injected_prompt=prompt)
+
+    if subcommand == "check-coords":
+        if not remainder:
+            services.renderer.show_error(
+                "Uso: /pgou check-coords <lat> <lon> <ruta_plano.pdf>\n"
+                "Ejemplo: /pgou check-coords 40.4168 -3.7038 ~/Desktop/plano.pdf"
+            )
+            return CommandResult(handled=True)
+        parts = remainder.split(maxsplit=2)
+        if len(parts) < 3:
+            services.renderer.show_error(
+                "Necesito latitud, longitud y ruta del plano PDF.\n"
+                "Ejemplo: /pgou check-coords 40.4168 -3.7038 ~/Desktop/plano.pdf"
+            )
+            return CommandResult(handled=True)
+        try:
+            lat = float(parts[0])
+            lon = float(parts[1])
+        except ValueError:
+            services.renderer.show_error("Latitud y longitud deben ser números decimales.")
+            return CommandResult(handled=True)
+        plan_path = parts[2].strip()
+        if not plan_path:
+            services.renderer.show_error("Indica también la ruta del plano PDF.")
+            return CommandResult(handled=True)
+        prompt = (
+            f"Analiza el plano arquitectónico en '{plan_path}' "
+            f"a partir de las coordenadas GPS ({lat}, {lon}). "
+            "Usa la herramienta plan_compliance_check_by_coordinates con "
+            f"plan_path='{plan_path}', latitude={lat}, longitude={lon} y auto_fetch=true. "
+            "Si la normativa no está indexada pero existe en catálogo, descárgala primero "
+            "automáticamente y luego presenta el informe de forma clara y ordenada."
+        )
+        services.logger.log("slash_pgou_check_coords", plan_path=plan_path, lat=lat, lon=lon)
         return CommandResult(handled=True, injected_prompt=prompt)
 
     if subcommand == "report":

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from adv_archon.core.attachments import normalize_attachment_paths
 from adv_archon.core.config import AppConfig
@@ -12,7 +13,9 @@ from adv_archon.desktop.branding import desktop_stylesheet, logo_path
 from adv_archon.desktop.compliance_session import (
     ComplianceSession,
     build_compliance_prompt,
+    build_coordinate_compliance_prompt,
     build_municipality_ask_prompt,
+    extract_coordinate_hint,
     extract_municipality_hint,
 )
 from adv_archon.desktop.presenters import (
@@ -43,7 +46,7 @@ def launch_desktop_app(
             QTimer,
             Signal,
         )
-        from PySide6.QtGui import QAction, QIcon, QPixmap, QTextCursor
+        from PySide6.QtGui import QAction, QIcon, QPixmap
         from PySide6.QtWidgets import (
             QApplication,
             QComboBox,
@@ -52,7 +55,6 @@ def launch_desktop_app(
             QHBoxLayout,
             QLabel,
             QListWidget,
-            QListWidgetItem,
             QMainWindow,
             QMessageBox,
             QPlainTextEdit,
@@ -585,7 +587,6 @@ def launch_desktop_app(
         # ── Keyboard shortcut: Ctrl+Enter sends ───────────────────────────────
         def eventFilter(self, obj, ev) -> bool:
             from PySide6.QtCore import QEvent
-            from PySide6.QtGui import QKeyEvent
             if obj is self._input and ev.type() == QEvent.Type.KeyPress:
                 key_ev = ev
                 ctrl = key_ev.modifiers() & Qt.KeyboardModifier.ControlModifier
@@ -1115,24 +1116,40 @@ def launch_desktop_app(
             """Send the compliance prompt to the agent."""
             if self._compliance.pdf_path is None:
                 return
-            if not self._compliance.municipality:
+            if (
+                not self._compliance.municipality
+                and (
+                    self._compliance.latitude is None
+                    or self._compliance.longitude is None
+                )
+            ):
                 self._append_system(
-                    "Indica el municipio en el chat antes de analizar el plano."
+                    "Indica el municipio o las coordenadas GPS en el chat "
+                    "antes de analizar el plano."
                 )
                 return
             self._compliance.mark_running()
             self._refresh_compliance_ui()
-            prompt = build_compliance_prompt(
-                self._compliance.pdf_path,
-                self._compliance.municipality,
-            )
+            if (
+                self._compliance.latitude is not None
+                and self._compliance.longitude is not None
+            ):
+                prompt = build_coordinate_compliance_prompt(
+                    self._compliance.pdf_path,
+                    self._compliance.latitude,
+                    self._compliance.longitude,
+                )
+            else:
+                prompt = build_compliance_prompt(
+                    self._compliance.pdf_path,
+                    self._compliance.municipality,
+                )
             self._input.setPlainText(prompt)
             self._submit_prompt()
 
         def _refresh_compliance_ui(self) -> None:
             state = self._compliance.state
             pdf_attached = self._compliance.pdf_path is not None
-            has_muni = bool(self._compliance.municipality)
             can_run  = self._compliance.can_run
 
             # "Analizar plano" button: visible when PDF is attached
@@ -1195,6 +1212,15 @@ def launch_desktop_app(
             capture it and update the compliance session.
             """
             if self._compliance.state != "pdf_attached":
+                return
+            coordinate_hint = extract_coordinate_hint(text)
+            if coordinate_hint is not None:
+                latitude, longitude = coordinate_hint
+                self._compliance.set_coordinates(latitude, longitude)
+                self._refresh_compliance_ui()
+                self._append_system(
+                    f"Coordenadas capturadas para el análisis: {latitude}, {longitude}."
+                )
                 return
             from adv_archon.desktop.compliance_session import _MUNI_PATTERN
             match = _MUNI_PATTERN.search(text)

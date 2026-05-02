@@ -6,9 +6,9 @@ import math
 import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
-from adv_archon.core.site_context import SiteContext
-
+from adv_archon.core.site_context import ConfidenceLevel, Resolution, SiteContext
 
 _CACHE_RADIUS_KM = 0.1   # 100 m — same coords are considered identical
 
@@ -97,8 +97,8 @@ def _row_to_context(row: sqlite3.Row) -> SiteContext:
         cadastral_ref=row["cadastral_ref"],
         cadastral_address=row["cadastral_address"],
         cadastral_use=row["cadastral_use"],
-        resolution=row["resolution"],  # type: ignore[arg-type]
-        confidence=row["confidence"],  # type: ignore[arg-type]
+        resolution=cast(Resolution, row["resolution"]),
+        confidence=cast(ConfidenceLevel, row["confidence"]),
         reasons=json.loads(row["reasons_json"]),
         raw_nominatim=json.loads(row["raw_nominatim_json"]),
         raw_catastro=row["raw_catastro"],

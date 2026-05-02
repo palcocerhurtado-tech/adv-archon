@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import time
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -40,7 +40,7 @@ def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
         )
         resp.raise_for_status()
         _last_call = time.monotonic()
-        return resp.json()
+        return cast(dict[str, Any], resp.json())
     except Exception:
         return {}
 

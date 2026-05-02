@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
@@ -170,14 +171,18 @@ class ArchonRuntime:
             logger=self.logger,
         )
         self.web_library_tools = WebLibraryTools(self.web_library_store)
-        from adv_archon.core.pgou_store import PGOUStore
         from adv_archon.core.geo_store import GeoStore
+        from adv_archon.core.pgou_store import PGOUStore
         from adv_archon.core.scraper_daemon import ScraperDaemon
         from adv_archon.tools.geo_tools import GeoTools
         self.pgou_store = PGOUStore(config.paths.pgou_db, encoder=encoder)
-        self.urban_compliance_tools = UrbanComplianceTools(self.pgou_store, llm)
         self.geo_store = GeoStore(config.paths.geo_db)
         self.geo_tools = GeoTools(self.geo_store, self.pgou_store)
+        self.urban_compliance_tools = UrbanComplianceTools(
+            self.pgou_store,
+            llm,
+            geo_tools=self.geo_tools,
+        )
         # Background scraper daemon — keeps PGOU data fresh automatically
         self.scraper_daemon = ScraperDaemon(
             pgou_store=self.pgou_store,
@@ -547,6 +552,20 @@ class ArchonRuntime:
         return specs
 
 
+def _extract_coordinate_pair_from_text(text: str) -> tuple[float, float] | None:
+    match = re.search(
+        r"(?P<lat>[+-]?\d{1,2}(?:\.\d+)?)[,\s]+(?P<lon>[+-]?\d{1,3}(?:\.\d+)?)",
+        text,
+    )
+    if match is None:
+        return None
+    latitude = float(match.group("lat"))
+    longitude = float(match.group("lon"))
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        return None
+    return latitude, longitude
+
+
 def _maybe_build_compliance_prompt(
     prompt: str,
     attachments: Sequence[Path | str],
@@ -563,8 +582,24 @@ def _maybe_build_compliance_prompt(
     if not looks_like_compliance_request(prompt):
         return prompt
 
+    coordinate_pair = _extract_coordinate_pair_from_text(prompt)
     municipality = extract_municipality(prompt)
     plan_path = pdf_paths[0]
+
+    if coordinate_pair is not None:
+        latitude, longitude = coordinate_pair
+        return (
+            f"{prompt}\n\n"
+            "INSTRUCCIÓN INTERNA: "
+            "Flujo de análisis normativo por coordenadas activado automáticamente.\n"
+            f"Coordenadas: ({latitude}, {longitude})\n"
+            f"Plano PDF: {plan_path}\n\n"
+            "Usa plan_compliance_check_by_coordinates con "
+            f"plan_path='{plan_path}', latitude={latitude}, longitude={longitude} "
+            "y auto_fetch=true. Después presenta el informe de cumplimiento de forma clara, "
+            "con tabla de parámetros (altura, superficies, retranqueos, usos) indicando "
+            "✓/⚠/✗ para cada uno."
+        )
 
     if municipality is None:
         return (
@@ -682,6 +717,40 @@ def _build_urban_compliance_tool_specs(
             "fn": tools.plan_compliance_check,
         },
         {
+            "name": "plan_compliance_check_by_coordinates",
+            "description": (
+                "Analyze an architectural plan PDF by first resolving GPS coordinates to the "
+                "correct municipality, cadastral context, and PGOU status. If needed, it can "
+                "auto-fetch the municipality normativa before running the compliance check."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "plan_path": {
+                        "type": "string",
+                        "description": "Absolute or ~ path to the architectural plan PDF.",
+                    },
+                    "latitude": {
+                        "type": "number",
+                        "description": "Decimal latitude of the plot.",
+                    },
+                    "longitude": {
+                        "type": "number",
+                        "description": "Decimal longitude of the plot.",
+                    },
+                    "auto_fetch": {
+                        "type": "boolean",
+                        "description": (
+                            "If true, auto-fetch missing PGOU normativa "
+                            "before analysis."
+                        ),
+                    },
+                },
+                "required": ["plan_path", "latitude", "longitude"],
+            },
+            "fn": tools.plan_compliance_check_by_coordinates,
+        },
+        {
             "name": "pgou_status",
             "description": "List all municipalities with indexed PGOU regulations.",
             "schema": {"type": "object", "properties": {}, "required": []},
@@ -765,7 +834,7 @@ def _build_urban_compliance_tool_specs(
     ]
 
 
-def _build_geo_tool_specs(tools: Any) -> list[dict]:
+def _build_geo_tool_specs(tools: Any) -> list[dict[str, Any]]:
     return [
         {
             "name": "resolve_coordinates",
@@ -799,8 +868,9 @@ def _build_geo_tool_specs(tools: Any) -> list[dict]:
             "name": "site_compliance_context",
             "description": (
                 "Full site context for a compliance check: resolves coordinates to a municipality, "
-                "checks whether PGOU normativa is already indexed, and tells you the next step. "
-                "Use this as the first tool when an architect provides coordinates for a plot."
+                "checks whether PGOU normativa is already indexed, and returns cadastral context "
+                "plus a preliminary legal checklist for parcel-level review. Use this as the first "
+                "tool when an architect provides coordinates for a plot."
             ),
             "schema": {
                 "type": "object",

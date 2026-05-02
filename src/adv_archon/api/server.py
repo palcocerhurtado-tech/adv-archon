@@ -71,22 +71,31 @@ def _boot(
 
     from adv_archon.api.app import create_app
     from adv_archon.api.store import ApiStore
+    from adv_archon.core.geo_store import GeoStore
     from adv_archon.core.pgou_store import PGOUStore
+    from adv_archon.tools.geo_tools import GeoTools
     from adv_archon.tools.urban_compliance import UrbanComplianceTools
 
     # ── Storage ──────────────────────────────────────────────────────────
     pgou_db = data_dir / "pgou.db"
     api_db = data_dir / "api.db"
+    geo_db = data_dir / "geo.db"
 
     pgou_store = PGOUStore(pgou_db)
     api_store = ApiStore(api_db)
+    geo_store = GeoStore(geo_db)
+    geo_tools = GeoTools(geo_store, pgou_store)
 
     # ── Admin key ────────────────────────────────────────────────────────
     admin_prefix, admin_key_raw = _ensure_admin_key(api_store, admin_key_raw)
 
     # ── LLM + compliance tools ───────────────────────────────────────────
     llm_router = _build_llm_router(data_dir)
-    compliance_tools = UrbanComplianceTools(pgou_store, llm_router)
+    compliance_tools = UrbanComplianceTools(
+        pgou_store,
+        llm_router,
+        geo_tools=geo_tools,
+    )
 
     # ── App ──────────────────────────────────────────────────────────────
     app = create_app(

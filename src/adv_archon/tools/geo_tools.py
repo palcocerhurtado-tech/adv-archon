@@ -8,6 +8,7 @@ from adv_archon.core.geo_store import GeoStore
 from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.site_context import LegalCheck, SiteContext
 from adv_archon.integrations import catastro as _catastro
+from adv_archon.integrations import costas as _costas
 from adv_archon.integrations import natura2000 as _natura2000
 from adv_archon.integrations import nominatim as _nominatim
 from adv_archon.integrations import snczi as _snczi
@@ -168,6 +169,39 @@ class GeoTools:
                 }
         payload["natura2000"] = natura_data
 
+        # Pre-fetch coastal zone data — only for provinces with sea frontage.
+        province = str(payload.get("province") or "").strip()
+        costas_data: dict[str, Any] = {
+            "queried": False,
+            "in_dpmt": None,
+            "in_protection_zone": None,
+            "in_influence_zone": None,
+            "zones": [],
+            "error": "skipped",
+        }
+        if latitude and longitude and province in _COASTAL_PROVINCES:
+            try:
+                raw_c = _costas.query_coastal_zone(latitude, longitude)
+                costas_data = {
+                    "queried": True,
+                    "in_dpmt": raw_c.get("in_dpmt"),
+                    "in_protection_zone": raw_c.get("in_protection_zone"),
+                    "in_influence_zone": raw_c.get("in_influence_zone"),
+                    "zones": raw_c.get("zones", []),
+                    "source": raw_c.get("source", "SIGCOSTAS / MITECO"),
+                    "error": raw_c.get("error", ""),
+                }
+            except Exception as exc:
+                costas_data = {
+                    "queried": True,
+                    "in_dpmt": None,
+                    "in_protection_zone": None,
+                    "in_influence_zone": None,
+                    "zones": [],
+                    "error": str(exc)[:120],
+                }
+        payload["costas"] = costas_data
+
         legal_checks = self._build_legal_checks(
             payload,
             pgou_indexed=pgou_indexed,
@@ -176,6 +210,7 @@ class GeoTools:
             _parcel_detail=parcel_detail,
             _flood_data=flood_data,
             _natura_data=natura_data,
+            _costas_data=costas_data,
         )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
@@ -269,6 +304,7 @@ class GeoTools:
         _parcel_detail: dict[str, Any] | None = None,
         _flood_data: dict[str, Any] | None = None,
         _natura_data: dict[str, Any] | None = None,
+        _costas_data: dict[str, Any] | None = None,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
@@ -282,6 +318,10 @@ class GeoTools:
         }
         natura_data: dict[str, Any] = _natura_data or {
             "in_protected_area": None, "zones": [], "error": "skipped",
+        }
+        costas_data: dict[str, Any] = _costas_data or {
+            "in_dpmt": None, "in_protection_zone": None,
+            "in_influence_zone": None, "zones": [], "error": "skipped",
         }
 
         # Build cadastral detail text from real parcel data
@@ -375,6 +415,86 @@ class GeoTools:
                 "Verificar catálogos de patrimonio y espacios protegidos autonómicos."
             )
             _natura_conf = "high"
+
+        # Build coastal domain status from real SIGCOSTAS data
+        _costas_status: str
+        _costas_detail: str
+        _costas_action: str
+        _costas_conf: str
+        _costas_queried = costas_data.get("queried", False)
+        _in_dpmt = costas_data.get("in_dpmt")
+        _in_prot = costas_data.get("in_protection_zone")
+        _in_infl = costas_data.get("in_influence_zone")
+
+        if not _costas_queried:
+            # Non-coastal province — check is not applicable
+            _costas_status = "not_applicable"
+            _costas_detail = (
+                f"La provincia de {province} no tiene fachada litoral. "
+                "No aplica la Ley de Costas."
+            )
+            _costas_action = "Sin afección de costas."
+            _costas_conf = "high"
+        elif costas_data.get("error") == "skipped" or (
+            _in_dpmt is None and _in_prot is None and _in_infl is None
+        ):
+            _costas_status = "pending_review"
+            _costas_detail = (
+                f"La provincia de {province} tiene fachada litoral, pero no se ha podido "
+                "consultar el SIGCOSTAS en este momento. "
+                f"{costas_data.get('error', '')}"
+            ).strip()
+            _costas_action = (
+                "Verificar manualmente en SIGCOSTAS (MITECO) si la parcela se encuentra "
+                "en DPMT, servidumbre de protección (100 m) o zona de influencia (500 m)."
+            )
+            _costas_conf = "medium"
+        elif _in_dpmt:
+            _costas_status = "conditional"
+            _costas_detail = (
+                "⚠️ La parcela SE ENCUENTRA en el Dominio Público Marítimo-Terrestre (DPMT). "
+                "Fuente: SIGCOSTAS/MITECO — datos oficiales. "
+                "La edificación está absolutamente prohibida salvo concesión del Estado."
+            )
+            _costas_action = (
+                "Consultar con la Demarcación de Costas correspondiente. "
+                "Se requiere autorización o concesión de la Dirección General de la Costa y el Mar."
+            )
+            _costas_conf = "high"
+        elif _in_prot:
+            zones = ", ".join(costas_data.get("zones") or [])
+            _costas_status = "conditional"
+            _costas_detail = (
+                f"⚠️ La parcela está en la SERVIDUMBRE DE PROTECCIÓN de costas "
+                f"({zones or '100 m desde la ribera del mar'}). "
+                "Fuente: SIGCOSTAS/MITECO — datos oficiales. "
+                "Aplican restricciones significativas de edificabilidad (Ley 22/1988)."
+            )
+            _costas_action = (
+                "Comprobar los usos permitidos en la zona de servidumbre de protección. "
+                "Se requiere informe previo de la Demarcación de Costas para cualquier actuación."
+            )
+            _costas_conf = "high"
+        elif _in_infl:
+            _costas_status = "conditional"
+            _costas_detail = (
+                "⚠️ La parcela está en la ZONA DE INFLUENCIA de costas (500 m). "
+                "Fuente: SIGCOSTAS/MITECO — datos oficiales. "
+                "El planeamiento municipal debe respetar las exigencias de protección del litoral."
+            )
+            _costas_action = (
+                "Verificar que el PGOU cumple con los criterios de ordenación del litoral. "
+                "Consultar con la Demarcación de Costas si la actuación requiere informe."
+            )
+            _costas_conf = "high"
+        else:
+            _costas_status = "ready"
+            _costas_detail = (
+                "La parcela NO se encuentra en DPMT, servidumbre de protección "
+                "ni zona de influencia de costas (SIGCOSTAS/MITECO — datos oficiales)."
+            )
+            _costas_action = "Sin afección de Ley de Costas detectada."
+            _costas_conf = "high"
 
         checks: list[LegalCheck] = [
             LegalCheck(
@@ -475,26 +595,16 @@ class GeoTools:
                 recommended_action=_natura_action,
                 confidence=_natura_conf,  # type: ignore[arg-type]
             ),
+            LegalCheck(
+                code="coastal-domain",
+                title="Costas y servidumbre marítimo-terrestre (Ley 22/1988)",
+                status=_costas_status,  # type: ignore[arg-type]
+                authority="SIGCOSTAS — Demarcación de Costas / MITECO (datos oficiales)",
+                detail=_costas_detail,
+                recommended_action=_costas_action,
+                confidence=_costas_conf,  # type: ignore[arg-type]
+            ),
         ]
-
-        if province in _COASTAL_PROVINCES:
-            checks.append(
-                LegalCheck(
-                    code="coastal-domain",
-                    title="Costas y servidumbre marítimo-terrestre",
-                    status="conditional",
-                    authority="Demarcación de Costas",
-                    detail=(
-                        f"La provincia de {province} tiene fachada litoral. Puede haber afecciones "
-                        "de costas si la parcela se encuentra en franja litoral."
-                    ),
-                    recommended_action=(
-                        "Verificar si la parcela entra en dominio público marítimo-terrestre "
-                        "o en sus servidumbres."
-                    ),
-                    confidence="medium",
-                )
-            )
 
         if cadastral_use:
             checks.append(

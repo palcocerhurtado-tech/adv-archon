@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from adv_archon.api.deps import AuthKey, get_compliance_tools
-from adv_archon.api.models import FloodZoneDetail, Natura2000Detail, ParcelDetail
+from adv_archon.api.models import CostasDetail, FloodZoneDetail, Natura2000Detail, ParcelDetail
 from adv_archon.core.geo_store import GeoStore
 from adv_archon.tools.geo_tools import GeoTools
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
@@ -51,6 +51,7 @@ class SiteContextResponse(BaseModel):
     parcel_detail: ParcelDetail = Field(default_factory=ParcelDetail)
     flood_zone: FloodZoneDetail = Field(default_factory=FloodZoneDetail)
     natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
+    costas: CostasDetail = Field(default_factory=CostasDetail)
     next_step: str | None = None
     legal_readiness: str = ""
     legal_summary: str = ""
@@ -81,9 +82,10 @@ def resolve_location(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=p.get("error", "No se pudo resolver la ubicación"),
         )
-    p.pop("parcel_detail", None)   # resolve endpoint doesn't run parcel/SNCZI/Natura2000
+    p.pop("parcel_detail", None)   # resolve endpoint: no sectorial fetches
     p.pop("flood_zone", None)
     p.pop("natura2000", None)
+    p.pop("costas", None)
     return SiteContextResponse(**p)
 
 

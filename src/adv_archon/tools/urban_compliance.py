@@ -507,6 +507,27 @@ def _format_site_context(ctx: dict[str, Any]) -> str:
         else:
             lines.append("Red Natura 2000: no disponible — verificar manualmente.")
 
+    cos = ctx.get("costas") or {}
+    if isinstance(cos, dict) and cos.get("queried"):
+        if cos.get("in_dpmt") is True:
+            lines.append(
+                "⚠️ COSTAS/DPMT (SIGCOSTAS/MITECO): parcela EN dominio público marítimo-terrestre. "
+                "Edificación prohibida salvo concesión."
+            )
+        elif cos.get("in_protection_zone") is True:
+            zones_c = ", ".join(cos.get("zones") or [])
+            lines.append(
+                f"⚠️ COSTAS (SIGCOSTAS/MITECO): servidumbre de protección — {zones_c or '100 m}'}. "
+                "Restricciones edificatorias Ley 22/1988."
+            )
+        elif cos.get("in_influence_zone") is True:
+            lines.append(
+                "COSTAS (SIGCOSTAS/MITECO): zona de influencia (500 m). "
+                "El planeamiento debe respetar el carácter litoral."
+            )
+        elif cos.get("in_dpmt") is False:
+            lines.append("Costas (SIGCOSTAS/MITECO): parcela fuera de DPMT y servidumbres.")
+
     address = ctx.get("cadastral_address", "")
     if address:
         lines.append(f"Dirección catastral: {address}")
@@ -612,4 +633,5 @@ def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "parcel_detail": payload.get("parcel_detail", {}),
         "flood_zone": payload.get("flood_zone", {}),
         "natura2000": payload.get("natura2000", {}),
+        "costas": payload.get("costas", {}),
     }

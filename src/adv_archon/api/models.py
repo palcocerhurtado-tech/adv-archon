@@ -34,8 +34,20 @@ class Natura2000Detail(BaseModel):
 
     queried: bool = False
     in_protected_area: bool | None = None  # None → service unavailable
-    zones: list[str] = Field(default_factory=list)  # e.g. ["ZEC (hábitats)"]
+    zones: list[str] = Field(default_factory=list)
     source: str = "Red Natura 2000 / CNIG"
+    error: str = ""
+
+
+class CostasDetail(BaseModel):
+    """SIGCOSTAS coastal-domain query result for a coordinate point."""
+
+    queried: bool = False
+    in_dpmt: bool | None = None              # Dominio Público Marítimo-Terrestre
+    in_protection_zone: bool | None = None  # Servidumbre de protección (100 m)
+    in_influence_zone: bool | None = None   # Zona de influencia (500 m)
+    zones: list[str] = Field(default_factory=list)
+    source: str = "SIGCOSTAS / MITECO"
     error: str = ""
 
 
@@ -78,6 +90,7 @@ class SiteContextSummary(BaseModel):
     parcel_detail: ParcelDetail = Field(default_factory=ParcelDetail)
     flood_zone: FloodZoneDetail = Field(default_factory=FloodZoneDetail)
     natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
+    costas: CostasDetail = Field(default_factory=CostasDetail)
 
 
 class ComplianceCheckResponse(BaseModel):

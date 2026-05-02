@@ -111,11 +111,26 @@ class GeoTools:
         payload = {**geo_result.payload}
         payload["pgou_indexed"] = pgou_indexed
         payload["indexed_municipalities"] = indexed_munis
+
+        # Fetch real parcel detail up-front so it's available for legal checks
+        # and exposed as a structured field in the API response.
+        cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
+        parcel_detail: dict[str, object] = {}
+        if cadastral_ref:
+            try:
+                parcel_detail = _catastro.get_parcel_by_ref(cadastral_ref)
+                if parcel_detail.get("error"):
+                    parcel_detail = {}
+            except Exception:
+                parcel_detail = {}
+        payload["parcel_detail"] = parcel_detail
+
         legal_checks = self._build_legal_checks(
             payload,
             pgou_indexed=pgou_indexed,
             latitude=latitude,
             longitude=longitude,
+            _parcel_detail=parcel_detail,
         )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
@@ -206,17 +221,20 @@ class GeoTools:
         pgou_indexed: bool,
         latitude: float = 0.0,
         longitude: float = 0.0,
+        _parcel_detail: dict[str, Any] | None = None,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
         cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
         cadastral_use = str(payload.get("cadastral_use") or "").strip()
 
-        # ── Real data fetches (best-effort, degrade gracefully) ──────────────
-        parcel_detail: dict[str, Any] = {}
-        if cadastral_ref:
+        # Use pre-fetched parcel detail if provided, otherwise fetch now.
+        parcel_detail: dict[str, Any] = _parcel_detail or {}
+        if not parcel_detail and cadastral_ref:
             try:
                 parcel_detail = _catastro.get_parcel_by_ref(cadastral_ref)
+                if parcel_detail.get("error"):
+                    parcel_detail = {}
             except Exception:
                 parcel_detail = {}
 

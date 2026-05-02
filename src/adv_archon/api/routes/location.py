@@ -32,6 +32,19 @@ class ResolveRequest(BaseModel):
     refresh: bool = False
 
 
+class ParcelDetail(BaseModel):
+    """Real parcel attributes from Catastro Consulta_DNPRC."""
+
+    ref: str = ""
+    surface_m2: int | None = None
+    construction_year: int | None = None
+    use_detail: str = ""
+    floors_above: int | None = None
+    floors_below: int | None = None
+    address: str = ""
+    municipality: str = ""
+
+
 class SiteContextResponse(BaseModel):
     ok: bool
     latitude: float
@@ -47,6 +60,7 @@ class SiteContextResponse(BaseModel):
     reasons: list[str]
     display_location: str
     pgou_indexed: bool | None = None
+    parcel_detail: ParcelDetail = Field(default_factory=ParcelDetail)
     next_step: str | None = None
     legal_readiness: str = ""
     legal_summary: str = ""
@@ -77,6 +91,7 @@ def resolve_location(
             status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
             detail=p.get("error", "No se pudo resolver la ubicación"),
         )
+    p.pop("parcel_detail", None)   # resolve endpoint doesn't run parcel fetch
     return SiteContextResponse(**p)
 
 

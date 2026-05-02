@@ -63,6 +63,7 @@ def query_flood_zone(lat: float, lon: float) -> dict[str, Any]:
             errors.append(f"{period}: {exc}")
 
     if errors and not matched and len(errors) == len(_PERIODS):
+        result["in_flood_zone"] = None   # service unavailable — unknown, not false
         result["error"] = "; ".join(errors[:2])
         return result
 

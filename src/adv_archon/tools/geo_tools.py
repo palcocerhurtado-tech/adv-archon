@@ -9,6 +9,7 @@ from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.site_context import LegalCheck, SiteContext
 from adv_archon.integrations import catastro as _catastro
 from adv_archon.integrations import nominatim as _nominatim
+from adv_archon.integrations import snczi as _snczi
 
 _COASTAL_PROVINCES = {
     "A Coruña",
@@ -110,7 +111,12 @@ class GeoTools:
         payload = {**geo_result.payload}
         payload["pgou_indexed"] = pgou_indexed
         payload["indexed_municipalities"] = indexed_munis
-        legal_checks = self._build_legal_checks(payload, pgou_indexed=pgou_indexed)
+        legal_checks = self._build_legal_checks(
+            payload,
+            pgou_indexed=pgou_indexed,
+            latitude=latitude,
+            longitude=longitude,
+        )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
         payload["legal_summary"] = self._legal_summary(payload, pgou_indexed=pgou_indexed)
@@ -198,11 +204,77 @@ class GeoTools:
         payload: dict[str, Any],
         *,
         pgou_indexed: bool,
+        latitude: float = 0.0,
+        longitude: float = 0.0,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
         cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
         cadastral_use = str(payload.get("cadastral_use") or "").strip()
+
+        # ── Real data fetches (best-effort, degrade gracefully) ──────────────
+        parcel_detail: dict[str, Any] = {}
+        if cadastral_ref:
+            try:
+                parcel_detail = _catastro.get_parcel_by_ref(cadastral_ref)
+            except Exception:
+                parcel_detail = {}
+
+        flood_data: dict[str, Any] = {"in_flood_zone": None, "periods": [], "error": "skipped"}
+        if latitude and longitude:
+            try:
+                flood_data = _snczi.query_flood_zone(latitude, longitude)
+            except Exception as exc:
+                flood_data = {"in_flood_zone": None, "periods": [], "error": str(exc)[:120]}
+
+        # Build cadastral detail text from real parcel data
+        _pd_parts: list[str] = []
+        if parcel_detail and not parcel_detail.get("error"):
+            if parcel_detail.get("surface_m2"):
+                _pd_parts.append(f"Superficie construida: {parcel_detail['surface_m2']} m²")
+            if parcel_detail.get("construction_year"):
+                _pd_parts.append(f"Año construcción: {parcel_detail['construction_year']}")
+            if parcel_detail.get("use_detail"):
+                _pd_parts.append(f"Uso: {parcel_detail['use_detail']}")
+            if parcel_detail.get("floors_above") is not None:
+                _pd_parts.append(f"Plantas sobre rasante: {parcel_detail['floors_above']}")
+        _cadastral_detail_extra = " | ".join(_pd_parts) if _pd_parts else ""
+
+        # Build flood zone text from real SNCZI data
+        _flood_status: str
+        _flood_detail: str
+        _flood_action: str
+        _flood_conf: str
+        if flood_data.get("error") == "skipped" or flood_data.get("in_flood_zone") is None:
+            _flood_status = "pending_review"
+            _flood_detail = (
+                "No se ha podido consultar el SNCZI en este momento. "
+                f"{flood_data.get('error', '')}"
+            ).strip()
+            _flood_action = "Revisar manualmente la cartografía del SNCZI (MITECO)."
+            _flood_conf = "medium"
+        elif flood_data["in_flood_zone"]:
+            periods = ", ".join(flood_data.get("periods", []))
+            _flood_status = "conditional"
+            _flood_detail = (
+                f"⚠️ La parcela INTERSECTA con zonas inundables SNCZI "
+                f"(períodos de retorno: {periods or 'detectado'}). "
+                "Fuente: MITECO/CNIG — datos oficiales."
+            )
+            _flood_action = (
+                "Consultar con la Confederación Hidrográfica correspondiente. "
+                "Puede haber restricciones de uso del suelo y condicionantes estructurales."
+            )
+            _flood_conf = "high"
+        else:
+            _flood_status = "ready"
+            _flood_detail = (
+                "La parcela NO aparece en zonas inundables SNCZI "
+                "(T10, T100 y T500 consultados). "
+                "Fuente: MITECO/CNIG — datos oficiales."
+            )
+            _flood_action = "Sin afección hidráulica detectada. Verificar en el PGOU local."
+            _flood_conf = "high"
 
         checks: list[LegalCheck] = [
             LegalCheck(
@@ -211,7 +283,10 @@ class GeoTools:
                 status="ready" if cadastral_ref else "missing",
                 authority="Catastro OVC",
                 detail=(
-                    f"Se ha identificado la referencia catastral {cadastral_ref}."
+                    (
+                        f"Referencia catastral: {cadastral_ref}."
+                        + (f" {_cadastral_detail_extra}" if _cadastral_detail_extra else "")
+                    )
                     if cadastral_ref
                     else "No se ha podido obtener una referencia catastral con estas coordenadas."
                 ),
@@ -269,18 +344,11 @@ class GeoTools:
             LegalCheck(
                 code="hydraulic-domain",
                 title="Cauces, inundabilidad y dominio público hidráulico",
-                status="pending_review",
-                authority="Confederación hidrográfica / cartografía ambiental",
-                detail=(
-                    "No se ha verificado todavía si la parcela queda afectada por "
-                    "policía de cauces, "
-                    "zonas inundables o limitaciones hidráulicas."
-                ),
-                recommended_action=(
-                    "Revisar cartografía hidráulica e inundabilidad antes de "
-                    "cerrar el criterio de viabilidad."
-                ),
-                confidence="medium",
+                status=_flood_status,  # type: ignore[arg-type]
+                authority="SNCZI — MITECO / CNIG (datos oficiales)",
+                detail=_flood_detail,
+                recommended_action=_flood_action,
+                confidence=_flood_conf,  # type: ignore[arg-type]
             ),
             LegalCheck(
                 code="roads-servitudes",

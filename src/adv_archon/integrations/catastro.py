@@ -1,6 +1,7 @@
 """
 Catastro de España (OVC) API — official, completely free, no API key.
 Docs: https://ovc.catastro.meh.es/ovcservweb/OVCSWlocalizacionRC/OVCCoordenadas.asmx
+      https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx
 """
 from __future__ import annotations
 
@@ -10,6 +11,7 @@ from typing import Any
 import httpx
 
 _BASE = "https://ovc.catastro.meh.es/ovcservweb/OVCSWlocalizacionRC/OVCCoordenadas.asmx"
+_BASE_RC = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx"
 _TIMEOUT = 10
 _USER_AGENT = "adv-archon-urban-compliance/1.0"
 
@@ -38,6 +40,105 @@ def get_cadastral_data(lat: float, lon: float) -> dict[str, Any]:
         return _parse_xml(resp.text)
     except Exception as exc:
         return {"error": str(exc)[:200], "raw_xml": ""}
+
+
+def get_parcel_by_ref(ref_cat: str) -> dict[str, Any]:
+    """
+    Fetch full parcel detail from Catastro by cadastral reference.
+
+    Uses Consulta_DNPRC (Datos No Protegidos by RC) — free, no auth needed.
+    Returns::
+
+        {
+          "ref": "7537903VK4873N0001OU",
+          "surface_m2": 120,
+          "construction_year": 1978,
+          "use_detail": "Residencial",
+          "floors_above": 4,
+          "floors_below": 1,
+          "address": "CL MAYOR 3 ES:1 PT:2",
+          "municipality": "Madrid",
+          "error": ""
+        }
+    """
+    ref_cat = ref_cat.strip().upper()
+    result: dict[str, Any] = {
+        "ref": ref_cat,
+        "surface_m2": None,
+        "construction_year": None,
+        "use_detail": "",
+        "floors_above": None,
+        "floors_below": None,
+        "address": "",
+        "municipality": "",
+        "error": "",
+    }
+    if not ref_cat:
+        result["error"] = "Referencia catastral vacía"
+        return result
+    try:
+        resp = httpx.get(
+            f"{_BASE_RC}/Consulta_DNPRC",
+            params={"RC": ref_cat},
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/xml, text/xml"},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return _parse_parcel_xml(resp.text, result)
+    except Exception as exc:
+        result["error"] = str(exc)[:200]
+        return result
+
+
+def _parse_parcel_xml(xml: str, base: dict[str, Any]) -> dict[str, Any]:
+    """Parse Consulta_DNPRC response XML."""
+    err = re.search(r"<cod>(\d+)</cod>", xml)
+    if err and err.group(1) != "0":
+        desc = re.search(r"<des>(.*?)</des>", xml, re.DOTALL)
+        base["error"] = desc.group(1).strip() if desc else f"Catastro error {err.group(1)}"
+        return base
+
+    def _first(pattern: str) -> str:
+        m = re.search(pattern, xml, re.DOTALL | re.IGNORECASE)
+        return m.group(1).strip() if m else ""
+
+    # Surface (sup total construida or superficie)
+    sup = _first(r"<stotloc>(.*?)</stotloc>") or _first(r"<sfc>(.*?)</sfc>")
+    if sup:
+        try:
+            base["surface_m2"] = int(float(sup))
+        except ValueError:
+            pass
+
+    # Year of construction
+    anyo = _first(r"<ant>(.*?)</ant>") or _first(r"<cpt>(.*?)</cpt>")
+    if anyo and anyo.isdigit():
+        base["construction_year"] = int(anyo)
+
+    # Use
+    uso = _first(r"<luso>(.*?)</luso>") or _first(r"<cn>(.*?)</cn>")
+    if uso:
+        base["use_detail"] = uso
+
+    # Floors
+    plt = _first(r"<plt>(.*?)</plt>")
+    if plt and plt.isdigit():
+        base["floors_above"] = int(plt)
+    pls = _first(r"<pls>(.*?)</pls>")
+    if pls and pls.isdigit():
+        base["floors_below"] = int(pls)
+
+    # Address
+    ldt = _first(r"<ldt>(.*?)</ldt>")
+    if ldt:
+        base["address"] = ldt
+
+    # Municipality
+    lmun = _first(r"<lmun>(.*?)</lmun>")
+    if lmun:
+        base["municipality"] = lmun
+
+    return base
 
 
 def _parse_xml(xml: str) -> dict[str, Any]:
@@ -76,3 +177,4 @@ def _parse_xml(xml: str) -> dict[str, Any]:
     result["catastro_province"] = lprov.group(1).strip() if lprov else ""
 
     return result
+

@@ -2371,6 +2371,8 @@ class Agent:
         legal_readiness = _describe_legal_readiness(str(payload.get("legal_readiness") or ""))
         legal_summary = str(payload.get("legal_summary") or "").strip()
         legal_checks = payload.get("legal_checks")
+        parcel_detail = payload.get("parcel_detail") or {}
+        flood_zone = payload.get("flood_zone") or {}
 
         lines = [f"Ubicación resuelta: {display_location}."]
         lines.append(f"- Municipio: {municipality}")
@@ -2388,6 +2390,28 @@ class Agent:
             lines.append(f"- Dirección catastral: {cadastral_address}")
         if cadastral_use:
             lines.append(f"- Uso catastral: {cadastral_use}")
+
+        # Real parcel attributes from Catastro
+        if isinstance(parcel_detail, dict) and not parcel_detail.get("error"):
+            if parcel_detail.get("surface_m2"):
+                lines.append(f"- Superficie construida: {parcel_detail['surface_m2']} m²")
+            if parcel_detail.get("construction_year"):
+                lines.append(f"- Año de construcción: {parcel_detail['construction_year']}")
+            if parcel_detail.get("floors_above") is not None:
+                lines.append(f"- Plantas sobre rasante: {parcel_detail['floors_above']}")
+
+        # SNCZI flood zone result
+        if isinstance(flood_zone, dict) and flood_zone.get("queried"):
+            in_flood = flood_zone.get("in_flood_zone")
+            periods = flood_zone.get("periods") or []
+            if in_flood is True:
+                period_str = ", ".join(periods) if periods else "detectado"
+                lines.append(f"- ⚠️ Zona inundable SNCZI: SÍ (períodos: {period_str})")
+            elif in_flood is False:
+                lines.append("- Zona inundable SNCZI: no detectada (T10/T100/T500)")
+            else:
+                lines.append("- Zona inundable SNCZI: servicio no disponible")
+
         if isinstance(pgou_indexed, bool):
             lines.append(f"- PGOU indexado: {'sí' if pgou_indexed else 'no'}")
         if legal_readiness:

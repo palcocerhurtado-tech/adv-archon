@@ -125,12 +125,34 @@ class GeoTools:
                 parcel_detail = {}
         payload["parcel_detail"] = parcel_detail
 
+        # Pre-fetch flood zone so the result is stored in payload for the API.
+        flood_data: dict[str, Any] = {
+            "queried": False, "in_flood_zone": None, "periods": [], "error": "skipped",
+        }
+        if latitude and longitude:
+            try:
+                raw = _snczi.query_flood_zone(latitude, longitude)
+                flood_data = {
+                    "queried": True,
+                    "in_flood_zone": raw.get("in_flood_zone"),
+                    "periods": raw.get("periods", []),
+                    "source": raw.get("source", "SNCZI/CNIG"),
+                    "error": raw.get("error", ""),
+                }
+            except Exception as exc:
+                flood_data = {
+                    "queried": True, "in_flood_zone": None,
+                    "periods": [], "error": str(exc)[:120],
+                }
+        payload["flood_zone"] = flood_data
+
         legal_checks = self._build_legal_checks(
             payload,
             pgou_indexed=pgou_indexed,
             latitude=latitude,
             longitude=longitude,
             _parcel_detail=parcel_detail,
+            _flood_data=flood_data,
         )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
@@ -222,28 +244,18 @@ class GeoTools:
         latitude: float = 0.0,
         longitude: float = 0.0,
         _parcel_detail: dict[str, Any] | None = None,
+        _flood_data: dict[str, Any] | None = None,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
         cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
         cadastral_use = str(payload.get("cadastral_use") or "").strip()
 
-        # Use pre-fetched parcel detail if provided, otherwise fetch now.
+        # Use pre-fetched data — avoids duplicate HTTP calls.
         parcel_detail: dict[str, Any] = _parcel_detail or {}
-        if not parcel_detail and cadastral_ref:
-            try:
-                parcel_detail = _catastro.get_parcel_by_ref(cadastral_ref)
-                if parcel_detail.get("error"):
-                    parcel_detail = {}
-            except Exception:
-                parcel_detail = {}
-
-        flood_data: dict[str, Any] = {"in_flood_zone": None, "periods": [], "error": "skipped"}
-        if latitude and longitude:
-            try:
-                flood_data = _snczi.query_flood_zone(latitude, longitude)
-            except Exception as exc:
-                flood_data = {"in_flood_zone": None, "periods": [], "error": str(exc)[:120]}
+        flood_data: dict[str, Any] = _flood_data or {
+            "in_flood_zone": None, "periods": [], "error": "skipped",
+        }
 
         # Build cadastral detail text from real parcel data
         _pd_parts: list[str] = []

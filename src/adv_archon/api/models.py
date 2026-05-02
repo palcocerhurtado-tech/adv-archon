@@ -3,6 +3,32 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+
+# ── Parcel / site enrichment ──────────────────────────────────────────────────
+
+class ParcelDetail(BaseModel):
+    """Real parcel attributes from Catastro Consulta_DNPRC."""
+
+    ref: str = ""
+    surface_m2: int | None = None
+    construction_year: int | None = None
+    use_detail: str = ""
+    floors_above: int | None = None
+    floors_below: int | None = None
+    address: str = ""
+    municipality: str = ""
+
+
+class FloodZoneDetail(BaseModel):
+    """SNCZI flood-zone query result for a coordinate point."""
+
+    queried: bool = False           # False → service not called (resolve-only endpoint)
+    in_flood_zone: bool | None = None  # None → service unavailable
+    periods: list[str] = Field(default_factory=list)  # e.g. ["T100", "T500"]
+    source: str = "SNCZI/CNIG"
+    error: str = ""
+
+
 # ── Compliance ────────────────────────────────────────────────────────────────
 
 class ComplianceAnnotation(BaseModel):
@@ -39,6 +65,8 @@ class SiteContextSummary(BaseModel):
     legal_readiness: str = ""
     legal_summary: str = ""
     legal_checks: list[LegalCheckEntry] = Field(default_factory=list)
+    parcel_detail: ParcelDetail = Field(default_factory=ParcelDetail)
+    flood_zone: FloodZoneDetail = Field(default_factory=FloodZoneDetail)
 
 
 class ComplianceCheckResponse(BaseModel):

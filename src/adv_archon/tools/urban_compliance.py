@@ -3,7 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage
@@ -11,6 +11,9 @@ from adv_archon.core.pgou_store import PGOUChunk, PGOUStore
 from adv_archon.core.report_generator import generate_compliance_pdf
 from adv_archon.tools.pgou_scraper import PGOUScraper
 from adv_archon.tools.urban_plan import PlanData, plan_to_summary, read_plan
+
+if TYPE_CHECKING:
+    from adv_archon.tools.geo_tools import GeoTools
 
 
 @dataclass(slots=True)
@@ -42,9 +45,12 @@ class UrbanComplianceTools:
         self,
         pgou_store: PGOUStore,
         llm: LLMRouter,
+        *,
+        geo_tools: GeoTools | None = None,
     ) -> None:
         self._store = pgou_store
         self._llm = llm
+        self._geo_tools = geo_tools
         self._scraper = PGOUScraper(pgou_store)
 
     # ------------------------------------------------------------------ #
@@ -204,6 +210,96 @@ class UrbanComplianceTools:
                     for a in report.annotations
                 ],
                 "full_analysis": report.raw_analysis,
+            },
+        )
+
+    def plan_compliance_check_by_coordinates(
+        self,
+        plan_path: str,
+        latitude: float,
+        longitude: float,
+        *,
+        auto_fetch: bool = True,
+    ) -> ToolResult:
+        """Resolve coordinates, ensure PGOU availability, then analyze the plan."""
+        if self._geo_tools is None:
+            return ToolResult(
+                name="plan_compliance_check_by_coordinates",
+                payload={
+                    "ok": False,
+                    "error": "La geolocalización no está configurada en este entorno.",
+                },
+            )
+
+        site_result = self._geo_tools.site_compliance_context(latitude, longitude)
+        site_payload = dict(site_result.payload)
+        if not site_payload.get("ok"):
+            return ToolResult(
+                name="plan_compliance_check_by_coordinates",
+                payload=site_payload,
+            )
+
+        municipality = str(site_payload.get("municipality") or "").strip()
+        if not municipality:
+            return ToolResult(
+                name="plan_compliance_check_by_coordinates",
+                payload={
+                    **site_payload,
+                    "ok": False,
+                    "error": "No se ha podido determinar el municipio de esas coordenadas.",
+                },
+            )
+
+        auto_fetched = False
+        if not bool(site_payload.get("pgou_indexed")):
+            if not auto_fetch:
+                return ToolResult(
+                    name="plan_compliance_check_by_coordinates",
+                    payload={
+                        **site_payload,
+                        "ok": False,
+                        "municipality": municipality,
+                        "site_context": _site_context_summary(site_payload),
+                        "error": (
+                            f"La normativa de {municipality} no está indexada todavía. "
+                            "Activa auto_fetch o ejecuta pgou_fetch primero."
+                        ),
+                    },
+                )
+
+            fetch_result = self.pgou_fetch(municipality)
+            fetch_payload = dict(fetch_result.payload)
+            if not fetch_payload.get("ok"):
+                return ToolResult(
+                    name="plan_compliance_check_by_coordinates",
+                    payload={
+                        **site_payload,
+                        "ok": False,
+                        "municipality": municipality,
+                        "site_context": _site_context_summary(site_payload),
+                        "error": (
+                            f"No he podido descargar la normativa de {municipality} "
+                            "antes del análisis. Detalle: "
+                            f"{fetch_payload.get('error', 'sin detalle')}"
+                        ),
+                    },
+                )
+            auto_fetched = True
+            site_payload["pgou_indexed"] = True
+            site_payload["next_step"] = (
+                f"La normativa PGOU de {municipality} se ha descargado e indexado "
+                "automáticamente para este análisis."
+            )
+
+        check_result = self.plan_compliance_check(plan_path, municipality)
+        check_payload = dict(check_result.payload)
+        return ToolResult(
+            name="plan_compliance_check_by_coordinates",
+            payload={
+                **check_payload,
+                "municipality": municipality,
+                "site_context": _site_context_summary(site_payload),
+                "pgou_auto_fetched": auto_fetched,
             },
         )
 
@@ -421,3 +517,21 @@ def _extract_summary(text: str) -> str:
             lines = [line.strip() for line in snippet.split("\n") if line.strip()]
             return "\n".join(lines[:5])
     return text[:400]
+
+
+def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "latitude": payload.get("latitude"),
+        "longitude": payload.get("longitude"),
+        "municipality": payload.get("municipality", ""),
+        "province": payload.get("province", ""),
+        "autonomous_community": payload.get("autonomous_community", ""),
+        "display_location": payload.get("display_location", ""),
+        "cadastral_ref": payload.get("cadastral_ref", ""),
+        "cadastral_address": payload.get("cadastral_address", ""),
+        "cadastral_use": payload.get("cadastral_use", ""),
+        "resolution": payload.get("resolution", ""),
+        "confidence": payload.get("confidence", ""),
+        "pgou_indexed": payload.get("pgou_indexed"),
+        "next_step": payload.get("next_step"),
+    }

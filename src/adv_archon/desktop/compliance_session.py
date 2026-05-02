@@ -13,7 +13,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 ComplianceState = Literal["idle", "pdf_attached", "running", "done", "error"]
 
@@ -29,6 +29,9 @@ _MUNI_PATTERN = re.compile(
     )""",
     re.VERBOSE,
 )
+_COORDINATE_PAIR_RE = re.compile(
+    r"(?P<lat>[+-]?\d{1,2}(?:\.\d+)?)[,\s]+(?P<lon>[+-]?\d{1,3}(?:\.\d+)?)"
+)
 
 
 @dataclass
@@ -36,6 +39,9 @@ class ComplianceSession:
     state: ComplianceState = "idle"
     pdf_path: Path | None = None
     municipality: str = ""
+    latitude: float | None = None
+    longitude: float | None = None
+    site_context: dict[str, Any] = field(default_factory=dict)
     result: dict[str, Any] = field(default_factory=dict)
     export_path: str = ""
     error: str = ""
@@ -45,12 +51,26 @@ class ComplianceSession:
     def attach_pdf(self, path: Path) -> None:
         self.pdf_path  = path
         self.state     = "pdf_attached"
+        self.municipality = ""
+        self.latitude = None
+        self.longitude = None
+        self.site_context = {}
         self.result    = {}
         self.export_path = ""
         self.error     = ""
 
     def set_municipality(self, name: str) -> None:
         self.municipality = name.strip()
+
+    def set_coordinates(self, latitude: float, longitude: float) -> None:
+        self.latitude = latitude
+        self.longitude = longitude
+
+    def set_site_context(self, payload: dict[str, Any]) -> None:
+        self.site_context = dict(payload)
+        municipality = str(payload.get("municipality") or "").strip()
+        if municipality:
+            self.municipality = municipality
 
     def mark_running(self) -> None:
         self.state = "running"
@@ -68,6 +88,9 @@ class ComplianceSession:
         self.state       = "idle"
         self.pdf_path    = None
         self.municipality = ""
+        self.latitude = None
+        self.longitude = None
+        self.site_context = {}
         self.result      = {}
         self.export_path  = ""
         self.error       = ""
@@ -79,7 +102,10 @@ class ComplianceSession:
         return (
             self.state == "pdf_attached"
             and self.pdf_path is not None
-            and bool(self.municipality)
+            and (
+                bool(self.municipality)
+                or (self.latitude is not None and self.longitude is not None)
+            )
         )
 
     @property
@@ -88,11 +114,12 @@ class ComplianceSession:
 
     @property
     def summary(self) -> str:
-        return self.result.get("summary", "")
+        return str(self.result.get("summary", ""))
 
     @property
     def annotations(self) -> list[dict[str, Any]]:
-        return self.result.get("annotations", [])
+        value = self.result.get("annotations", [])
+        return cast(list[dict[str, Any]], value if isinstance(value, list) else [])
 
     @property
     def ok_count(self) -> int:
@@ -127,17 +154,28 @@ def extract_municipality_hint(pdf_path: Path, *, max_chars: int = 4000) -> str:
     return ""
 
 
+def extract_coordinate_hint(text: str) -> tuple[float, float] | None:
+    match = _COORDINATE_PAIR_RE.search(text)
+    if match is None:
+        return None
+    latitude = float(match.group("lat"))
+    longitude = float(match.group("lon"))
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        return None
+    return latitude, longitude
+
+
 def _read_pdf_text(pdf_path: Path, *, max_chars: int) -> str:
     # Try pdfminer.six (optional heavy dep)
     try:
-        from pdfminer.high_level import extract_text  # type: ignore[import-untyped]
+        from pdfminer.high_level import extract_text
         text = extract_text(str(pdf_path), page_numbers=[0, 1, 2], maxpages=3)
         return (text or "")[:max_chars]
     except ImportError:
         pass
     # Try PyMuPDF (fitz)
     try:
-        import fitz  # type: ignore[import-untyped]
+        import fitz  # type: ignore[import-not-found]
         doc = fitz.open(str(pdf_path))
         chunks: list[str] = []
         for page in doc[:3]:
@@ -162,6 +200,20 @@ def build_compliance_prompt(pdf_path: Path, municipality: str) -> str:
     )
 
 
+def build_coordinate_compliance_prompt(
+    pdf_path: Path,
+    latitude: float,
+    longitude: float,
+) -> str:
+    return (
+        f"Analiza el cumplimiento normativo del plano arquitectónico '{pdf_path.name}' "
+        f"a partir de las coordenadas GPS ({latitude}, {longitude}). "
+        "Usa la herramienta plan_compliance_check_by_coordinates con auto_fetch=true "
+        "para resolver municipio, parcela si está disponible y normativa aplicable. "
+        "Después presenta el informe de cumplimiento de forma clara y ordenada."
+    )
+
+
 def build_municipality_ask_prompt(pdf_path: Path, hint: str = "") -> str:
     base = (
         f"He adjuntado el plano arquitectónico '{pdf_path.name}'. "
@@ -169,12 +221,12 @@ def build_municipality_ask_prompt(pdf_path: Path, hint: str = "") -> str:
     if hint:
         base += (
             f"Parece que el proyecto puede estar en el municipio de {hint}. "
-            "¿Es correcto? Si no, indícame el municipio real "
+            "¿Es correcto? Si no, indícame el municipio real o pásame las coordenadas GPS "
             "y analizaré el cumplimiento normativo completo."
         )
     else:
         base += (
-            "¿En qué municipio se ubica el proyecto? "
+            "¿En qué municipio se ubica el proyecto? También puedes darme las coordenadas GPS. "
             "Una vez que me lo confirmes, analizaré el cumplimiento normativo "
             "completo contra el PGOU de ese municipio."
         )

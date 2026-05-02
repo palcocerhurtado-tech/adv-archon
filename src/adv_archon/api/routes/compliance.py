@@ -98,6 +98,70 @@ async def compliance_check(
     )
 
 
+@router.post("/check-by-coordinates", response_model=ComplianceCheckResponse)
+async def compliance_check_by_coordinates(
+    latitude: float,
+    longitude: float,
+    plan: UploadFile,
+    key: AuthKey,
+    store: ApiStoreDep,
+    tools: ComplianceToolsDep,
+    auto_fetch: bool = True,
+) -> ComplianceCheckResponse:
+    """
+    Analyze an architectural plan PDF by resolving its coordinates first.
+    Costs **1 credit**.
+    """
+    _check_credits(key, store, _CHECK_COST)
+    _check_pdf(plan)
+
+    with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as tmp:
+        tmp.write(await plan.read())
+        tmp_path = tmp.name
+
+    try:
+        result = tools.plan_compliance_check_by_coordinates(
+            tmp_path,
+            latitude,
+            longitude,
+            auto_fetch=auto_fetch,
+        )
+    finally:
+        Path(tmp_path).unlink(missing_ok=True)
+
+    if not result.payload.get("ok"):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=result.payload.get("error", "Error en el análisis por coordenadas"),
+        )
+
+    municipality = str(result.payload.get("municipality") or "")
+    store.deduct_credits(
+        key,
+        _CHECK_COST,
+        endpoint="compliance_check_by_coordinates",
+        municipality=municipality,
+    )
+    remaining = _refresh_credits(store, key)
+
+    payload = result.payload
+    return ComplianceCheckResponse(
+        ok=True,
+        plan=payload["plan"],
+        municipality=payload["municipality"],
+        generated_at=payload["generated_at"],
+        summary=payload["summary"],
+        annotations=[
+            ComplianceAnnotation(**a) for a in payload.get("annotations", [])
+        ],
+        full_analysis=payload["full_analysis"],
+        credits_used=_CHECK_COST,
+        credits_remaining=remaining,
+        site_context=payload.get("site_context"),
+        pgou_auto_fetched=bool(payload.get("pgou_auto_fetched")),
+    )
+
+
 @router.post("/report")
 async def compliance_report(
     municipality: str,

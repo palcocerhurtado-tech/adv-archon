@@ -278,6 +278,10 @@ class FakeUrbanComplianceTools:
     pass
 
 
+class FakeGeoTools:
+    pass
+
+
 def build_services() -> CommandServices:
     return CommandServices(
         llm=FakeLLM(),
@@ -307,6 +311,7 @@ def build_services() -> CommandServices:
         tts=FakeTTS(),
         stt=FakeSTT(),
         urban_compliance_tools=FakeUrbanComplianceTools(),
+        geo_tools=FakeGeoTools(),
     )
 
 
@@ -349,6 +354,21 @@ def test_memory_command_can_remember_new_item() -> None:
 
     assert result.handled is True
     assert "He guardado" in services.renderer.infos[-1]
+
+
+def test_pgou_check_coords_command_injects_coordinate_analysis_prompt() -> None:
+    services = build_services()
+
+    result = handle_command(
+        "/pgou check-coords 40.4168 -3.7038 ~/Desktop/plano.pdf",
+        services=services,
+    )
+
+    assert result.handled is True
+    assert result.injected_prompt is not None
+    assert "plan_compliance_check_by_coordinates" in result.injected_prompt
+    assert "40.4168" in result.injected_prompt
+    assert "-3.7038" in result.injected_prompt
 
 
 def test_automation_command_shows_status() -> None:

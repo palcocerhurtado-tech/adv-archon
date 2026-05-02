@@ -346,6 +346,27 @@ PGOU_SEARCH_KEYWORDS = {
     "regulacion de", "regulación de", "altura maxima", "altura máxima",
     "retranqueo", "ocupacion", "ocupación", "edificabilidad", "uso permitido",
 }
+GEO_CONTEXT_KEYWORDS = {
+    "catastro",
+    "coordenadas",
+    "edificar",
+    "emplazamiento",
+    "gps",
+    "localiza",
+    "localizar",
+    "municipio",
+    "normativa",
+    "obra",
+    "parcela",
+    "pgou",
+    "solar",
+    "suelo",
+    "ubicacion",
+    "ubicación",
+}
+COORDINATE_PAIR_RE = re.compile(
+    r"(?P<lat>[+-]?\d{1,2}(?:\.\d+)?)[,\s]+(?P<lon>[+-]?\d{1,3}(?:\.\d+)?)"
+)
 
 
 @dataclass(slots=True)
@@ -758,6 +779,17 @@ class Agent:
                     )
                     return related_response
 
+                location_response = self._deterministic_location_response(
+                    user_input=user_input,
+                    tool_name=tool_name,
+                    payload=payload,
+                )
+                if location_response is not None:
+                    self._session.append(
+                        SessionMessage(role="assistant", content=location_response.text)
+                    )
+                    return location_response
+
             response = self._final_response(
                 user_input,
                 state,
@@ -879,9 +911,51 @@ class Agent:
         executed = set(executed_tools)
 
         # ── PGOU / urban compliance rules (resolved locally, no LLM planning needed) ──
+        wants_geo_compliance = _looks_like_geo_compliance_request(normalized, user_input)
+        wants_geo_context = _looks_like_geo_pgou_request(normalized, user_input)
+        coordinate_pair = (
+            _extract_coordinate_pair(user_input)
+            if (wants_geo_context or wants_geo_compliance)
+            else None
+        )
         wants_pgou_status = _contains_any(normalized, PGOU_STATUS_KEYWORDS)
         wants_pgou_fetch = _contains_any(normalized, PGOU_FETCH_KEYWORDS)
         wants_pgou_search = any(kw in normalized for kw in PGOU_SEARCH_KEYWORDS)
+
+        if (
+            wants_geo_compliance
+            and coordinate_pair is not None
+            and "plan_compliance_check_by_coordinates" in self._tools
+            and "plan_compliance_check_by_coordinates" not in executed
+        ):
+            plan_path = _extract_path_hint(user_input)
+            if plan_path is not None:
+                latitude, longitude = coordinate_pair
+                return {
+                    "kind": "tool",
+                    "tool_name": "plan_compliance_check_by_coordinates",
+                    "arguments": {
+                        "plan_path": plan_path,
+                        "latitude": latitude,
+                        "longitude": longitude,
+                        "auto_fetch": True,
+                    },
+                    "step_summary": "analizar plano por coordenadas",
+                }
+
+        if (
+            wants_geo_context
+            and coordinate_pair is not None
+            and "site_compliance_context" in self._tools
+            and "site_compliance_context" not in executed
+        ):
+            latitude, longitude = coordinate_pair
+            return {
+                "kind": "tool",
+                "tool_name": "site_compliance_context",
+                "arguments": {"latitude": latitude, "longitude": longitude},
+                "step_summary": "resolver emplazamiento y contexto normativo",
+            }
 
         if wants_pgou_status and "pgou_status" in self._tools and "pgou_status" not in executed:
             return {
@@ -2242,6 +2316,91 @@ class Agent:
             model="related-documents-handler",
         )
 
+    def _deterministic_location_response(
+        self,
+        *,
+        user_input: str,
+        tool_name: str,
+        payload: dict[str, Any],
+    ) -> LLMResponse | None:
+        if tool_name not in {"resolve_coordinates", "site_compliance_context"}:
+            return None
+
+        normalized = _normalize_text(user_input)
+        if not _looks_like_geo_pgou_request(normalized, user_input):
+            return None
+
+        error = str(payload.get("error") or "").strip()
+        if error:
+            return LLMResponse(
+                text=(
+                    "No he podido resolver el emplazamiento a partir de esas coordenadas. "
+                    f"Error: {error}"
+                ),
+                usage=LLMUsage(),
+                provider="deterministic",
+                model="location-handler",
+            )
+
+        if not payload.get("ok"):
+            return None
+
+        municipality = str(payload.get("municipality") or "").strip()
+        if not municipality:
+            return None
+
+        display_location = str(payload.get("display_location") or municipality).strip()
+        province = str(payload.get("province") or "").strip()
+        autonomous_community = str(payload.get("autonomous_community") or "").strip()
+        resolution = _describe_geo_resolution(str(payload.get("resolution") or ""))
+        confidence = _describe_geo_confidence(str(payload.get("confidence") or ""))
+        cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
+        cadastral_address = str(payload.get("cadastral_address") or "").strip()
+        cadastral_use = str(payload.get("cadastral_use") or "").strip()
+        next_step = str(payload.get("next_step") or "").strip()
+        reasons = payload.get("reasons")
+        pgou_indexed = payload.get("pgou_indexed")
+
+        lines = [f"Ubicación resuelta: {display_location}."]
+        lines.append(f"- Municipio: {municipality}")
+        if province:
+            lines.append(f"- Provincia: {province}")
+        if autonomous_community:
+            lines.append(f"- Comunidad autónoma: {autonomous_community}")
+        if resolution:
+            lines.append(f"- Resolución: {resolution}")
+        if confidence:
+            lines.append(f"- Confianza: {confidence}")
+        if cadastral_ref:
+            lines.append(f"- Referencia catastral: {cadastral_ref}")
+        if cadastral_address:
+            lines.append(f"- Dirección catastral: {cadastral_address}")
+        if cadastral_use:
+            lines.append(f"- Uso catastral: {cadastral_use}")
+        if isinstance(pgou_indexed, bool):
+            lines.append(f"- PGOU indexado: {'sí' if pgou_indexed else 'no'}")
+
+        text = "\n".join(lines)
+
+        if next_step:
+            text += f"\n\nSiguiente paso:\n{next_step}"
+
+        if isinstance(reasons, list) and reasons:
+            bullets = "\n".join(
+                f"- {str(reason).strip()}"
+                for reason in reasons[:3]
+                if str(reason).strip()
+            )
+            if bullets:
+                text += f"\n\nBase de resolución:\n{bullets}"
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="location-handler",
+        )
+
     def _deterministic_tool_error_response(
         self,
         *,
@@ -3075,6 +3234,7 @@ def _should_skip_heavy_context(text: str, raw_text: str) -> bool:
         _looks_like_direct_file_request(text, raw_text)
         or _looks_like_local_file_search_request(text)
         or _looks_like_related_local_documents_request(text)
+        or _looks_like_geo_pgou_request(text, raw_text)
         or _looks_like_web_grounded_document_compare_request(text)
         or _looks_like_recent_document_note_request(text)
     )
@@ -3182,6 +3342,80 @@ def _looks_like_document_summary_request(text: str, raw_text: str) -> bool:
         "summarize",
     }
     return _contains_any(text, summary_keywords)
+
+
+def _extract_coordinate_pair(raw_text: str) -> tuple[float, float] | None:
+    match = COORDINATE_PAIR_RE.search(raw_text)
+    if match is None:
+        return None
+
+    latitude = float(match.group("lat"))
+    longitude = float(match.group("lon"))
+    if not (-90 <= latitude <= 90) or not (-180 <= longitude <= 180):
+        return None
+    return latitude, longitude
+
+
+def _looks_like_geo_pgou_request(text: str, raw_text: str) -> bool:
+    if _extract_coordinate_pair(raw_text) is None:
+        return False
+    if _contains_any(text, GEO_CONTEXT_KEYWORDS):
+        return True
+    return any(
+        phrase in text
+        for phrase in (
+            "donde esta",
+            "dónde está",
+            "donde se encuentra",
+            "dónde se encuentra",
+            "que aplica",
+            "qué aplica",
+            "que municipio",
+            "qué municipio",
+        )
+    )
+
+
+def _looks_like_geo_compliance_request(text: str, raw_text: str) -> bool:
+    if _extract_coordinate_pair(raw_text) is None:
+        return False
+    if _extract_path_hint(raw_text) is None and "adjuntos disponibles" not in text:
+        return False
+    return _contains_any(
+        text,
+        {
+            "analiza",
+            "analizar",
+            "archivo",
+            "arquitectonico",
+            "arquitectónico",
+            "cumplimiento",
+            "informe",
+            "pdf",
+            "plano",
+            "proyecto",
+        },
+    )
+
+
+def _describe_geo_resolution(value: str) -> str:
+    mapping = {
+        "cache": "caché local",
+        "catastro": "Catastro",
+        "manual": "resolución manual",
+        "nominatim": "Nominatim",
+        "unknown": "resolución parcial",
+    }
+    return mapping.get(value.lower(), value)
+
+
+def _describe_geo_confidence(value: str) -> str:
+    mapping = {
+        "high": "alta",
+        "medium": "media",
+        "low": "baja",
+    }
+    return mapping.get(value.lower(), value)
 
 
 def _build_document_excerpt(content: str, *, max_chars: int = 6000) -> tuple[str, bool]:

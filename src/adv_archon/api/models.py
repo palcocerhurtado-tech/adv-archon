@@ -12,6 +12,22 @@ class ComplianceAnnotation(BaseModel):
     recommendation: str
 
 
+class SiteContextSummary(BaseModel):
+    latitude: float | None = None
+    longitude: float | None = None
+    municipality: str
+    province: str
+    autonomous_community: str
+    display_location: str
+    cadastral_ref: str = ""
+    cadastral_address: str = ""
+    cadastral_use: str = ""
+    resolution: str = ""
+    confidence: str = ""
+    pgou_indexed: bool | None = None
+    next_step: str | None = None
+
+
 class ComplianceCheckResponse(BaseModel):
     ok: bool
     plan: str
@@ -22,6 +38,8 @@ class ComplianceCheckResponse(BaseModel):
     full_analysis: str
     credits_used: int = 1
     credits_remaining: int
+    site_context: SiteContextSummary | None = None
+    pgou_auto_fetched: bool = False
 
 
 class ComplianceReportResponse(BaseModel):

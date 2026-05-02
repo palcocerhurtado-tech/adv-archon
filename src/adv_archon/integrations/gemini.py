@@ -140,7 +140,10 @@ class GeminiClient:
                 continue
 
             except httpx.HTTPStatusError as exc:
-                if exc.response.status_code in (429, 500, 503) and attempt < self.max_stream_retries:
+                if (
+                    exc.response.status_code in (429, 500, 503)
+                    and attempt < self.max_stream_retries
+                ):
                     last_error = exc
                     continue
                 raise
@@ -193,8 +196,8 @@ class GeminiClient:
                     if status in (500, 503):
                         raise httpx.HTTPStatusError(
                             msg,
-                            request=response.request,  # type: ignore[arg-type]
-                            response=response,  # type: ignore[arg-type]
+                            request=response.request,
+                            response=response,
                         )
 
                 text = self._extract_text(data)

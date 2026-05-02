@@ -165,7 +165,13 @@ class UrbanComplianceTools:
     # Tool: plan_compliance_check                                          #
     # ------------------------------------------------------------------ #
 
-    def plan_compliance_check(self, plan_path: str, municipality: str) -> ToolResult:
+    def plan_compliance_check(
+        self,
+        plan_path: str,
+        municipality: str,
+        *,
+        site_context: dict[str, Any] | None = None,
+    ) -> ToolResult:
         """Analyze an architectural plan against the PGOU of a municipality."""
         muni = self._store.get_municipality(municipality)
         if muni is None:
@@ -190,7 +196,7 @@ class UrbanComplianceTools:
                 payload={"ok": False, "error": str(exc)},
             )
 
-        report = self._run_analysis(plan_data, municipality)
+        report = self._run_analysis(plan_data, municipality, site_context=site_context)
 
         return ToolResult(
             name="plan_compliance_check",
@@ -291,7 +297,9 @@ class UrbanComplianceTools:
                 "automáticamente para este análisis."
             )
 
-        check_result = self.plan_compliance_check(plan_path, municipality)
+        check_result = self.plan_compliance_check(
+            plan_path, municipality, site_context=_site_context_summary(site_payload)
+        )
         check_payload = dict(check_result.payload)
         return ToolResult(
             name="plan_compliance_check_by_coordinates",
@@ -385,7 +393,13 @@ class UrbanComplianceTools:
     # Private: LLM analysis                                               #
     # ------------------------------------------------------------------ #
 
-    def _run_analysis(self, plan: PlanData, municipality: str) -> ComplianceReport:
+    def _run_analysis(
+        self,
+        plan: PlanData,
+        municipality: str,
+        *,
+        site_context: dict[str, Any] | None = None,
+    ) -> ComplianceReport:
         search_query = _build_search_query(plan)
         search_result = self._store.search(
             search_query,
@@ -395,6 +409,7 @@ class UrbanComplianceTools:
 
         normativa_block = _format_normativa(search_result.chunks)
         plan_summary = plan_to_summary(plan)
+        site_block = _format_site_context(site_context) if site_context else ""
 
         system_prompt = (
             "Eres un arquitecto técnico experto en normativa urbanística española. "
@@ -407,7 +422,8 @@ class UrbanComplianceTools:
 
         user_message = (
             f"MUNICIPIO: {municipality}\n\n"
-            f"=== DATOS EXTRAÍDOS DEL PLANO ===\n{plan_summary}\n\n"
+            + (f"=== DATOS OFICIALES DE PARCELA Y ZONA ===\n{site_block}\n\n" if site_block else "")
+            + f"=== DATOS EXTRAÍDOS DEL PLANO ===\n{plan_summary}\n\n"
             f"=== FRAGMENTOS RELEVANTES DEL PGOU DE {municipality.upper()} ===\n"
             f"{normativa_block}\n\n"
             "Por favor, proporciona:\n"
@@ -441,6 +457,48 @@ class UrbanComplianceTools:
 # ------------------------------------------------------------------ #
 # Helpers                                                             #
 # ------------------------------------------------------------------ #
+
+def _format_site_context(ctx: dict[str, Any]) -> str:
+    """Render real parcel + flood data as a compact block for the LLM prompt."""
+    lines: list[str] = []
+
+    cadastral_ref = ctx.get("cadastral_ref", "")
+    if cadastral_ref:
+        lines.append(f"Referencia catastral: {cadastral_ref}")
+
+    pd = ctx.get("parcel_detail") or {}
+    if isinstance(pd, dict) and not pd.get("error"):
+        if pd.get("surface_m2"):
+            lines.append(f"Superficie construida real (Catastro): {pd['surface_m2']} m²")
+        if pd.get("construction_year"):
+            lines.append(f"Año de construcción (Catastro): {pd['construction_year']}")
+        if pd.get("floors_above") is not None:
+            lines.append(f"Plantas sobre rasante (Catastro): {pd['floors_above']}")
+        if pd.get("floors_below"):
+            lines.append(f"Plantas bajo rasante (Catastro): {pd['floors_below']}")
+        if pd.get("use_detail"):
+            lines.append(f"Uso catastral: {pd['use_detail']}")
+
+    fz = ctx.get("flood_zone") or {}
+    if isinstance(fz, dict) and fz.get("queried"):
+        in_flood = fz.get("in_flood_zone")
+        if in_flood is True:
+            periods = ", ".join(fz.get("periods") or [])
+            lines.append(
+                f"⚠️ ZONA INUNDABLE (SNCZI/MITECO): SÍ — períodos {periods or 'detectado'}. "
+                "Pueden aplicar restricciones sectoriales."
+            )
+        elif in_flood is False:
+            lines.append("Zona inundable (SNCZI/MITECO): NO detectada (T10, T100, T500).")
+        else:
+            lines.append("Zona inundable (SNCZI): no disponible — verificar manualmente.")
+
+    address = ctx.get("cadastral_address", "")
+    if address:
+        lines.append(f"Dirección catastral: {address}")
+
+    return "\n".join(lines) if lines else ""
+
 
 def _build_search_query(plan: PlanData) -> str:
     parts: list[str] = ["normativa urbanística edificación"]
@@ -537,4 +595,6 @@ def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "legal_readiness": payload.get("legal_readiness", ""),
         "legal_summary": payload.get("legal_summary", ""),
         "legal_checks": payload.get("legal_checks", []),
+        "parcel_detail": payload.get("parcel_detail", {}),
+        "flood_zone": payload.get("flood_zone", {}),
     }

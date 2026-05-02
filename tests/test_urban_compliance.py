@@ -65,7 +65,7 @@ def test_plan_compliance_check_by_coordinates_auto_fetches_when_needed(tmp_path:
         name="pgou_fetch",
         payload={"ok": True, "municipality": municipality},
     )
-    tools.plan_compliance_check = lambda plan_path, municipality: ToolResult(  # type: ignore[method-assign]
+    tools.plan_compliance_check = lambda plan_path, municipality, **_kw: ToolResult(  # type: ignore[method-assign]
         name="plan_compliance_check",
         payload={
             "ok": True,

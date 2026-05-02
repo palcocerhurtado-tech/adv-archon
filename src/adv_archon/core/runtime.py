@@ -868,8 +868,9 @@ def _build_geo_tool_specs(tools: Any) -> list[dict[str, Any]]:
             "name": "site_compliance_context",
             "description": (
                 "Full site context for a compliance check: resolves coordinates to a municipality, "
-                "checks whether PGOU normativa is already indexed, and tells you the next step. "
-                "Use this as the first tool when an architect provides coordinates for a plot."
+                "checks whether PGOU normativa is already indexed, and returns cadastral context "
+                "plus a preliminary legal checklist for parcel-level review. Use this as the first "
+                "tool when an architect provides coordinates for a plot."
             ),
             "schema": {
                 "type": "object",

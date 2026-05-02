@@ -40,6 +40,22 @@ def test_plan_compliance_check_by_coordinates_auto_fetches_when_needed(tmp_path:
                 "resolution": "nominatim",
                 "confidence": "high",
                 "pgou_indexed": False,
+                "legal_readiness": "pgou-pending",
+                "legal_summary": (
+                    "La parcela ya está identificada, pero falta indexar "
+                    "la normativa municipal."
+                ),
+                "legal_checks": [
+                    {
+                        "code": "pgou-municipal",
+                        "title": "Normativa municipal aplicable",
+                        "status": "pending_review",
+                        "authority": "PGOU de Madrid",
+                        "detail": "Falta indexar normativa.",
+                        "recommended_action": "Descargar PGOU.",
+                        "confidence": "high",
+                    }
+                ],
                 "next_step": "Usa pgou_fetch primero.",
             }
         ),
@@ -72,3 +88,5 @@ def test_plan_compliance_check_by_coordinates_auto_fetches_when_needed(tmp_path:
     assert result.payload["municipality"] == "Madrid"
     assert result.payload["pgou_auto_fetched"] is True
     assert result.payload["site_context"]["cadastral_ref"] == "1234567VK4713S0001AB"
+    assert result.payload["site_context"]["legal_readiness"] == "pgou-pending"
+    assert result.payload["site_context"]["legal_checks"][0]["code"] == "pgou-municipal"

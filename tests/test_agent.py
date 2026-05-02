@@ -1331,6 +1331,22 @@ def test_deterministic_location_response_formats_pgou_context(tmp_path: Path) ->
                 "La normativa PGOU de Madrid ya está indexada. "
                 "Puedes usar plan_compliance_check directamente."
             ),
+            "legal_readiness": "preliminary-ready",
+            "legal_summary": (
+                "Ya hay base suficiente para un análisis preliminar, pero faltan "
+                "comprobaciones sectoriales antes de considerar viable la actuación."
+            ),
+            "legal_checks": [
+                {
+                    "code": "parcel-zoning",
+                    "title": "Ordenanza y zona de parcela",
+                    "status": "pending_review",
+                    "authority": "Planeamiento municipal",
+                    "detail": "Falta fijar la ordenanza concreta.",
+                    "recommended_action": "Cruzar la parcela con la ficha y la ordenanza.",
+                    "confidence": "medium",
+                }
+            ],
             "reasons": [
                 "Municipio resuelto por Nominatim: Madrid",
                 "Referencia catastral obtenida: 1234567VK4713S0001AB",
@@ -1341,8 +1357,10 @@ def test_deterministic_location_response_formats_pgou_context(tmp_path: Path) ->
     assert response is not None
     assert "Ubicación resuelta: Madrid, Comunidad de Madrid." in response.text
     assert "- PGOU indexado: sí" in response.text
+    assert "- Estado jurídico preliminar: listo para análisis preliminar" in response.text
     assert "plan_compliance_check" in response.text
     assert "Referencia catastral: 1234567VK4713S0001AB" in response.text
+    assert "Comprobaciones y afecciones a revisar" in response.text
 
 
 def test_build_context_snapshot_uses_sober_checkpoint_and_confidence(tmp_path: Path) -> None:

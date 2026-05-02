@@ -371,6 +371,17 @@ def test_pgou_check_coords_command_injects_coordinate_analysis_prompt() -> None:
     assert "-3.7038" in result.injected_prompt
 
 
+def test_pgou_locate_command_mentions_legal_pending_checks() -> None:
+    services = build_services()
+
+    result = handle_command("/pgou locate 40.4168 -3.7038", services=services)
+
+    assert result.handled is True
+    assert result.injected_prompt is not None
+    assert "site_compliance_context" in result.injected_prompt
+    assert "advertencias sectoriales" in result.injected_prompt
+
+
 def test_automation_command_shows_status() -> None:
     services = build_services()
 

@@ -565,7 +565,8 @@ def _handle_pgou(argument: str, *, services: CommandServices) -> CommandResult:
             "en qué municipio español se encuentran y qué normativa urbanística (PGOU) aplica. "
             "Usa la herramienta site_compliance_context con esas coordenadas. "
             "Luego explica el municipio, provincia, referencia catastral si está disponible, "
-            "y si el PGOU ya está indexado o hay que descargarlo primero."
+            "si el PGOU ya está indexado o hay que descargarlo primero, y qué advertencias "
+            "sectoriales o comprobaciones jurídicas siguen pendientes sobre la parcela."
         )
         services.logger.log("slash_pgou_locate", lat=lat, lon=lon)
         return CommandResult(handled=True, injected_prompt=prompt)

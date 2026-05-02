@@ -12,6 +12,16 @@ class ComplianceAnnotation(BaseModel):
     recommendation: str
 
 
+class LegalCheckEntry(BaseModel):
+    code: str
+    title: str
+    status: str
+    authority: str
+    detail: str
+    recommended_action: str
+    confidence: str
+
+
 class SiteContextSummary(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
@@ -26,6 +36,9 @@ class SiteContextSummary(BaseModel):
     confidence: str = ""
     pgou_indexed: bool | None = None
     next_step: str | None = None
+    legal_readiness: str = ""
+    legal_summary: str = ""
+    legal_checks: list[LegalCheckEntry] = Field(default_factory=list)
 
 
 class ComplianceCheckResponse(BaseModel):

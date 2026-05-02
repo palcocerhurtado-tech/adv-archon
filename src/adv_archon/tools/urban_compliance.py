@@ -534,4 +534,7 @@ def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "confidence": payload.get("confidence", ""),
         "pgou_indexed": payload.get("pgou_indexed"),
         "next_step": payload.get("next_step"),
+        "legal_readiness": payload.get("legal_readiness", ""),
+        "legal_summary": payload.get("legal_summary", ""),
+        "legal_checks": payload.get("legal_checks", []),
     }

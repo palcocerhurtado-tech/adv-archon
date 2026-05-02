@@ -15,7 +15,7 @@ router = APIRouter(prefix="/v1/location", tags=["location"])
 _geo_tools: GeoTools | None = None
 
 
-def _get_geo_tools(tools: UrbanComplianceTools = Depends(get_compliance_tools)) -> GeoTools:
+def _get_geo_tools(tools: UrbanComplianceTools = Depends(get_compliance_tools)) -> GeoTools:  # noqa: B008
     global _geo_tools
     if _geo_tools is None:
         import os
@@ -48,6 +48,9 @@ class SiteContextResponse(BaseModel):
     display_location: str
     pgou_indexed: bool | None = None
     next_step: str | None = None
+    legal_readiness: str = ""
+    legal_summary: str = ""
+    legal_checks: list[dict[str, str]] = Field(default_factory=list)
     from_cache: bool = False
     error: str | None = None
 
@@ -56,7 +59,7 @@ class SiteContextResponse(BaseModel):
 def resolve_location(
     req: ResolveRequest,
     _key: AuthKey,
-    geo: GeoTools = Depends(_get_geo_tools),
+    geo: GeoTools = Depends(_get_geo_tools),  # noqa: B008
 ) -> SiteContextResponse:
     """
     Resolve GPS coordinates to a Spanish municipality, province,
@@ -81,11 +84,11 @@ def resolve_location(
 def site_compliance_context(
     req: ResolveRequest,
     _key: AuthKey,
-    geo: GeoTools = Depends(_get_geo_tools),
+    geo: GeoTools = Depends(_get_geo_tools),  # noqa: B008
 ) -> SiteContextResponse:
     """
     Full site context: municipality + cadastral reference + PGOU index status.
-    Returns next_step indicating whether to run pgou_fetch or plan_compliance_check.
+    Returns next_step and a preliminary legal checklist for parcel-level review.
     No credits charged.
     """
     result = geo.site_compliance_context(req.latitude, req.longitude)

@@ -7,6 +7,31 @@ from typing import Any, Literal
 Resolution = Literal["nominatim", "catastro", "cache", "manual", "unknown"]
 
 ConfidenceLevel = Literal["high", "medium", "low"]
+LegalCheckStatus = Literal["ready", "pending_review", "conditional", "missing"]
+
+
+@dataclass(slots=True)
+class LegalCheck:
+    """Structured legal/sectorial verification item for a parcel or site."""
+
+    code: str
+    title: str
+    status: LegalCheckStatus
+    authority: str
+    detail: str
+    recommended_action: str
+    confidence: ConfidenceLevel = "medium"
+
+    def to_dict(self) -> dict[str, str]:
+        return {
+            "code": self.code,
+            "title": self.title,
+            "status": self.status,
+            "authority": self.authority,
+            "detail": self.detail,
+            "recommended_action": self.recommended_action,
+            "confidence": self.confidence,
+        }
 
 
 @dataclass(slots=True)

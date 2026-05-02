@@ -965,7 +965,11 @@ class Agent:
                 "step_summary": "consultar catálogo PGOU indexado",
             }
 
-        if wants_pgou_fetch and "pgou_fetch_all" in self._tools and "pgou_fetch_all" not in executed:
+        if (
+            wants_pgou_fetch
+            and "pgou_fetch_all" in self._tools
+            and "pgou_fetch_all" not in executed
+        ):
             return {
                 "kind": "tool",
                 "tool_name": "pgou_fetch_all",
@@ -973,7 +977,11 @@ class Agent:
                 "step_summary": "actualizar catálogo PGOU completo",
             }
 
-        if wants_pgou_search and "pgou_catalogue" in self._tools and "pgou_catalogue" not in executed:
+        if (
+            wants_pgou_search
+            and "pgou_catalogue" in self._tools
+            and "pgou_catalogue" not in executed
+        ):
             return {
                 "kind": "tool",
                 "tool_name": "pgou_catalogue",
@@ -2360,6 +2368,9 @@ class Agent:
         next_step = str(payload.get("next_step") or "").strip()
         reasons = payload.get("reasons")
         pgou_indexed = payload.get("pgou_indexed")
+        legal_readiness = _describe_legal_readiness(str(payload.get("legal_readiness") or ""))
+        legal_summary = str(payload.get("legal_summary") or "").strip()
+        legal_checks = payload.get("legal_checks")
 
         lines = [f"Ubicación resuelta: {display_location}."]
         lines.append(f"- Municipio: {municipality}")
@@ -2379,11 +2390,35 @@ class Agent:
             lines.append(f"- Uso catastral: {cadastral_use}")
         if isinstance(pgou_indexed, bool):
             lines.append(f"- PGOU indexado: {'sí' if pgou_indexed else 'no'}")
+        if legal_readiness:
+            lines.append(f"- Estado jurídico preliminar: {legal_readiness}")
 
         text = "\n".join(lines)
 
         if next_step:
             text += f"\n\nSiguiente paso:\n{next_step}"
+
+        if legal_summary:
+            text += f"\n\nLectura jurídica preliminar:\n{legal_summary}"
+
+        if isinstance(legal_checks, list) and legal_checks:
+            check_lines: list[str] = []
+            for item in legal_checks[:5]:
+                if not isinstance(item, dict):
+                    continue
+                title = str(item.get("title") or "").strip()
+                status = _describe_legal_check_status(str(item.get("status") or ""))
+                action = str(item.get("recommended_action") or "").strip()
+                if not title:
+                    continue
+                entry = f"- {title}"
+                if status:
+                    entry += f": {status}"
+                if action:
+                    entry += f". {action}"
+                check_lines.append(entry)
+            if check_lines:
+                text += "\n\nComprobaciones y afecciones a revisar:\n" + "\n".join(check_lines)
 
         if isinstance(reasons, list) and reasons:
             bullets = "\n".join(
@@ -3414,6 +3449,26 @@ def _describe_geo_confidence(value: str) -> str:
         "high": "alta",
         "medium": "media",
         "low": "baja",
+    }
+    return mapping.get(value.lower(), value)
+
+
+def _describe_legal_readiness(value: str) -> str:
+    mapping = {
+        "early-stage": "fase temprana",
+        "parcel-pending": "falta fijar la parcela",
+        "pgou-pending": "falta normativa municipal operativa",
+        "preliminary-ready": "listo para análisis preliminar",
+    }
+    return mapping.get(value.lower(), value)
+
+
+def _describe_legal_check_status(value: str) -> str:
+    mapping = {
+        "ready": "resuelto",
+        "pending_review": "revisión pendiente",
+        "conditional": "revisión condicionada",
+        "missing": "dato pendiente",
     }
     return mapping.get(value.lower(), value)
 

@@ -22,10 +22,20 @@ class ParcelDetail(BaseModel):
 class FloodZoneDetail(BaseModel):
     """SNCZI flood-zone query result for a coordinate point."""
 
-    queried: bool = False           # False → service not called (resolve-only endpoint)
+    queried: bool = False
     in_flood_zone: bool | None = None  # None → service unavailable
-    periods: list[str] = Field(default_factory=list)  # e.g. ["T100", "T500"]
+    periods: list[str] = Field(default_factory=list)
     source: str = "SNCZI/CNIG"
+    error: str = ""
+
+
+class Natura2000Detail(BaseModel):
+    """Red Natura 2000 (ZEC/ZEPA) query result for a coordinate point."""
+
+    queried: bool = False
+    in_protected_area: bool | None = None  # None → service unavailable
+    zones: list[str] = Field(default_factory=list)  # e.g. ["ZEC (hábitats)"]
+    source: str = "Red Natura 2000 / CNIG"
     error: str = ""
 
 
@@ -67,6 +77,7 @@ class SiteContextSummary(BaseModel):
     legal_checks: list[LegalCheckEntry] = Field(default_factory=list)
     parcel_detail: ParcelDetail = Field(default_factory=ParcelDetail)
     flood_zone: FloodZoneDetail = Field(default_factory=FloodZoneDetail)
+    natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
 
 
 class ComplianceCheckResponse(BaseModel):

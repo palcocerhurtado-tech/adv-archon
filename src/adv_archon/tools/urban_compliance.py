@@ -493,6 +493,20 @@ def _format_site_context(ctx: dict[str, Any]) -> str:
         else:
             lines.append("Zona inundable (SNCZI): no disponible — verificar manualmente.")
 
+    n2k = ctx.get("natura2000") or {}
+    if isinstance(n2k, dict) and n2k.get("queried"):
+        in_n2k = n2k.get("in_protected_area")
+        if in_n2k is True:
+            zones = ", ".join(n2k.get("zones") or [])
+            lines.append(
+                f"⚠️ RED NATURA 2000 (CNIG/MITECO): SÍ — {zones or 'zona protegida'}. "
+                "Requiere Evaluación de Impacto Ambiental."
+            )
+        elif in_n2k is False:
+            lines.append("Red Natura 2000 (CNIG/MITECO): NO detectada (ZEC y ZEPA consultados).")
+        else:
+            lines.append("Red Natura 2000: no disponible — verificar manualmente.")
+
     address = ctx.get("cadastral_address", "")
     if address:
         lines.append(f"Dirección catastral: {address}")
@@ -597,4 +611,5 @@ def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "legal_checks": payload.get("legal_checks", []),
         "parcel_detail": payload.get("parcel_detail", {}),
         "flood_zone": payload.get("flood_zone", {}),
+        "natura2000": payload.get("natura2000", {}),
     }

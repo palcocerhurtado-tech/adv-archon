@@ -8,6 +8,7 @@ from adv_archon.core.geo_store import GeoStore
 from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.site_context import LegalCheck, SiteContext
 from adv_archon.integrations import catastro as _catastro
+from adv_archon.integrations import natura2000 as _natura2000
 from adv_archon.integrations import nominatim as _nominatim
 from adv_archon.integrations import snczi as _snczi
 
@@ -146,6 +147,27 @@ class GeoTools:
                 }
         payload["flood_zone"] = flood_data
 
+        # Pre-fetch Red Natura 2000 protected area data.
+        natura_data: dict[str, Any] = {
+            "queried": False, "in_protected_area": None, "zones": [], "error": "skipped",
+        }
+        if latitude and longitude:
+            try:
+                raw_n = _natura2000.query_protected_area(latitude, longitude)
+                natura_data = {
+                    "queried": True,
+                    "in_protected_area": raw_n.get("in_protected_area"),
+                    "zones": raw_n.get("zones", []),
+                    "source": raw_n.get("source", "Red Natura 2000 / CNIG"),
+                    "error": raw_n.get("error", ""),
+                }
+            except Exception as exc:
+                natura_data = {
+                    "queried": True, "in_protected_area": None,
+                    "zones": [], "error": str(exc)[:120],
+                }
+        payload["natura2000"] = natura_data
+
         legal_checks = self._build_legal_checks(
             payload,
             pgou_indexed=pgou_indexed,
@@ -153,6 +175,7 @@ class GeoTools:
             longitude=longitude,
             _parcel_detail=parcel_detail,
             _flood_data=flood_data,
+            _natura_data=natura_data,
         )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
@@ -245,6 +268,7 @@ class GeoTools:
         longitude: float = 0.0,
         _parcel_detail: dict[str, Any] | None = None,
         _flood_data: dict[str, Any] | None = None,
+        _natura_data: dict[str, Any] | None = None,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
@@ -255,6 +279,9 @@ class GeoTools:
         parcel_detail: dict[str, Any] = _parcel_detail or {}
         flood_data: dict[str, Any] = _flood_data or {
             "in_flood_zone": None, "periods": [], "error": "skipped",
+        }
+        natura_data: dict[str, Any] = _natura_data or {
+            "in_protected_area": None, "zones": [], "error": "skipped",
         }
 
         # Build cadastral detail text from real parcel data
@@ -305,6 +332,49 @@ class GeoTools:
             )
             _flood_action = "Sin afección hidráulica detectada. Verificar en el PGOU local."
             _flood_conf = "high"
+
+        # Build natura2000 / heritage status from real CNIG data
+        _natura_status: str
+        _natura_detail: str
+        _natura_action: str
+        _natura_conf: str
+        in_natura = natura_data.get("in_protected_area")
+        if natura_data.get("error") == "skipped" or in_natura is None:
+            _natura_status = "pending_review"
+            _natura_detail = (
+                "No se ha podido consultar la Red Natura 2000 en este momento. "
+                f"{natura_data.get('error', '')}"
+            ).strip()
+            _natura_action = (
+                "Revisar manualmente el visor de Red Natura 2000 (MITECO) "
+                "y catálogos de patrimonio de la comunidad autónoma."
+            )
+            _natura_conf = "medium"
+        elif in_natura:
+            zones = ", ".join(natura_data.get("zones") or [])
+            _natura_status = "conditional"
+            _natura_detail = (
+                f"⚠️ La parcela INTERSECTA con espacios Red Natura 2000 "
+                f"({zones or 'zona protegida detectada'}). "
+                "Fuente: CNIG/MITECO — datos oficiales."
+            )
+            _natura_action = (
+                "Obligatorio realizar Evaluación de Impacto Ambiental (EIA) "
+                "o Evaluación de Repercusiones Ambientales antes de cualquier actuación."
+            )
+            _natura_conf = "high"
+        else:
+            _natura_status = "ready"
+            _natura_detail = (
+                "La parcela NO se encuentra dentro de espacios Red Natura 2000 "
+                "(ZEC y ZEPA consultados). "
+                "Fuente: CNIG/MITECO — datos oficiales."
+            )
+            _natura_action = (
+                "Sin afección directa de Red Natura 2000. "
+                "Verificar catálogos de patrimonio y espacios protegidos autonómicos."
+            )
+            _natura_conf = "high"
 
         checks: list[LegalCheck] = [
             LegalCheck(
@@ -398,19 +468,12 @@ class GeoTools:
             ),
             LegalCheck(
                 code="heritage-environment",
-                title="Patrimonio y protección ambiental",
-                status="pending_review",
-                authority="Comunidad autónoma / ayuntamiento",
-                detail=(
-                    "Falta revisar si el emplazamiento está dentro de un ámbito "
-                    "protegido, entorno BIC, "
-                    "catálogo patrimonial o espacio ambiental condicionado."
-                ),
-                recommended_action=(
-                    "Consultar catálogos patrimoniales y ambientales del municipio "
-                    "o de la comunidad autónoma."
-                ),
-                confidence="medium",
+                title="Patrimonio y protección ambiental (Red Natura 2000)",
+                status=_natura_status,  # type: ignore[arg-type]
+                authority="Red Natura 2000 — CNIG/MITECO (datos oficiales)",
+                detail=_natura_detail,
+                recommended_action=_natura_action,
+                confidence=_natura_conf,  # type: ignore[arg-type]
             ),
         ]
 

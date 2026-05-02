@@ -1,7 +1,10 @@
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable
-from typing import Literal
+from collections import deque
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from dataclasses import dataclass
+from typing import Literal, Protocol
 
 from adv_archon.core.config import LLMConfig
 from adv_archon.core.llm_types import LLMMessage, LLMResponse, LLMUsage
@@ -10,19 +13,72 @@ from adv_archon.integrations.gemini import GeminiClient
 from adv_archon.integrations.ollama import OllamaClient
 
 ProviderMode = Literal["cloud", "local"]
+TaskKind = Literal[
+    "assistant",
+    "browser",
+    "coding",
+    "documents",
+    "fast",
+    "general",
+    "planner",
+    "reasoning",
+    "study",
+    "web",
+]
+
+
+class ProviderClient(Protocol):
+    def complete(
+        self,
+        messages: Iterable[LLMMessage],
+        *,
+        system_prompt: str,
+        response_mime_type: str | None = None,
+    ) -> tuple[str, LLMUsage]: ...
+
+    def stream_complete(
+        self,
+        messages: Iterable[LLMMessage],
+        *,
+        system_prompt: str,
+        on_chunk: Callable[[str], None] | None = None,
+    ) -> tuple[str, LLMUsage]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class _ResolvedRoute:
+    mode: ProviderMode
+    provider_name: str
+    model: str
+    client: ProviderClient
 
 
 class LLMRouter:
     def __init__(self, config: LLMConfig) -> None:
         self._config = config
         self._pii_redactor = PIIRedactor()
+        self._mode_overrides: deque[ProviderMode] = deque()
 
     @property
     def mode(self) -> ProviderMode:
+        if self._mode_overrides:
+            return self._mode_overrides[-1]
         return "local" if self._config.mode == "local" else "cloud"
+
+    @property
+    def tool_call_repair_enabled(self) -> bool:
+        return self._config.tool_call_repair
 
     def set_mode(self, mode: ProviderMode) -> None:
         self._config.mode = mode
+
+    @contextmanager
+    def temporary_mode(self, mode: ProviderMode) -> Iterator[None]:
+        self._mode_overrides.append(mode)
+        try:
+            yield
+        finally:
+            self._mode_overrides.pop()
 
     def complete(
         self,
@@ -30,21 +86,22 @@ class LLMRouter:
         *,
         system_prompt: str,
         response_mime_type: str | None = None,
+        task: TaskKind | None = None,
+        prefer_local: bool | None = None,
     ) -> LLMResponse:
         prepared = self._prepare_request(messages, system_prompt=system_prompt)
-        provider = self._provider()
-        text, usage = provider.complete(
+        route = self._resolve_route(task=task, prefer_local=prefer_local)
+        text, usage = route.client.complete(
             prepared.messages,
             system_prompt=prepared.system_prompt,
             response_mime_type=response_mime_type,
         )
         usage = self._estimate_cost(usage)
-        provider_name, model = self._provider_name_model()
         return LLMResponse(
             text=prepared.restore(text),
             usage=usage,
-            provider=provider_name,
-            model=model,
+            provider=route.provider_name,
+            model=route.model,
             redaction_applied=prepared.applied,
             redaction_items=prepared.items,
         )
@@ -55,33 +112,34 @@ class LLMRouter:
         *,
         system_prompt: str,
         on_chunk: Callable[[str], None] | None = None,
+        task: TaskKind | None = None,
+        prefer_local: bool | None = None,
     ) -> LLMResponse:
         prepared = self._prepare_request(messages, system_prompt=system_prompt)
-        provider = self._provider()
+        route = self._resolve_route(task=task, prefer_local=prefer_local)
         stream_callback = on_chunk
         if prepared.applied and on_chunk is not None:
             stream_callback = None
-        text, usage = provider.stream_complete(
+        text, usage = route.client.stream_complete(
             prepared.messages,
             system_prompt=prepared.system_prompt,
             on_chunk=stream_callback,
         )
         usage = self._estimate_cost(usage)
-        provider_name, model = self._provider_name_model()
         restored_text = prepared.restore(text)
         if prepared.applied and on_chunk is not None and restored_text:
             on_chunk(restored_text)
         return LLMResponse(
             text=restored_text,
             usage=usage,
-            provider=provider_name,
-            model=model,
+            provider=route.provider_name,
+            model=route.model,
             redaction_applied=prepared.applied,
             redaction_items=prepared.items,
         )
 
-    def _provider(self) -> GeminiClient | OllamaClient:
-        if self.mode == "cloud":
+    def _provider(self, mode: ProviderMode, *, model: str) -> ProviderClient:
+        if mode == "cloud":
             if not self._config.gemini_api_key:
                 raise RuntimeError(
                     "No Gemini API key found. "
@@ -89,19 +147,72 @@ class LLMRouter:
                 )
             return GeminiClient(
                 api_key=self._config.gemini_api_key,
-                model=self._config.gemini_model,
+                model=model,
                 temperature=self._config.temperature,
+                timeout=float(self._config.gemini_timeout_seconds),
             )
         return OllamaClient(
             base_url=self._config.ollama_base_url,
-            model=self._config.ollama_model,
+            model=model,
             temperature=self._config.temperature,
+            timeout=float(self._config.ollama_timeout_seconds),
+            num_ctx=self._config.ollama_num_ctx,
+            keep_alive=self._config.ollama_keep_alive,
         )
 
-    def _provider_name_model(self) -> tuple[str, str]:
-        if self.mode == "cloud":
-            return "gemini", self._config.gemini_model
-        return "ollama", self._config.ollama_model
+    def _resolve_route(
+        self,
+        *,
+        task: TaskKind | None,
+        prefer_local: bool | None,
+    ) -> _ResolvedRoute:
+        mode = self._resolved_mode(task=task, prefer_local=prefer_local)
+        model = self._model_for_task(mode=mode, task=task)
+        provider_name = "gemini" if mode == "cloud" else "ollama"
+        return _ResolvedRoute(
+            mode=mode,
+            provider_name=provider_name,
+            model=model,
+            client=self._provider(mode, model=model),
+        )
+
+    def _resolved_mode(
+        self,
+        *,
+        task: TaskKind | None,
+        prefer_local: bool | None,
+    ) -> ProviderMode:
+        if prefer_local is True:
+            return "local"
+        if not self._config.task_routing_enabled:
+            return self.mode
+        if task in {"coding", "documents", "fast", "planner", "reasoning", "study"}:
+            return "local"
+        return self.mode
+
+    def _model_for_task(self, *, mode: ProviderMode, task: TaskKind | None) -> str:
+        if not self._config.task_routing_enabled:
+            return self._config.gemini_model if mode == "cloud" else self._config.ollama_model
+
+        if mode == "local":
+            mapping = {
+                "coding": self._config.coding_local_model,
+                "documents": self._config.document_local_model,
+                "fast": self._config.fast_local_model,
+                "planner": self._config.planner_local_model,
+                "reasoning": self._config.reasoning_local_model or self._config.coding_local_model,
+                "study": self._config.document_local_model,
+            }
+            return mapping.get(task or "general") or self._config.ollama_model
+
+        mapping = {
+            "coding": self._config.coding_cloud_model,
+            "documents": self._config.document_cloud_model,
+            "fast": self._config.fast_cloud_model,
+            "planner": self._config.planner_cloud_model,
+            "study": self._config.document_cloud_model,
+        }
+        return mapping.get(task or "general") or self._config.gemini_model
 
     def _estimate_cost(self, usage: LLMUsage) -> LLMUsage:
         if usage.total_tokens == 0:

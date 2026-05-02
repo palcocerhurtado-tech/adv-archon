@@ -53,6 +53,7 @@ Example:
 ```toml
 [privacy]
 redact_cloud_pii = true
+force_local_private_context = true
 
 [shell]
 timeout_seconds = 20
@@ -75,6 +76,23 @@ auto_index_on_search = true
 max_files_per_root = 2000
 max_file_bytes = 2000000
 search_limit = 5
+background_batch_size = 250
+background_interval_minutes = 60
+
+[google]
+enabled = true
+client_secret_file = "~/.adv-archon/google-client-secret.json"
+token_file = "~/.adv-archon/google-token.json"
+default_calendar_id = "primary"
+gmail_default_max_results = 10
+drive_default_max_results = 10
+
+[research]
+enabled = true
+seed_queries = ["ai consulting spain", "llm agents market"]
+search_results_per_query = 5
+fetch_top_results = 2
+launch_agent_interval_minutes = 180
 
 [ui]
 show_context_panel = true
@@ -108,6 +126,17 @@ PORCUPINE_ACCESS_KEY=
 Long-term memory uses `sentence-transformers` with the `all-MiniLM-L6-v2` model.
 
 The first memory operation may download the model once into the local cache if it is not present yet.
+
+## Daily brief prerequisites
+
+The richer `adv-archon daily` brief uses whichever of these sources you have configured and permitted:
+
+- macOS Calendar, Reminders, and Notes permissions for the terminal app you use
+- Google OAuth credentials in `~/.adv-archon/google-client-secret.json`
+- a valid Google token in `~/.adv-archon/google-token.json`
+- local knowledge indexing enabled if you want knowledge status and contextual hits
+
+If a source is unavailable, the brief still renders and marks that source as degraded.
 
 ## Document support and OCR
 
@@ -161,6 +190,29 @@ Phase 2 adds native macOS connectors for:
 
 The first real use may trigger macOS permission prompts for your terminal app.
 
+## Google Workspace connectors
+
+To enable Gmail, Google Calendar, and Drive:
+
+1. Create a Google OAuth desktop client in Google Cloud.
+2. Save the downloaded JSON in:
+
+```text
+~/.adv-archon/google-client-secret.json
+```
+
+3. On first use, ADV ARCHON will open a local OAuth flow and persist the token in:
+
+```text
+~/.adv-archon/google-token.json
+```
+
+The default scopes cover:
+
+- Gmail read and draft creation
+- Google Calendar read and event creation
+- Google Drive read-only search and file access
+
 ## Browser automation
 
 Browser automation uses Playwright with a persistent local profile at:
@@ -200,8 +252,50 @@ ADV ARCHON can index your files as personal context without turning that into wr
 Default behavior:
 
 - read access is broad across your configured knowledge roots
+- that includes your Desktop and its folders when they sit under configured roots such as `~`
 - knowledge retrieval is automatic when the request looks document-heavy or assistant-like
+- discovery keeps metadata for files even when full content cannot be embedded
 - writes still stay behind confirmation gates
+- writing a note in macOS Notes also stays behind explicit confirmation
+
+Useful maintenance commands:
+
+```bash
+adv-archon knowledge status
+adv-archon knowledge run-batch
+adv-archon knowledge install-agent
+```
+
+The optional background indexer uses:
+
+```text
+~/Library/LaunchAgents/com.adv-archon.knowledge.plist
+```
+
+## Background web research
+
+ADV ARCHON can also maintain a separate local web library under:
+
+```text
+~/.adv-archon/web-library.db
+```
+
+This store is intended for external perspective only. Your Mac knowledge base remains primary.
+
+Useful commands:
+
+```bash
+adv-archon research status
+adv-archon research run-once
+adv-archon research search "query"
+adv-archon research install-agent
+```
+
+The optional background research agent uses:
+
+```text
+~/Library/LaunchAgents/com.adv-archon.research.plist
+```
 
 For broader access on macOS protected folders, you may need to grant Full Disk Access to the terminal app you use.
 

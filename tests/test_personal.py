@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from subprocess import TimeoutExpired
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -45,6 +46,33 @@ def test_mail_draft_requires_confirmation() -> None:
             "Propuesta",
             "Te adjunto la propuesta.",
         )
+
+
+def test_notes_create_requires_confirmation() -> None:
+    tool = PersonalTools(confirm=lambda _question: False)
+
+    with pytest.raises(PermissionError):
+        tool.notes_create("Ideas", "Revisar conectores")
+
+
+def test_notes_create_calls_jxa_when_confirmed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: dict[str, str] = {}
+    tool = PersonalTools(confirm=lambda _question: True)
+
+    def fake_run(script: str) -> dict[str, object]:
+        captured["script"] = script
+        return {"created": True, "title": "Ideas", "folder": "Notas"}
+
+    monkeypatch.setattr(tool, "_run_jxa", fake_run)
+
+    result = tool.notes_create("Ideas", "Revisar conectores", folder="Notas")
+
+    assert result.payload["created"] is True
+    assert "Ideas" in captured["script"]
+    assert "Revisar conectores" in captured["script"]
+    assert "Notas" in captured["script"]
 
 
 def test_calendar_upcoming_expands_weekly_recurrence(
@@ -125,6 +153,7 @@ def test_calendar_script_uses_long_recurrence_lookback() -> None:
     assert any(
         f"({RECURRING_LOOKBACK_DAYS} * days)" in line for line in script_lines
     )
+    assert "if not running then launch" in script_lines
 
 
 def test_expand_calendar_events_handles_recurring_and_one_off() -> None:
@@ -158,3 +187,15 @@ def test_expand_calendar_events_handles_recurring_and_one_off() -> None:
     assert events[0]["start"].startswith("2026-04-21T08:30:00")
     assert events[1]["start"].startswith("2026-04-22T08:30:00")
     assert events[2]["title"] == "Día de San Jorge"
+
+
+def test_notes_search_times_out_cleanly(monkeypatch: pytest.MonkeyPatch) -> None:
+    tool = PersonalTools(confirm=lambda _question: True)
+
+    def fake_run(*_args, **_kwargs):  # type: ignore[no-untyped-def]
+        raise TimeoutExpired(cmd=["osascript"], timeout=12)
+
+    monkeypatch.setattr("adv_archon.tools.personal.subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError):
+        tool.notes_search("acme", limit=3)

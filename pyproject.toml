@@ -14,8 +14,16 @@ authors = [
 ]
 dependencies = [
   "dateparser>=1.2.2",
-  "duckduckgo-search>=8.1.1",
+  "fastapi>=0.115.0",
+  "uvicorn[standard]>=0.34.0",
+  "python-multipart>=0.0.20",
+  "passlib[bcrypt]>=1.7.4",
+  "ddgs>=9.6.1",
+  "fpdf2>=2.8.0",
   "faster-whisper>=1.1.1",
+  "google-api-python-client>=2.169.0",
+  "google-auth-oauthlib>=1.2.2",
+  "google-auth-httplib2>=0.2.0",
   "httpx>=0.28.1",
   "numpy>=2.2.5",
   "openpyxl>=3.1.5",
@@ -43,6 +51,10 @@ dev = [
   "pytest>=8.3.5",
   "pytest-asyncio>=1.0.0",
   "ruff>=0.11.7",
+  "pyinstaller>=6.0",
+]
+desktop = [
+  "PySide6>=6.8.0",
 ]
 wakeword = [
   "pvporcupine>=3.0.5",
@@ -51,6 +63,8 @@ wakeword = [
 [project.scripts]
 adv-archon = "adv_archon.main:main"
 adv = "adv_archon.main:main"
+adv-archon-desktop = "adv_archon.main:desktop_main"
+adv-archon-api = "adv_archon.api.server:main"
 
 [tool.setuptools]
 package-dir = { "" = "src" }
@@ -60,7 +74,13 @@ include-package-data = true
 where = ["src"]
 
 [tool.setuptools.package-data]
-adv_archon = ["py.typed", "resources/*.md"]
+adv_archon = [
+  "py.typed",
+  "resources/*.md",
+  "resources/*.json",
+  "resources/branding/*.png",
+  "resources/branding/*.icns",
+]
 
 [tool.ruff]
 line-length = 100

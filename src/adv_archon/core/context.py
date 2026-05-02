@@ -64,6 +64,7 @@ class RuntimeContext:
     now: datetime
     git: GitContext
     working_set: WorkingSet
+    active_profile: str = "general"
 
     def greeting(self) -> str:
         time_of_day = _time_of_day(self.now.hour)
@@ -80,13 +81,18 @@ class RuntimeContext:
             "Runtime context:",
             f"- Local time: {WEEKDAY_NAMES[self.now.weekday()]}, {self.now:%H:%M}",
             f"- Current directory: {self.cwd}",
+            f"- Active profile: {self.active_profile}",
             f"- Git: {self.git.summary()}",
             f"- Working set: {self.working_set.summary()}",
         ]
         return "\n".join(lines)
 
 
-def capture_runtime_context(cwd: Path | None = None) -> RuntimeContext:
+def capture_runtime_context(
+    cwd: Path | None = None,
+    *,
+    active_profile: str = "general",
+) -> RuntimeContext:
     resolved_cwd = (cwd or Path.cwd()).resolve()
     git = _capture_git_context(resolved_cwd)
     project_root = git.repo_root or _find_project_root(resolved_cwd) or resolved_cwd
@@ -96,6 +102,7 @@ def capture_runtime_context(cwd: Path | None = None) -> RuntimeContext:
         now=datetime.now(),
         git=git,
         working_set=working_set,
+        active_profile=active_profile,
     )
 
 
@@ -109,7 +116,7 @@ def _capture_git_context(cwd: Path) -> GitContext:
             changed_files=0,
             changed_paths=[],
         )
-    repo_root = Path(repo_root_text.strip()).resolve()
+    repo_root = Path(repo_root_text).resolve()
     branch_text = _run_git(cwd, "branch", "--show-current")
     status_text = _run_git(cwd, "status", "--porcelain")
     changed_files = 0
@@ -118,10 +125,10 @@ def _capture_git_context(cwd: Path) -> GitContext:
         status_lines = [line for line in status_text.splitlines() if line.strip()]
         changed_files = len(status_lines)
         for line in status_lines[:10]:
-            changed_paths.append(line[3:].strip())
+            changed_paths.append(line[3:])
     return GitContext(
         repo_root=repo_root,
-        branch=(branch_text or "").strip() or None,
+        branch=(branch_text or "") or None,
         dirty=changed_files > 0,
         changed_files=changed_files,
         changed_paths=changed_paths,
@@ -137,7 +144,7 @@ def _run_git(cwd: Path, *args: str) -> str | None:
     )
     if completed.returncode != 0:
         return None
-    return completed.stdout.strip()
+    return completed.stdout.rstrip("\r\n")
 
 
 def _find_project_root(cwd: Path) -> Path | None:

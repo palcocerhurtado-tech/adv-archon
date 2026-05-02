@@ -22,14 +22,20 @@ This repository currently includes:
 - Intent auto-router for chat, code, docs, web, shell, and assistant tasks
 - Structured long-term memory backed by SQLite and local embeddings
 - Local knowledge base indexed from your files in read-only mode
+- Incremental file discovery with metadata coverage, pending batches, and status reporting
+- Separate local web library for external sources, freshness, and background research cycles
 - Operator-style planning with context panel and next-step visibility
 - Persistent tasks with a local SQLite scheduler and `launchd` integration
 - Personal macOS connectors for Calendar, Reminders, Notes, Contacts, and Mail
+- Google Workspace connectors for Gmail, Google Calendar, and Drive
 - Managed browser automation for navigation, extraction, screenshots, and supervised form work
+- Persistent runtime profiles (`general`, `work`, `personal`, `research`, `coding`)
+- Dedicated Markdown/Obsidian vault search tied to the active profile
 - Session cost ledger and local JSON logs
 - Auto mode with confirmation before enabling
 - Optional PII redaction before cloud LLM calls
-- `adv-archon daily` proactive routine
+- Automatic local-only handling for turns that touch private Mac context
+- `adv-archon daily` serious daily brief that combines agenda, tasks, Gmail, Drive, Notes, and local knowledge
 - Voice output with macOS `say`
 - Local dictation with `faster-whisper`
 - Optional wake-word startup flow with `--listen`
@@ -78,6 +84,7 @@ Daily routine:
 
 ```bash
 adv-archon daily
+adv-archon daily raw
 ```
 
 Task scheduler utilities:
@@ -85,15 +92,20 @@ Task scheduler utilities:
 ```bash
 adv-archon tasks
 adv-archon tasks run-due
+adv-archon knowledge status
+adv-archon research status
 ```
 
 ## Current slash commands
 
 - `/help`
 - `/exit`
+- `/daily [brief|raw]`
 - `/mode <cloud|local>`
+- `/profile [name|status]`
 - `/read <path>`
 - `/web <query>`
+- `/vault <query>`
 - `/recall <query>`
 - `/forget <query|id>`
 - `/cost`
@@ -123,9 +135,24 @@ Optional cloud PII redaction can be enabled in `~/.adv-archon/config.toml`:
 ```toml
 [privacy]
 redact_cloud_pii = true
+force_local_private_context = true
 ```
 
 When enabled, ADV ARCHON replaces emails, phones, IBANs, and Spanish DNI/NIE identifiers with placeholders before sending cloud prompts, then restores them in the answer.
+
+When `force_local_private_context` is enabled, turns that touch private Mac context such as local files, memory, notes, calendar, tasks, Gmail, Google Calendar, or Drive are resolved locally instead of going to the cloud model.
+
+## Daily brief
+
+`adv-archon daily` now renders a read-only daily brief that pulls from:
+
+- local ARCHON activity logs
+- persistent tasks and memory
+- macOS Calendar, Reminders, and Notes
+- Gmail, Google Calendar, and Drive
+- local knowledge status and project-relevant knowledge hits
+
+If a source is unavailable because of missing permissions, missing OAuth, or a temporary connector problem, the brief still renders and marks that source as degraded instead of failing the whole command.
 
 ## Local knowledge and read-only learning
 
@@ -135,19 +162,67 @@ By default it now treats your home directory as the primary read-only knowledge 
 
 It does not gain write access from that. File modifications still require explicit confirmation through the existing shell safety policy.
 
+It now also keeps a metadata map of discovered files, so unsupported or oversized files can still exist in the knowledge graph as visible Mac context even if their full content was not embedded.
+
 You can tune the knowledge scope in `~/.adv-archon/config.toml`:
 
 ```toml
 [knowledge]
 default_roots = ["~"]
+vault_roots = ["~/Obsidian", "~/Documents/Notes"]
 auto_index_on_search = true
 max_files_per_root = 2000
 max_file_bytes = 2000000
 search_limit = 5
+background_batch_size = 250
+background_interval_minutes = 60
+
+[profiles]
+default = "general"
+
+[profiles.work]
+description = "Clientes, propuestas y repos de trabajo"
+knowledge_roots = ["~/Desktop", "~/Documents"]
+vault_roots = ["~/Obsidian/Work"]
 
 [ui]
 show_context_panel = true
 operator_max_tool_steps = 8
+```
+
+## Profiles and Markdown vaults
+
+ADV ARCHON can keep an active profile between launches:
+
+```text
+/profile status
+/profile work
+/profile research
+```
+
+The active profile affects:
+
+- the context shown to the agent
+- the default read-only knowledge roots
+- the Markdown or Obsidian vault roots used by `/vault` and natural-language vault searches
+
+Examples:
+
+```text
+busca en mi vault de obsidian todo lo relacionado con acme
+```
+
+```text
+/vault propuesta acme
+```
+
+Maintenance commands:
+
+```bash
+adv-archon knowledge status
+adv-archon knowledge run-batch
+adv-archon knowledge search "atomic habits"
+adv-archon knowledge install-agent
 ```
 
 ## Personal assistant connectors
@@ -156,7 +231,7 @@ ADV ARCHON can now use native macOS apps in supervised mode:
 
 - Calendar: upcoming events
 - Reminders: list and create reminders
-- Notes: search note contents
+- Notes: search contents and create notes after confirmation
 - Contacts: search people by name, email, or phone
 - Mail: draft emails after confirmation
 
@@ -175,10 +250,88 @@ busca en mis notas todo lo relacionado con propuesta acme
 ```
 
 ```text
+hazme una nota sobre ~/Desktop/Libros/atomic-habits.pdf
+```
+
+```text
+crea una nota titulada Ideas ADV que diga revisar Gmail y Drive
+```
+
+```text
 prepara un borrador de correo para este cliente con seguimiento de la propuesta
 ```
 
 macOS may ask your terminal for access to Calendar, Reminders, Notes, Contacts, or Mail the first time.
+
+## Google Workspace connectors
+
+ADV ARCHON can also use Google Workspace in supervised mode:
+
+- Gmail: search and read threads, plus draft creation with confirmation
+- Google Calendar: list events and create events with confirmation
+- Google Drive: search files and read supported text content
+
+Setup:
+
+1. Create a Google OAuth desktop client in Google Cloud.
+2. Save the JSON credentials file at:
+
+```text
+~/.adv-archon/google-client-secret.json
+```
+
+3. On first real use, ADV ARCHON will open the local OAuth flow in the browser and store the token at:
+
+```text
+~/.adv-archon/google-token.json
+```
+
+Example prompts:
+
+```text
+qué correos importantes tengo en gmail
+```
+
+```text
+qué tengo mañana en google calendar
+```
+
+```text
+busca en google drive la propuesta de acme
+```
+
+```text
+crea un evento en google calendar para mañana a las 10 con acme
+```
+
+## Local web library and background research
+
+ADV ARCHON can now keep a separate local library of external web sources in `~/.adv-archon/web-library.db`.
+
+That web library is intentionally separate from the Mac knowledge base:
+
+- your Mac files remain the primary private source of truth
+- web sources are supporting context, perspective, and external reality checks
+- everything saved from the web stays local on disk
+
+Useful commands:
+
+```bash
+adv-archon research status
+adv-archon research run-once "ai consulting spain" "llm agents market"
+adv-archon research search "consultoria ia"
+adv-archon research install-agent "ai consulting spain" "llm agents market"
+```
+
+Natural-language examples:
+
+```text
+guarda una búsqueda web sobre consultoría IA en españa
+```
+
+```text
+busca en tu biblioteca web todo lo relacionado con agentes
+```
 
 ## Browser automation
 

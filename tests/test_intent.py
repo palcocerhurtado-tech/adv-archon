@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from adv_archon.core.context import GitContext, RuntimeContext, WorkingSet
-from adv_archon.core.intent import IntentRouter
+from adv_archon.core.intent import IntentRouter, looks_like_compliance_request
 
 
 def test_intent_router_detects_coding_repo_context() -> None:
@@ -41,6 +41,16 @@ def test_intent_router_detects_document_query() -> None:
     assert analysis.needs_knowledge is True
 
 
+def test_intent_router_marks_desktop_note_request_as_knowledge_heavy() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze(
+        "hazme unos apuntes sobre el libro atomic habits del escritorio"
+    )
+
+    assert analysis.needs_knowledge is True
+
+
 def test_intent_router_detects_browser_automation_query() -> None:
     router = IntentRouter()
 
@@ -48,6 +58,32 @@ def test_intent_router_detects_browser_automation_query() -> None:
 
     assert analysis.needs_plan is True
     assert "keywords de navegador/automatizacion" in analysis.reasons
+
+
+def test_intent_router_detects_explicit_pgou_request() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze(
+        "analiza este plano contra el PGOU de Madrid y dime si cumple normativa"
+    )
+
+    assert analysis.category == "compliance"
+    assert analysis.profile == "work"
+    assert analysis.needs_plan is True
+
+
+def test_generic_architecture_pdf_stays_in_documents_lane() -> None:
+    router = IntentRouter()
+
+    analysis = router.analyze("resume ~/Desktop/arquitectura-del-renacimiento.pdf")
+
+    assert analysis.category == "documents"
+
+
+def test_compliance_detection_requires_stronger_signals() -> None:
+    assert looks_like_compliance_request("quiero el PGOU de Madrid") is True
+    assert looks_like_compliance_request("resume este libro de arquitectura") is False
+    assert looks_like_compliance_request("plano de vivienda en Madrid") is False
 
 
 def test_intent_router_does_not_force_knowledge_for_calendar_tasks_query() -> None:
@@ -59,3 +95,59 @@ def test_intent_router_does_not_force_knowledge_for_calendar_tasks_query() -> No
 
     assert analysis.category == "assistant"
     assert analysis.needs_knowledge is False
+
+
+def test_intent_router_inherits_active_profile_when_relevant() -> None:
+    router = IntentRouter()
+    context = RuntimeContext(
+        cwd=Path("/tmp/home"),
+        now=__import__("datetime").datetime(2026, 4, 21, 9, 0),
+        git=GitContext(
+            repo_root=None,
+            branch=None,
+            dirty=False,
+            changed_files=0,
+            changed_paths=[],
+        ),
+        working_set=WorkingSet(
+            project_root=Path("/tmp/home"),
+            project_name="home",
+            markers=[],
+            top_entries=[],
+        ),
+        active_profile="work",
+    )
+
+    analysis = router.analyze("organiza mis prioridades para hoy", context)
+
+    assert analysis.category == "assistant"
+    assert analysis.profile == "work"
+
+
+def test_intent_router_keeps_capability_query_general_inside_repo() -> None:
+    router = IntentRouter()
+    context = RuntimeContext(
+        cwd=Path("/tmp/demo"),
+        now=__import__("datetime").datetime(2026, 4, 26, 14, 41),
+        git=GitContext(
+            repo_root=Path("/tmp/demo"),
+            branch="main",
+            dirty=True,
+            changed_files=31,
+            changed_paths=["src/app.py"],
+        ),
+        working_set=WorkingSet(
+            project_root=Path("/tmp/demo"),
+            project_name="demo",
+            markers=["pyproject.toml"],
+            top_entries=["src/", "README.md"],
+        ),
+        active_profile="coding",
+    )
+
+    analysis = router.analyze("que puedes hacer ?", context)
+
+    assert analysis.category == "chat"
+    assert analysis.profile == "general"
+    assert analysis.needs_plan is False
+    assert analysis.needs_shell is False

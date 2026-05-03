@@ -58,6 +58,7 @@ def create_macos_app_bundle(
         "fi",
         f"cd '{resolved_project_root}'",
         f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
+        "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
         *qt_plugin_exports,
         'exec "$UV" run python -m adv_archon.main desktop "$@"',
         "",

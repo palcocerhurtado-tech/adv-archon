@@ -334,3 +334,193 @@ def _wrap_text(text: str, width_mm: float, pdf: FPDF, font: str, size: float) ->
     if current:
         lines.append(current)
     return lines or [""]
+
+
+# ── Expediente PDF (direct, no LLM roundtrip) ────────────────────────────────
+
+def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None) -> Path:
+    """
+    Generate a professional compliance report PDF directly from an Expediente,
+    using site_context and analysis_result already stored in the record.
+    No LLM call required.
+    """
+    import json
+
+    municipality = expediente.municipality or expediente.address or "Municipio desconocido"
+    plan_name = Path(expediente.plan_path).name if expediente.plan_path else "Sin plano"
+
+    # Parse stored JSON fields
+    site_ctx: dict[str, Any] = {}
+    if expediente.site_context:
+        try:
+            site_ctx = json.loads(expediente.site_context)
+        except (json.JSONDecodeError, TypeError):
+            pass
+
+    analysis: dict[str, Any] = {}
+    if expediente.analysis_result:
+        try:
+            analysis = json.loads(expediente.analysis_result)
+        except (json.JSONDecodeError, TypeError):
+            # If stored as plain text, wrap it
+            analysis = {"summary": expediente.analysis_result, "annotations": [], "full_analysis": expediente.analysis_result}
+
+    summary = analysis.get("summary", "Análisis pendiente.")
+    annotations = analysis.get("annotations", [])
+    full_analysis = analysis.get("full_analysis", analysis.get("raw_analysis", ""))
+
+    # Default output path: Desktop
+    if output_path is None:
+        stem = Path(expediente.plan_path).stem if expediente.plan_path else "expediente"
+        safe_muni = municipality.lower().replace(" ", "_")[:30]
+        from datetime import datetime as _dt
+        ts = _dt.now().strftime("%Y%m%d_%H%M")
+        output_path = Path.home() / "Desktop" / f"informe_{safe_muni}_{stem}_{ts}.pdf"
+
+    pdf = ArchonPDF(municipality=municipality, plan_name=plan_name)
+    pdf.add_page()
+
+    # ── Cover: expediente metadata ────────────────────────────────────────
+    pdf.set_font(pdf._fn, "B", 20)
+    pdf.set_text_color(*_C_ACCENT)
+    pdf.cell(0, 12, "INFORME DE CUMPLIMIENTO NORMATIVO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font(pdf._fn, "B", 13)
+    pdf.set_text_color(*_C_DARK)
+    pdf.cell(0, 8, _clean_text(expediente.title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(2)
+
+    from datetime import datetime as _dt2
+    try:
+        dt = _dt2.fromisoformat(expediente.created_at)
+        fecha_exp = dt.strftime("%d/%m/%Y")
+    except (ValueError, AttributeError):
+        fecha_exp = str(expediente.created_at or "")[:10]
+
+    cover_rows = [
+        ("Dirección", expediente.address or "-"),
+        ("Municipio", municipality),
+        ("Provincia", expediente.province or "-"),
+        ("Ref. catastral", expediente.cadastral_ref or "-"),
+        ("Plano analizado", plan_name),
+        ("Fecha expediente", fecha_exp),
+    ]
+    if expediente.latitude and expediente.longitude:
+        cover_rows.insert(4, ("Coordenadas GPS", f"{expediente.latitude:.6f}, {expediente.longitude:.6f}"))
+
+    col_w = [52, 120]
+    for label, value in cover_rows:
+        pdf.set_fill_color(*_C_LIGHT_BG)
+        pdf.set_font(pdf._fn, "B", 9)
+        pdf.cell(col_w[0], 7, f"  {label}", border=1, fill=True)
+        pdf.set_font(pdf._fn, "", 9)
+        pdf.set_fill_color(*_C_WHITE)
+        pdf.cell(col_w[1], 7, f"  {_clean_text(str(value))}", border=1, fill=True,
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(6)
+
+    # ── Parcel data from site_context ─────────────────────────────────────
+    parcel = site_ctx.get("parcel_detail") or {}
+    if isinstance(parcel, dict) and not parcel.get("error") and any(parcel.values()):
+        _section_title(pdf, "DATOS OFICIALES DE PARCELA (CATASTRO)")
+        parcel_rows = [
+            ("Superficie m²", str(parcel.get("surface_m2") or "-")),
+            ("Año construcción", str(parcel.get("construction_year") or "-")),
+            ("Plantas sobre rasante", str(parcel.get("floors_above") or "-")),
+            ("Plantas bajo rasante", str(parcel.get("floors_below") or "-")),
+            ("Uso catastral", str(parcel.get("use_detail") or "-")),
+        ]
+        for label, value in parcel_rows:
+            pdf.set_fill_color(*_C_LIGHT_BG)
+            pdf.set_font(pdf._fn, "B", 9)
+            pdf.cell(60, 6, f"  {label}", border=1, fill=True)
+            pdf.set_font(pdf._fn, "", 9)
+            pdf.set_fill_color(*_C_WHITE)
+            pdf.cell(112, 6, f"  {_clean_text(value)}", border=1, fill=True,
+                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.ln(5)
+
+    # ── Legal checks panel ────────────────────────────────────────────────
+    legal_checks: list[dict[str, Any]] = site_ctx.get("legal_checks", [])
+    if legal_checks:
+        _section_title(pdf, "PANEL DE VERIFICACION SECTORIAL")
+        _legal_checks_table(pdf, legal_checks)
+        pdf.ln(4)
+
+    # ── Summary ───────────────────────────────────────────────────────────
+    _section_title(pdf, "RESUMEN EJECUTIVO")
+    _summary_box(pdf, summary if summary else "Análisis pendiente — ejecuta 'Analizar' primero.")
+    pdf.ln(4)
+
+    # ── Annotations table ─────────────────────────────────────────────────
+    if annotations:
+        _section_title(pdf, "TABLA DE VERIFICACION NORMATIVA")
+        _annotations_table(pdf, annotations)
+        pdf.ln(4)
+
+    # ── Full analysis ─────────────────────────────────────────────────────
+    if full_analysis:
+        _section_title(pdf, "ANALISIS DETALLADO")
+        _full_analysis_block(pdf, full_analysis)
+
+    pdf.ln(4)
+    _legend(pdf)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf.output(str(output_path))
+    return output_path
+
+
+def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:
+    _STATUS_CHECK_COLOR = {
+        "ready": _C_OK,
+        "conditional": _C_WARN,
+        "pending_review": _C_INFO,
+        "not_applicable": (160, 160, 160),
+    }
+    _STATUS_CHECK_LABEL = {
+        "ready": "OK",
+        "conditional": "REV",
+        "pending_review": "PEN",
+        "not_applicable": "N/A",
+    }
+    headers = ["Verificación", "Estado", "Detalle"]
+    col_w = [58, 18, 98]
+
+    pdf.set_fill_color(*_C_HEADER_BG)
+    pdf.set_text_color(*_C_WHITE)
+    pdf.set_font(pdf._fn, "B", 8)
+    for header, w in zip(headers, col_w, strict=True):
+        pdf.cell(w, 7, f"  {header}", border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(*_C_BLACK)
+
+    for idx, check in enumerate(checks):
+        name = _clean_text(str(check.get("name") or check.get("check") or ""))
+        status = str(check.get("status") or "pending_review")
+        detail = _clean_text(str(check.get("detail") or check.get("description") or ""))
+
+        color = _STATUS_CHECK_COLOR.get(status, _C_INFO)
+        label = _STATUS_CHECK_LABEL.get(status, "?")
+
+        fill_color = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        pdf.set_fill_color(*fill_color)
+        pdf.set_font(pdf._fn, "", 8)
+
+        x0 = pdf.get_x()
+        y0 = pdf.get_y()
+        if y0 + 7 > pdf.h - pdf.b_margin - 5:
+            pdf.add_page()
+            y0 = pdf.get_y()
+
+        pdf.cell(col_w[0], 7, f"  {name}", border=1, fill=True)
+
+        pdf.set_fill_color(*color)
+        pdf.set_text_color(*_C_WHITE)
+        pdf.set_font(pdf._fn, "B", 7)
+        pdf.cell(col_w[1], 7, label, border=1, fill=True, align="C")
+
+        pdf.set_fill_color(*fill_color)
+        pdf.set_text_color(*_C_BLACK)
+        pdf.set_font(pdf._fn, "", 8)
+        pdf.cell(col_w[2], 7, f"  {detail[:70]}", border=1, fill=True,
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)

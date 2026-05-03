@@ -190,6 +190,8 @@ def launch_desktop_app(
                 self.resize(1280, 860)
 
             self._compliance = ComplianceSession()
+            self._active_exp_store: Any = None   # set when expediente analysis starts
+            self._active_exp_id: str = ""
             self._warmup_agent_ref: tuple[Any, Any] | None = None
 
             self._confirm_bridge   = ConfirmBridge()
@@ -1187,15 +1189,32 @@ def launch_desktop_app(
                 return
             lowered = text.lower()
             if any(kw in lowered for kw in ("cumple", "incumple", "revisar", "análisis")):
-                # Extract approximate summary from response text
                 summary_snippet = text[:300].replace("\n", " ").strip()
-                self._compliance.mark_done(
-                    result={
-                        "summary": summary_snippet,
-                        "annotations": [],   # populated by tool result in real flow
-                    }
-                )
+                result = {
+                    "summary": summary_snippet,
+                    "annotations": [],
+                    "full_analysis": text,
+                }
+                self._compliance.mark_done(result=result)
                 self._refresh_compliance_ui()
+                # Persist result to active expediente so Exportar works instantly
+                if self._active_exp_store and self._active_exp_id:
+                    try:
+                        import dataclasses as _dc
+                        import json as _json
+                        exp = self._active_exp_store.get(self._active_exp_id)
+                        if exp:
+                            updated = _dc.replace(
+                                exp,
+                                analysis_result=_json.dumps(result, ensure_ascii=False),
+                                status="analizado",
+                            )
+                            self._active_exp_store.update(updated)
+                    except Exception:
+                        pass
+                    finally:
+                        self._active_exp_id = ""
+                        self._active_exp_store = None
 
         def _export_compliance_report(self) -> None:
             if self._compliance.pdf_path is None or not self._compliance.municipality:
@@ -1343,6 +1362,9 @@ def launch_desktop_app(
                         "y el municipio indicado."
                     )
                     prompt = "\n".join(parts)
+                # Track active expediente so result can be saved on completion
+                self._active_exp_store = store
+                self._active_exp_id = eid
                 dlg.accept()
                 # Auto-submit after the dialog event loop unwinds
                 QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
@@ -1351,13 +1373,19 @@ def launch_desktop_app(
                 exp = store.get(eid)
                 if not exp:
                     return
-                prompt = (
-                    f"Exporta el informe de cumplimiento del expediente «{exp.title}» "
-                    f"(municipio: {exp.municipality or '?'}) como PDF profesional "
-                    "usando plan_compliance_export."
-                )
-                dlg.accept()
-                QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
+                # Generate PDF directly — no LLM call, instant
+                try:
+                    from adv_archon.core.report_generator import generate_expediente_pdf
+                    pdf_path = generate_expediente_pdf(exp)
+                    import dataclasses as _dc
+                    updated = _dc.replace(exp, report_path=str(pdf_path), status="informe_generado")
+                    store.update(updated)
+                    detail_panel.load_expediente(updated)
+                    import subprocess as _sp
+                    _sp.Popen(["open", str(pdf_path)])   # macOS: open with Preview
+                except Exception as exc:
+                    from PySide6.QtWidgets import QMessageBox as _MBX
+                    _MBX.warning(dlg, "Error al exportar", str(exc))
 
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),

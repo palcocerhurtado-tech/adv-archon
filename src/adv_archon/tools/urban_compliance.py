@@ -438,7 +438,8 @@ class UrbanComplianceTools:
         response = self._llm.complete(
             [LLMMessage(role="user", content=user_message)],
             system_prompt=system_prompt,
-            task="reasoning",
+            task="documents",
+            prefer_local=True,
         )
 
         annotations = _parse_annotations(response.text)

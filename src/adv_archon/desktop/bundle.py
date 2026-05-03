@@ -3,7 +3,6 @@ from __future__ import annotations
 import plistlib
 import shutil
 import stat
-import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -40,21 +39,30 @@ def create_macos_app_bundle(
     resources_path.mkdir(parents=True, exist_ok=True)
     macos_path.mkdir(parents=True, exist_ok=True)
 
-    executable = (python_executable or Path(sys.executable)).expanduser()
-    launcher = "\n".join(
-        [
-            "#!/bin/zsh",
-            "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"",
-            f"cd '{resolved_project_root}'",
-            f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
-            *((
-                f"export QT_PLUGIN_PATH='{qt_plugins_path}'",
-                f"export QT_QPA_PLATFORM_PLUGIN_PATH='{qt_plugins_path / 'platforms'}'",
-            ) if qt_plugins_path is not None else ()),
-            f"exec '{executable}' -m adv_archon.main desktop \"$@\"",
-            "",
+    qt_plugin_exports: list[str] = []
+    if qt_plugins_path is not None:
+        qt_plugin_exports = [
+            f"export QT_PLUGIN_PATH='{qt_plugins_path}'",
+            f"export QT_QPA_PLATFORM_PLUGIN_PATH='{qt_plugins_path / 'platforms'}'",
         ]
-    )
+
+    launcher_lines = [
+        "#!/bin/sh",
+        "# Find uv — common locations",
+        'for UV in "$HOME/.cargo/bin/uv" "/opt/homebrew/bin/uv" "/usr/local/bin/uv" "$(command -v uv 2>/dev/null)"; do',
+        '    [ -x "$UV" ] && break',
+        "done",
+        'if [ ! -x "$UV" ]; then',
+        "    osascript -e 'display alert \"ADV ARCHON\" message \"No se encontró uv. Instálalo con: curl -LsSf https://astral.sh/uv/install.sh | sh\" as critical'",
+        "    exit 1",
+        "fi",
+        f"cd '{resolved_project_root}'",
+        f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
+        *qt_plugin_exports,
+        'exec "$UV" run python -m adv_archon.main desktop "$@"',
+        "",
+    ]
+    launcher = "\n".join(launcher_lines)
     launcher_path.write_text(launcher, encoding="utf-8")
     current_mode = launcher_path.stat().st_mode
     launcher_path.chmod(current_mode | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
@@ -74,6 +82,8 @@ def create_macos_app_bundle(
         "CFBundlePackageType": "APPL",
         "LSMinimumSystemVersion": "13.0",
         "NSHighResolutionCapable": True,
+        "NSAppleEventsUsageDescription": "ADV ARCHON necesita Apple Events para funcionar correctamente.",
+        "NSDocumentsFolderUsageDescription": "ADV ARCHON accede a tus documentos para analizar planos.",
     }
     if bundled_icon_path is not None:
         info_plist["CFBundleIconFile"] = bundled_icon_path.name

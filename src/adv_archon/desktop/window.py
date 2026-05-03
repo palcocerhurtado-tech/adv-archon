@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import suppress
 from html import escape
 from importlib import import_module
@@ -7,6 +8,12 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
+from adv_archon.core.expediente import ExpedienteStore
+from adv_archon.desktop.expediente_panel import (
+    ExpedienteDetailPanel,
+    ExpedienteListPanel,
+    NewExpedienteDialog,
+)
 from adv_archon.desktop.models import (
     DesktopAttachment,
     DesktopChatMessage,
@@ -28,7 +35,9 @@ QObject: Any = None
 QThread: Any = None
 Signal: Any = None
 QAbstractItemView: Any = None
+QDialog: Any = None
 QFileDialog: Any = None
+QFrame: Any = None
 QHBoxLayout: Any = None
 QLabel: Any = None
 QListWidget: Any = None
@@ -39,6 +48,7 @@ QPlainTextEdit: Any = None
 QPushButton: Any = None
 QSplitter: Any = None
 QStatusBar: Any = None
+QTabWidget: Any = None
 QTextBrowser: Any = None
 QVBoxLayout: Any = None
 QWidget: Any = None
@@ -51,7 +61,9 @@ if PYSIDE6_AVAILABLE:
     QThread = _qt_core.QThread
     Signal = _qt_core.Signal
     QAbstractItemView = _qt_widgets.QAbstractItemView
+    QDialog = _qt_widgets.QDialog
     QFileDialog = _qt_widgets.QFileDialog
+    QFrame = _qt_widgets.QFrame
     QHBoxLayout = _qt_widgets.QHBoxLayout
     QLabel = _qt_widgets.QLabel
     QListWidget = _qt_widgets.QListWidget
@@ -62,6 +74,7 @@ if PYSIDE6_AVAILABLE:
     QPushButton = _qt_widgets.QPushButton
     QSplitter = _qt_widgets.QSplitter
     QStatusBar = _qt_widgets.QStatusBar
+    QTabWidget = _qt_widgets.QTabWidget
     QTextBrowser = _qt_widgets.QTextBrowser
     QVBoxLayout = _qt_widgets.QVBoxLayout
     QWidget = _qt_widgets.QWidget
@@ -153,18 +166,27 @@ if PYSIDE6_AVAILABLE:
             self._active_threads: list[tuple[Any, Any]] = []
 
             self.setWindowTitle("ADV ARCHON Desktop")
-            self.resize(1120, 760)
+            self.resize(1200, 800)
+
+            # Expediente store — persisted in the same data dir as the rest of the app
+            _data_dir = Path(os.getenv("ADV_ARCHON_HOME", Path.home() / ".adv-archon"))
+            _data_dir.mkdir(parents=True, exist_ok=True)
+            self._exp_store = ExpedienteStore(_data_dir / "expedientes.db")
 
             root = QWidget()
-            layout = QVBoxLayout(root)
-            layout.setContentsMargins(16, 16, 16, 16)
-            layout.setSpacing(12)
+            root_layout = QVBoxLayout(root)
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            root_layout.setSpacing(0)
 
-            header = QLabel(
-                "ADV ARCHON Desktop\n"
-                "Chat local inicial con adjuntos, selector de archivos y drag-and-drop."
-            )
-            layout.addWidget(header)
+            tabs = QTabWidget()
+            tabs.setTabPosition(QTabWidget.TabPosition.North)
+            root_layout.addWidget(tabs)
+
+            # ── Tab 1: Chat ────────────────────────────────────────────────
+            chat_tab = QWidget()
+            layout = QVBoxLayout(chat_tab)
+            layout.setContentsMargins(16, 12, 16, 16)
+            layout.setSpacing(12)
 
             splitter = QSplitter(Qt.Orientation.Horizontal)
             layout.addWidget(splitter, 1)
@@ -232,16 +254,46 @@ if PYSIDE6_AVAILABLE:
             splitter.addWidget(attachments_panel)
             splitter.setSizes([760, 320])
 
+            tabs.addTab(chat_tab, "Chat")
+
+            # ── Tab 2: Expedientes ─────────────────────────────────────────
+            exp_tab = QWidget()
+            exp_layout = QHBoxLayout(exp_tab)
+            exp_layout.setContentsMargins(0, 0, 0, 0)
+            exp_layout.setSpacing(0)
+
+            self._exp_list_panel = ExpedienteListPanel(
+                on_select=self._on_exp_select,
+                on_new=self._on_exp_new,
+                on_delete=self._on_exp_delete,
+            )
+            exp_layout.addWidget(self._exp_list_panel)
+
+            exp_sep = QFrame()
+            exp_sep.setFrameShape(QFrame.Shape.VLine)
+            exp_layout.addWidget(exp_sep)
+
+            self._exp_detail_panel = ExpedienteDetailPanel(
+                on_attach_plan=self._on_exp_attach_plan,
+                on_analyze=self._on_exp_analyze,
+                on_export=self._on_exp_export,
+            )
+            exp_layout.addWidget(self._exp_detail_panel, 1)
+
+            tabs.addTab(exp_tab, "Expedientes")
+
+            self._exp_list_panel.populate(self._exp_store.list_all())
+
             self.setCentralWidget(root)
             self.setStatusBar(QStatusBar())
-            self.statusBar().showMessage("UI desktop inicial lista.")
+            self.statusBar().showMessage("ADV ARCHON listo.")
 
             self._append_message(
                 DesktopChatMessage(
                     role="system",
                     text=(
-                        "Capa desktop preparada. Esta ventana todavía no está conectada al "
-                        "runtime compartido ni al pipeline de streaming."
+                        "Bienvenido a ADV ARCHON. Puedes chatear aquí o gestionar "
+                        "expedientes en la pestaña Expedientes."
                     ),
                 )
             )
@@ -363,6 +415,89 @@ if PYSIDE6_AVAILABLE:
             self._remove_button.setDisabled(is_busy)
             self._clear_button.setDisabled(is_busy)
             self.statusBar().showMessage(status_message)
+
+        # ── Expediente callbacks ───────────────────────────────────────────
+
+        def _on_exp_new(self) -> None:
+            dlg = NewExpedienteDialog(self)
+            if dlg.exec() != QDialog.DialogCode.Accepted:
+                return
+            exp = self._exp_store.create(
+                title=dlg.title_text(),
+                address=dlg.address_text(),
+                notes=dlg.notes_text(),
+            )
+            self._exp_list_panel.populate(self._exp_store.list_all())
+            self._exp_detail_panel.load_expediente(exp)
+            self.statusBar().showMessage(f"Expediente «{exp.title}» creado.")
+
+        def _on_exp_select(self, expediente_id: str) -> None:
+            exp = self._exp_store.get(expediente_id)
+            if exp:
+                self._exp_detail_panel.load_expediente(exp)
+
+        def _on_exp_delete(self, expediente_id: str) -> None:
+            exp = self._exp_store.get(expediente_id)
+            if not exp:
+                return
+            reply = QMessageBox.question(
+                self,
+                "Eliminar expediente",
+                f"¿Eliminar «{exp.title}»? Esta acción no se puede deshacer.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            )
+            if reply == QMessageBox.StandardButton.Yes:
+                self._exp_store.delete(expediente_id)
+                self._exp_list_panel.populate(self._exp_store.list_all())
+                self._exp_detail_panel.clear()
+                self.statusBar().showMessage("Expediente eliminado.")
+
+        def _on_exp_attach_plan(self, expediente_id: str) -> None:
+            paths, _ = QFileDialog.getOpenFileNames(
+                self,
+                "Adjuntar plano arquitectónico",
+                str(Path.home()),
+                "Planos (*.pdf *.dwg *.dxf *.png *.jpg *.jpeg);;Todos (*)",
+            )
+            if not paths:
+                return
+            exp = self._exp_store.get(expediente_id)
+            if not exp:
+                return
+            import dataclasses
+            exp = dataclasses.replace(exp, plan_path=paths[0])
+            self._exp_store.update(exp)
+            self._exp_detail_panel.load_expediente(exp)
+            self.statusBar().showMessage(f"Plano adjuntado: {Path(paths[0]).name}")
+
+        def _on_exp_analyze(self, expediente_id: str) -> None:
+            exp = self._exp_store.get(expediente_id)
+            if not exp:
+                return
+            # Pre-fill chat with expediente context so the user can trigger analysis
+            self.statusBar().showMessage("Abre la pestaña Chat para ejecutar el análisis.")
+            prompt = (
+                f"Analiza el plano del expediente «{exp.title}».\n"
+                f"Dirección: {exp.address}\n"
+                f"Municipio: {exp.municipality or '(pendiente de resolver)'}\n"
+                f"Ref. catastral: {exp.cadastral_ref or '(pendiente)'}\n"
+                f"Plano: {exp.plan_path}\n\n"
+                "Ejecuta plan_compliance_check con ese plano y el municipio indicado."
+            )
+            self._prompt_input.setPlainText(prompt)
+            # Switch to chat tab
+            self.centralWidget().layout().itemAt(0).widget().setCurrentIndex(0)
+
+        def _on_exp_export(self, expediente_id: str) -> None:
+            exp = self._exp_store.get(expediente_id)
+            if not exp:
+                return
+            QMessageBox.information(
+                self,
+                "Exportar informe",
+                f"Usa el comando /export o solicítalo en el chat para generar el PDF "
+                f"del expediente «{exp.title}».",
+            )
 
 
 else:

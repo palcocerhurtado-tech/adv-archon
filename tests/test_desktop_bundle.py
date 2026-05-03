@@ -35,7 +35,8 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
     assert result.icon_path.exists()
 
     launcher = result.launcher_path.read_text(encoding="utf-8")
-    assert str(python_executable) in launcher
+    assert "#!/bin/sh" in launcher
+    assert "uv" in launcher                         # uses uv run, not hardcoded Python
     assert f"cd '{project_root}'" in launcher
     assert f"export PYTHONPATH='{project_root / 'src'}':\"$PYTHONPATH\"" in launcher
     assert f"export QT_PLUGIN_PATH='{qt_platforms.parent}'" in launcher

@@ -2550,6 +2550,7 @@ class Agent:
                 content=self._format_message(message),
             )
             for message in self._session.messages
+            if self._format_message(message).strip()
         ]
 
     @staticmethod

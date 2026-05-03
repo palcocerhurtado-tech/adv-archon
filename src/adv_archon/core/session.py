@@ -30,6 +30,8 @@ class SessionStore:
         return self._messages[-limit:]
 
     def append(self, message: SessionMessage) -> None:
+        if not message.content or not message.content.strip():
+            return
         stamped = SessionMessage(
             role=message.role,
             content=message.content,

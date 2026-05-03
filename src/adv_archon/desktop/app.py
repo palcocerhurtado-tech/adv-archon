@@ -1314,24 +1314,38 @@ def launch_desktop_app(
                 exp = store.get(eid)
                 if not exp:
                     return
-                parts = [f"Analiza el expediente «{exp.title}»."]
-                parts.append(f"Dirección: {exp.address}")
-                if exp.municipality:
-                    parts.append(f"Municipio: {exp.municipality}, {exp.province}")
-                if exp.cadastral_ref:
-                    parts.append(f"Ref. catastral: {exp.cadastral_ref}")
-                if exp.latitude and exp.longitude:
-                    parts.append(f"Coordenadas: {exp.latitude:.6f}, {exp.longitude:.6f}")
-                parts.append(
-                    "\nEjecuta plan_compliance_check con el plano adjunto "
-                    "y el municipio indicado."
-                )
+                # Attach plan PDF to compliance session so result card appears
                 if exp.plan_path:
                     plan = Path(exp.plan_path)
                     if plan.exists():
+                        self._compliance.attach_pdf(plan)
                         self._add_attachments([plan])
-                self._input.setPlainText("\n".join(parts))
-                dlg.accept()   # close dialog, switch user to chat
+                # Wire municipality / coordinates into compliance session
+                if exp.latitude and exp.longitude:
+                    self._compliance.set_coordinates(exp.latitude, exp.longitude)
+                if exp.municipality:
+                    self._compliance.set_municipality(exp.municipality)
+                # Build the best prompt based on available data
+                if exp.latitude and exp.longitude and exp.plan_path:
+                    plan_path = Path(exp.plan_path)
+                    prompt = build_coordinate_compliance_prompt(
+                        plan_path, exp.latitude, exp.longitude
+                    )
+                else:
+                    parts = [f"Analiza el expediente «{exp.title}»."]
+                    parts.append(f"Dirección: {exp.address}")
+                    if exp.municipality:
+                        parts.append(f"Municipio: {exp.municipality}")
+                    if exp.cadastral_ref:
+                        parts.append(f"Ref. catastral: {exp.cadastral_ref}")
+                    parts.append(
+                        "Usa plan_compliance_check con el plano adjunto "
+                        "y el municipio indicado."
+                    )
+                    prompt = "\n".join(parts)
+                dlg.accept()
+                # Auto-submit after the dialog event loop unwinds
+                QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
 
             def _on_export(eid: str) -> None:
                 exp = store.get(eid)
@@ -1342,8 +1356,8 @@ def launch_desktop_app(
                     f"(municipio: {exp.municipality or '?'}) como PDF profesional "
                     "usando plan_compliance_export."
                 )
-                self._input.setPlainText(prompt)
                 dlg.accept()
+                QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
 
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),

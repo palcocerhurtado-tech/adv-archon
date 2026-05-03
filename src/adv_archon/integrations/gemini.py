@@ -65,6 +65,7 @@ class GeminiClient:
             "contents": [
                 {"role": message.role, "parts": [{"text": message.content}]}
                 for message in messages
+                if message.content
             ],
             "generationConfig": {
                 "temperature": self.temperature,

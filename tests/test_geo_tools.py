@@ -54,6 +54,18 @@ _ROAD_NONE = {
     "error": "",
 }
 
+_ZONING_TEXT = """
+Artículo 4. Ordenanza residencial Z-1.
+
+Clasificación del suelo: Suelo urbano consolidado.
+Calificación urbanística: Residencial colectiva.
+Ordenanza de aplicación: Z-1 Residencial.
+Edificabilidad máxima: 1,50 m2/m2.
+Ocupación máxima: 60%.
+Altura máxima: 10 m.
+Retranqueos: según alineación oficial.
+"""
+
 
 class _StubGeoTools(GeoTools):
     def __init__(self, tmp_path: Path, payload: dict[str, object]) -> None:
@@ -157,3 +169,31 @@ def test_site_compliance_context_marks_pgou_ready_when_indexed(tmp_path: Path) -
     assert result.payload["pgou_indexed"] is True
     assert result.payload["legal_readiness"] == "preliminary-ready"
     assert "base suficiente para un análisis preliminar" in result.payload["legal_summary"]
+
+
+def test_site_compliance_context_adds_preliminary_parcel_zoning(tmp_path: Path) -> None:
+    tools = _StubGeoTools(
+        tmp_path,
+        {
+            "municipality": "Madrid",
+            "province": "Madrid",
+            "autonomous_community": "Comunidad de Madrid",
+            "display_location": "Madrid, Comunidad de Madrid",
+            "cadastral_ref": "1234567VK4713S0001AB",
+            "cadastral_address": "Calle Mayor 1",
+            "cadastral_use": "Residencial",
+            "resolution": "nominatim",
+            "confidence": "high",
+            "reasons": ["Municipio resuelto por Nominatim: Madrid"],
+        },
+    )
+    tools._pgou.index_text(_ZONING_TEXT, municipality="Madrid", source="test")
+
+    result = _site_context_with_offline_sectorials(tools, 40.4168, -3.7038)
+
+    zoning = result.payload["parcel_zoning"]
+    assert zoning["available"] is True
+    assert "Z-1" in zoning["ordinance"]
+    checks_by_code = {c["code"]: c for c in result.payload["legal_checks"]}
+    assert checks_by_code["parcel-zoning"]["status"] == "conditional"
+    assert "no cruza la parcela con planos" in checks_by_code["parcel-zoning"]["detail"]

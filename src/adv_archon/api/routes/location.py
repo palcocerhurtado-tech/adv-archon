@@ -11,6 +11,7 @@ from adv_archon.api.models import (
     FloodZoneDetail,
     Natura2000Detail,
     ParcelDetail,
+    ParcelZoningDetail,
 )
 from adv_archon.core.geo_store import GeoStore
 from adv_archon.tools.geo_tools import GeoTools
@@ -59,6 +60,7 @@ class SiteContextResponse(BaseModel):
     natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
     costas: CostasDetail = Field(default_factory=CostasDetail)
     carreteras: CarreterasDetail = Field(default_factory=CarreterasDetail)
+    parcel_zoning: ParcelZoningDetail = Field(default_factory=ParcelZoningDetail)
     next_step: str | None = None
     legal_readiness: str = ""
     legal_summary: str = ""
@@ -94,6 +96,7 @@ def resolve_location(
     p.pop("natura2000", None)
     p.pop("costas", None)
     p.pop("carreteras", None)
+    p.pop("parcel_zoning", None)
     return SiteContextResponse(**p)
 
 

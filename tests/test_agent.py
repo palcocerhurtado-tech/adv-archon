@@ -1327,6 +1327,13 @@ def test_deterministic_location_response_formats_pgou_context(tmp_path: Path) ->
             "cadastral_address": "Calle Mayor 1",
             "cadastral_use": "Residencial",
             "pgou_indexed": True,
+            "parcel_zoning": {
+                "queried": True,
+                "available": True,
+                "classification": "Suelo urbano consolidado",
+                "zoning": "Residencial colectiva",
+                "ordinance": "Z-1 Residencial",
+            },
             "next_step": (
                 "La normativa PGOU de Madrid ya está indexada. "
                 "Puedes usar plan_compliance_check directamente."
@@ -1360,6 +1367,8 @@ def test_deterministic_location_response_formats_pgou_context(tmp_path: Path) ->
     assert "- Estado jurídico preliminar: listo para análisis preliminar" in response.text
     assert "plan_compliance_check" in response.text
     assert "Referencia catastral: 1234567VK4713S0001AB" in response.text
+    assert "Zonificación PGOU preliminar" in response.text
+    assert "Z-1 Residencial" in response.text
     assert "Comprobaciones y afecciones a revisar" in response.text
 
 

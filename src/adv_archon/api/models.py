@@ -64,6 +64,36 @@ class CarreterasDetail(BaseModel):
     error: str = ""
 
 
+class ParcelZoningExcerpt(BaseModel):
+    """Small PGOU excerpt used as evidence for preliminary parcel zoning."""
+
+    article_ref: str = ""
+    title: str = ""
+    text: str = ""
+    source: str = ""
+
+
+class ParcelZoningDetail(BaseModel):
+    """Preliminary zoning clues extracted from indexed PGOU text."""
+
+    queried: bool = False
+    available: bool = False
+    classification: str = ""
+    zoning: str = ""
+    ordinance: str = ""
+    allowed_uses: list[str] = Field(default_factory=list)
+    buildability: str = ""
+    occupancy: str = ""
+    height: str = ""
+    setbacks: str = ""
+    source: str = "PGOU municipal indexado"
+    method: str = "búsqueda textual preliminar en normativa PGOU indexada"
+    requires_map_crossing: bool = True
+    confidence: str = "low"
+    excerpts: list[ParcelZoningExcerpt] = Field(default_factory=list)
+    error: str = ""
+
+
 # ── Compliance ────────────────────────────────────────────────────────────────
 
 class ComplianceAnnotation(BaseModel):
@@ -105,6 +135,7 @@ class SiteContextSummary(BaseModel):
     natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
     costas: CostasDetail = Field(default_factory=CostasDetail)
     carreteras: CarreterasDetail = Field(default_factory=CarreterasDetail)
+    parcel_zoning: ParcelZoningDetail = Field(default_factory=ParcelZoningDetail)
 
 
 class ComplianceCheckResponse(BaseModel):

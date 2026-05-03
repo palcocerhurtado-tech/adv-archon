@@ -479,6 +479,39 @@ def _format_site_context(ctx: dict[str, Any]) -> str:
         if pd.get("use_detail"):
             lines.append(f"Uso catastral: {pd['use_detail']}")
 
+    zoning = ctx.get("parcel_zoning") or {}
+    if isinstance(zoning, dict) and zoning.get("queried"):
+        if zoning.get("available"):
+            pieces: list[str] = []
+            for key, label in (
+                ("classification", "clasificación"),
+                ("zoning", "calificación/zona"),
+                ("ordinance", "ordenanza"),
+                ("buildability", "edificabilidad"),
+                ("occupancy", "ocupación"),
+                ("height", "altura"),
+                ("setbacks", "retranqueos/alineaciones"),
+            ):
+                value = str(zoning.get(key) or "").strip()
+                if value:
+                    pieces.append(f"{label}: {value}")
+            uses = zoning.get("allowed_uses") or []
+            if isinstance(uses, list) and uses:
+                use_text = ", ".join(str(use).strip() for use in uses if str(use).strip())
+                if use_text:
+                    pieces.append(f"usos: {use_text}")
+            if pieces:
+                lines.append(
+                    "Zonificación PGOU preliminar: "
+                    + "; ".join(pieces)
+                    + ". Requiere confirmar en planos/visor municipal."
+                )
+        else:
+            lines.append(
+                "Zonificación PGOU: no identificada automáticamente; confirmar "
+                "ordenanza y parámetros en planos/fichas municipales."
+            )
+
     fz = ctx.get("flood_zone") or {}
     if isinstance(fz, dict) and fz.get("queried"):
         in_flood = fz.get("in_flood_zone")
@@ -656,6 +689,7 @@ def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "legal_summary": payload.get("legal_summary", ""),
         "legal_checks": payload.get("legal_checks", []),
         "parcel_detail": payload.get("parcel_detail", {}),
+        "parcel_zoning": payload.get("parcel_zoning", {}),
         "flood_zone": payload.get("flood_zone", {}),
         "natura2000": payload.get("natura2000", {}),
         "costas": payload.get("costas", {}),

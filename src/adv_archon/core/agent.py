@@ -2372,6 +2372,7 @@ class Agent:
         legal_summary = str(payload.get("legal_summary") or "").strip()
         legal_checks = payload.get("legal_checks")
         parcel_detail = payload.get("parcel_detail") or {}
+        parcel_zoning = payload.get("parcel_zoning") or {}
         flood_zone = payload.get("flood_zone") or {}
         carreteras = payload.get("carreteras") or {}
 
@@ -2400,6 +2401,23 @@ class Agent:
                 lines.append(f"- Año de construcción: {parcel_detail['construction_year']}")
             if parcel_detail.get("floors_above") is not None:
                 lines.append(f"- Plantas sobre rasante: {parcel_detail['floors_above']}")
+
+        if isinstance(parcel_zoning, dict) and parcel_zoning.get("queried"):
+            if parcel_zoning.get("available"):
+                zoning_bits: list[str] = []
+                for key, label in (
+                    ("classification", "clasificación"),
+                    ("zoning", "calificación/zona"),
+                    ("ordinance", "ordenanza"),
+                ):
+                    value = str(parcel_zoning.get(key) or "").strip()
+                    if value:
+                        zoning_bits.append(f"{label}: {value}")
+                if zoning_bits:
+                    lines.append("- Zonificación PGOU preliminar: " + "; ".join(zoning_bits))
+                lines.append("- Zonificación exacta: confirmar en planos o visor municipal")
+            else:
+                lines.append("- Zonificación PGOU: no identificada automáticamente")
 
         # SNCZI flood zone result
         if isinstance(flood_zone, dict) and flood_zone.get("queried"):

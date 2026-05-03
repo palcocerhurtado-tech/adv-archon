@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from adv_archon.core.geo_store import GeoStore
+from adv_archon.core.parcel_zoning import query_parcel_zoning
 from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.site_context import LegalCheck, SiteContext
 from adv_archon.integrations import carreteras as _carreteras
@@ -246,6 +247,13 @@ class GeoTools:
                 }
         payload["carreteras"] = carreteras_data
 
+        parcel_zoning_data = query_parcel_zoning(
+            self._pgou,
+            municipality,
+            pgou_indexed=pgou_indexed,
+        )
+        payload["parcel_zoning"] = parcel_zoning_data
+
         legal_checks = self._build_legal_checks(
             payload,
             pgou_indexed=pgou_indexed,
@@ -256,6 +264,7 @@ class GeoTools:
             _natura_data=natura_data,
             _costas_data=costas_data,
             _carreteras_data=carreteras_data,
+            _parcel_zoning_data=parcel_zoning_data,
         )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
@@ -351,6 +360,7 @@ class GeoTools:
         _natura_data: dict[str, Any] | None = None,
         _costas_data: dict[str, Any] | None = None,
         _carreteras_data: dict[str, Any] | None = None,
+        _parcel_zoning_data: dict[str, Any] | None = None,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
@@ -376,6 +386,22 @@ class GeoTools:
             "in_affection_zone": None,
             "zones": [],
             "nearest_distance_m": None,
+            "error": "skipped",
+        }
+        parcel_zoning_data: dict[str, Any] = _parcel_zoning_data or {
+            "queried": False,
+            "available": False,
+            "classification": "",
+            "zoning": "",
+            "ordinance": "",
+            "allowed_uses": [],
+            "buildability": "",
+            "occupancy": "",
+            "height": "",
+            "setbacks": "",
+            "source": "PGOU municipal indexado",
+            "confidence": "low",
+            "excerpts": [],
             "error": "skipped",
         }
 
@@ -612,6 +638,59 @@ class GeoTools:
             )
             _roads_conf = "medium"
 
+        # Build preliminary parcel zoning status from indexed PGOU text.
+        _zoning_status: str
+        _zoning_detail: str
+        _zoning_action: str
+        _zoning_conf: str
+        _zoning_queried = parcel_zoning_data.get("queried", False)
+        _zoning_available = parcel_zoning_data.get("available", False)
+        if not pgou_indexed:
+            _zoning_status = "pending_review"
+            _zoning_detail = (
+                "No se puede identificar la clasificación, calificación u ordenanza "
+                "de parcela porque el PGOU municipal todavía no está indexado."
+            )
+            _zoning_action = (
+                "Indexar primero la normativa municipal y después contrastar la parcela "
+                "con los planos de ordenación o visor urbanístico municipal."
+            )
+            _zoning_conf = "medium"
+        elif not _zoning_queried or not _zoning_available:
+            _zoning_status = "pending_review"
+            _zoning_detail = (
+                "El PGOU está indexado, pero la búsqueda textual preliminar no ha "
+                "encontrado referencias claras a clasificación, calificación, ordenanza "
+                "o parámetros edificatorios aplicables. "
+                f"{parcel_zoning_data.get('error', '')}"
+            ).strip()
+            _zoning_action = (
+                "Revisar manualmente los planos de ordenación, la ficha de zona y la "
+                "ordenanza concreta de la parcela."
+            )
+            _zoning_conf = "low"
+        else:
+            found_parts = _format_zoning_parts(parcel_zoning_data)
+            excerpts = parcel_zoning_data.get("excerpts") or []
+            first_ref = ""
+            if excerpts and isinstance(excerpts[0], dict):
+                first_ref = str(excerpts[0].get("article_ref") or excerpts[0].get("title") or "")
+            _zoning_status = "conditional"
+            _zoning_detail = (
+                "Se han localizado indicios textuales en el PGOU indexado"
+                + (f" ({first_ref})" if first_ref else "")
+                + (f": {found_parts}." if found_parts else ".")
+                + " Este resultado es una lectura normativa preliminar: no cruza la "
+                "parcela con planos georreferenciados y no fija por sí solo la "
+                "ordenanza jurídica exacta."
+            )
+            _zoning_action = (
+                "Confirmar clasificación, calificación, ordenanza y parámetros en los "
+                "planos de ordenación, ficha urbanística o visor municipal antes de "
+                "emitir criterio definitivo."
+            )
+            _zoning_conf = str(parcel_zoning_data.get("confidence") or "medium")
+
         checks: list[LegalCheck] = [
             LegalCheck(
                 code="cadastral-identification",
@@ -662,20 +741,11 @@ class GeoTools:
             LegalCheck(
                 code="parcel-zoning",
                 title="Ordenanza y zona de parcela",
-                status="pending_review",
-                authority="Planeamiento municipal",
-                detail=(
-                    "La parcela ya está localizada, pero todavía no se ha identificado "
-                    "de forma automática "
-                    "la clasificación, calificación, ordenanza ni parámetros "
-                    "edificatorios concretos."
-                ),
-                recommended_action=(
-                    "Cruzar la parcela con los planos y fichas del PGOU para "
-                    "confirmar uso, edificabilidad, "
-                    "ocupación, altura, retranqueos y ordenanza."
-                ),
-                confidence="medium",
+                status=_zoning_status,  # type: ignore[arg-type]
+                authority=f"PGOU / normas urbanísticas de {municipality or 'municipio'}",
+                detail=_zoning_detail,
+                recommended_action=_zoning_action,
+                confidence=_zoning_conf,  # type: ignore[arg-type]
             ),
             LegalCheck(
                 code="hydraulic-domain",
@@ -771,3 +841,26 @@ class GeoTools:
             "los dos prerrequisitos clave: la identificación catastral y la normativa municipal "
             "operativa. Cualquier conclusión debe tomarse como preliminar."
         )
+
+
+def _format_zoning_parts(data: dict[str, Any]) -> str:
+    parts: list[str] = []
+    mapping = (
+        ("classification", "clasificación"),
+        ("zoning", "calificación/zona"),
+        ("ordinance", "ordenanza"),
+        ("buildability", "edificabilidad"),
+        ("occupancy", "ocupación"),
+        ("height", "altura"),
+        ("setbacks", "retranqueos/alineaciones"),
+    )
+    for key, label in mapping:
+        value = str(data.get(key) or "").strip()
+        if value:
+            parts.append(f"{label}: {value}")
+    uses = data.get("allowed_uses") or []
+    if isinstance(uses, list) and uses:
+        joined = ", ".join(str(use).strip() for use in uses[:4] if str(use).strip())
+        if joined:
+            parts.append(f"usos: {joined}")
+    return "; ".join(parts)

@@ -123,6 +123,19 @@ _ROAD_UNAVAILABLE = {
     "error": "connection timeout",
 }
 
+_ZONING_TEXT = """
+Artículo 4. Ordenanza residencial ZR-1.
+
+Clasificación del suelo: Suelo urbano consolidado.
+Calificación urbanística: Residencial colectiva.
+Ordenanza de aplicación: ZR-1 Residencial.
+Uso principal: residencial vivienda.
+Edificabilidad máxima: 1,20 m2/m2.
+Ocupación máxima: 40%.
+Altura máxima: 7 m y 2 plantas.
+Retranqueos: 3 m a linderos.
+"""
+
 
 def _make_geo_tools(tmp_path: Path) -> GeoTools:
     return GeoTools(
@@ -209,11 +222,13 @@ def test_site_compliance_context_full_flow_no_flood(tmp_path: Path) -> None:
     roads = p["carreteras"]
     assert roads["queried"] is True
     assert roads["in_affection_zone"] is False
+    assert p["parcel_zoning"]["queried"] is False
 
     # Legal checks
     checks_by_code = {c["code"]: c for c in p["legal_checks"]}
     assert checks_by_code["hydraulic-domain"]["status"] == "ready"
     assert checks_by_code["roads-servitudes"]["status"] == "ready"
+    assert checks_by_code["parcel-zoning"]["status"] == "pending_review"
     assert "aparece" in checks_by_code["hydraulic-domain"]["detail"].lower()
     assert checks_by_code["cadastral-identification"]["status"] == "ready"
     assert "245" in checks_by_code["cadastral-identification"]["detail"]
@@ -305,6 +320,26 @@ def test_legal_readiness_with_pgou_indexed(tmp_path: Path) -> None:
 
     assert result.payload["pgou_indexed"] is True
     assert result.payload["legal_readiness"] == "preliminary-ready"
+
+
+def test_site_compliance_context_pgou_zoning_textual_clues(tmp_path: Path) -> None:
+    """Indexed PGOU zoning text is exposed but remains a preliminary check."""
+    tools = _make_geo_tools(tmp_path)
+    tools._pgou.index_text(_ZONING_TEXT, municipality="Madrid", source="PGOU test")
+
+    result = _run_with_patches(tools, _FLOOD_NONE)
+
+    zoning = result.payload["parcel_zoning"]
+    assert zoning["queried"] is True
+    assert zoning["available"] is True
+    assert zoning["classification"] == "Suelo urbano consolidado"
+    assert "ZR-1" in zoning["ordinance"]
+
+    checks_by_code = {c["code"]: c for c in result.payload["legal_checks"]}
+    zoning_check = checks_by_code["parcel-zoning"]
+    assert zoning_check["status"] == "conditional"
+    assert "lectura normativa preliminar" in zoning_check["detail"]
+    assert "no cruza la parcela con planos" in zoning_check["detail"]
 
 
 def test_site_compliance_context_roads_detected(tmp_path: Path) -> None:

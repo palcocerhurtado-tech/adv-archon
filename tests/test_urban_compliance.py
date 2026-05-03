@@ -2,7 +2,11 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from adv_archon.core.pgou_store import PGOUStore
-from adv_archon.tools.urban_compliance import ToolResult, UrbanComplianceTools
+from adv_archon.tools.urban_compliance import (
+    ToolResult,
+    UrbanComplianceTools,
+    _format_site_context,
+)
 
 
 class _FakeLLM:
@@ -90,3 +94,26 @@ def test_plan_compliance_check_by_coordinates_auto_fetches_when_needed(tmp_path:
     assert result.payload["site_context"]["cadastral_ref"] == "1234567VK4713S0001AB"
     assert result.payload["site_context"]["legal_readiness"] == "pgou-pending"
     assert result.payload["site_context"]["legal_checks"][0]["code"] == "pgou-municipal"
+
+
+def test_format_site_context_includes_preliminary_parcel_zoning() -> None:
+    text = _format_site_context(
+        {
+            "parcel_zoning": {
+                "queried": True,
+                "available": True,
+                "classification": "Suelo urbano consolidado",
+                "zoning": "Residencial colectiva",
+                "ordinance": "Z-1 Residencial",
+                "allowed_uses": ["residencial", "dotacional"],
+                "buildability": "1,50 m2/m2",
+                "occupancy": "60%",
+                "height": "10 m",
+                "setbacks": "según alineación oficial",
+            }
+        }
+    )
+
+    assert "Zonificación PGOU preliminar" in text
+    assert "Z-1 Residencial" in text
+    assert "Requiere confirmar en planos/visor municipal" in text

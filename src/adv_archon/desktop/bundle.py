@@ -39,8 +39,14 @@ def create_macos_app_bundle(
     resources_path.mkdir(parents=True, exist_ok=True)
     macos_path.mkdir(parents=True, exist_ok=True)
 
+    venv_python = resolved_project_root / ".venv" / "bin" / "python"
+
     launcher_lines = [
         "#!/bin/sh",
+        # Source user shell so PATH includes homebrew/cargo even from Finder
+        '[ -f "$HOME/.zprofile" ] && . "$HOME/.zprofile"',
+        '[ -f "$HOME/.zshrc"    ] && . "$HOME/.zshrc" 2>/dev/null',
+        '[ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile" 2>/dev/null',
         "# Find uv — common locations",
         'for UV in "$HOME/.cargo/bin/uv" "/opt/homebrew/bin/uv" "/usr/local/bin/uv" "$(command -v uv 2>/dev/null)"; do',
         '    [ -x "$UV" ] && break',
@@ -52,8 +58,10 @@ def create_macos_app_bundle(
         f"cd '{resolved_project_root}'",
         f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
-        # Detect Qt plugin path at runtime so it survives venv recreations
-        'SITE=$("$UV" run python -c "import sysconfig; print(sysconfig.get_path(\'platlib\'))" 2>/dev/null)',
+        # Use venv Python directly for sysconfig (fast, no uv overhead)
+        f'VENV_PY="{venv_python}"',
+        '[ -x "$VENV_PY" ] || VENV_PY=$("$UV" run python -c "import sys; print(sys.executable)" 2>/dev/null)',
+        'SITE=$("$VENV_PY" -c "import sysconfig; print(sysconfig.get_path(\'platlib\'))" 2>/dev/null)',
         'if [ -n "$SITE" ] && [ -d "$SITE/PySide6/Qt/plugins" ]; then',
         '    export QT_PLUGIN_PATH="$SITE/PySide6/Qt/plugins"',
         '    export QT_QPA_PLATFORM_PLUGIN_PATH="$SITE/PySide6/Qt/plugins/platforms"',
@@ -83,6 +91,13 @@ def create_macos_app_bundle(
         "NSHighResolutionCapable": True,
         "NSAppleEventsUsageDescription": "ADV ARCHON necesita Apple Events para funcionar correctamente.",
         "NSDocumentsFolderUsageDescription": "ADV ARCHON accede a tus documentos para analizar planos.",
+        # Ensure PATH includes common uv/homebrew locations when launched from Finder
+        "LSEnvironment": {
+            "PATH": (
+                f"{Path.home()}/.cargo/bin"
+                ":/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+            ),
+        },
     }
     if bundled_icon_path is not None:
         info_plist["CFBundleIconFile"] = bundled_icon_path.name

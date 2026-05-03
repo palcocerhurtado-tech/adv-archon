@@ -1361,17 +1361,20 @@ def launch_desktop_app(
                 )
                 picker.setFileMode(_QFD.FileMode.ExistingFile)
                 picker.setOption(_QFD.Option.DontUseNativeDialog, True)
-                if picker.exec() != _QFD.DialogCode.Accepted:
-                    return
-                paths = picker.selectedFiles()
-                if not paths:
-                    return
-                exp = store.get(eid)
-                if not exp:
-                    return
-                updated = dataclasses.replace(exp, plan_path=paths[0])
-                store.update(updated)
-                detail_panel.load_expediente(updated)
+
+                def _on_accepted() -> None:
+                    paths = picker.selectedFiles()
+                    if not paths:
+                        return
+                    exp = store.get(eid)
+                    if not exp:
+                        return
+                    updated = dataclasses.replace(exp, plan_path=paths[0])
+                    store.update(updated)
+                    detail_panel.load_expediente(updated)
+
+                picker.accepted.connect(_on_accepted)
+                picker.open()   # non-blocking — avoids nested exec() crash on macOS
 
             def _select(eid: str) -> None:
                 exp = store.get(eid)

@@ -334,6 +334,10 @@ def launch_desktop_app(
             self._nav_daily_btn.clicked.connect(self._send_daily_prompt)
             sl.addWidget(self._nav_daily_btn)
 
+            self._nav_exp_btn = self._make_nav_btn("  Expedientes")
+            self._nav_exp_btn.clicked.connect(self._open_expedientes)
+            sl.addWidget(self._nav_exp_btn)
+
             sl.addStretch(1)
             sl.addWidget(self._make_divider())
             sl.addSpacing(10)
@@ -1204,6 +1208,211 @@ def launch_desktop_app(
             )
             self._input.setPlainText(prompt)
             self._submit_prompt()
+
+        # ── Expedientes panel ─────────────────────────────────────────────────
+        def _open_expedientes(self) -> None:
+            import dataclasses
+            import json
+            import os
+
+            from PySide6.QtCore import QObject, QThread, Signal as _Signal
+            from PySide6.QtWidgets import (
+                QDialog,
+                QFrame,
+                QHBoxLayout as _QHBoxLayout,
+            )
+
+            from adv_archon.core.expediente import Expediente, ExpedienteStore
+            from adv_archon.desktop.expediente_panel import (
+                ExpedienteDetailPanel,
+                ExpedienteListPanel,
+                NewExpedienteDialog,
+            )
+            from adv_archon.integrations import catastro as _catastro
+            from adv_archon.integrations import nominatim as _nominatim
+
+            data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
+            data_dir.mkdir(parents=True, exist_ok=True)
+            store = ExpedienteStore(data_dir / "expedientes.db")
+
+            # -- Background geo-resolver ----------------------------------------
+            class _GeoWorker(QObject):
+                resolved = _Signal(object)
+                failed   = _Signal(str)
+
+                def __init__(self, exp: Expediente) -> None:
+                    super().__init__()
+                    self._exp = exp
+
+                def run(self) -> None:
+                    try:
+                        result = _nominatim.forward_geocode(self._exp.address)
+                        if not result:
+                            self.failed.emit("Nominatim no encontró la dirección.")
+                            return
+                        lat = float(result.get("lat", 0) or 0)
+                        lon = float(result.get("lon", 0) or 0)
+                        municipality, province, _ = _nominatim.extract_municipality(result)
+                        cadastral_ref = ""
+                        try:
+                            cd = _catastro.get_cadastral_data(lat, lon)
+                            cadastral_ref = cd.get("cadastral_ref", "") or ""
+                        except Exception:
+                            pass
+                        site_ctx = json.dumps(
+                            {"latitude": lat, "longitude": lon,
+                             "municipality": municipality, "province": province,
+                             "cadastral_ref": cadastral_ref, "resolution": "nominatim"},
+                            ensure_ascii=False,
+                        )
+                        updated = dataclasses.replace(
+                            self._exp,
+                            latitude=lat, longitude=lon,
+                            municipality=municipality, province=province,
+                            cadastral_ref=cadastral_ref,
+                            site_context=site_ctx,
+                        )
+                        self.resolved.emit(updated)
+                    except Exception as exc:
+                        self.failed.emit(str(exc))
+
+            _active_geo_threads: list[tuple[Any, Any]] = []
+
+            def _launch_geo(exp: Expediente) -> None:
+                t = QThread(dlg)
+                w = _GeoWorker(exp)
+                w.moveToThread(t)
+                t.started.connect(w.run)
+
+                def _on_resolved(updated: Expediente) -> None:
+                    store.update(updated)
+                    list_panel.populate(store.list_all())
+                    detail_panel.load_expediente(updated)
+                    t.quit()
+
+                def _on_failed(msg: str) -> None:
+                    t.quit()
+
+                w.resolved.connect(_on_resolved)
+                w.failed.connect(_on_failed)
+                t.finished.connect(t.deleteLater)
+                _active_geo_threads.append((t, w))
+                t.start()
+
+            # -- Dialog ----------------------------------------------------------
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Expedientes — ADV ARCHON")
+            dlg.resize(1100, 680)
+            dlg_layout = _QHBoxLayout(dlg)
+            dlg_layout.setContentsMargins(0, 0, 0, 0)
+            dlg_layout.setSpacing(0)
+
+            def _on_analyze(eid: str) -> None:
+                exp = store.get(eid)
+                if not exp:
+                    return
+                parts = [f"Analiza el expediente «{exp.title}»."]
+                parts.append(f"Dirección: {exp.address}")
+                if exp.municipality:
+                    parts.append(f"Municipio: {exp.municipality}, {exp.province}")
+                if exp.cadastral_ref:
+                    parts.append(f"Ref. catastral: {exp.cadastral_ref}")
+                if exp.latitude and exp.longitude:
+                    parts.append(f"Coordenadas: {exp.latitude:.6f}, {exp.longitude:.6f}")
+                parts.append(
+                    "\nEjecuta plan_compliance_check con el plano adjunto "
+                    "y el municipio indicado."
+                )
+                if exp.plan_path:
+                    plan = Path(exp.plan_path)
+                    if plan.exists():
+                        self._add_attachments([plan])
+                self._input.setPlainText("\n".join(parts))
+                dlg.accept()   # close dialog, switch user to chat
+
+            def _on_export(eid: str) -> None:
+                exp = store.get(eid)
+                if not exp:
+                    return
+                prompt = (
+                    f"Exporta el informe de cumplimiento del expediente «{exp.title}» "
+                    f"(municipio: {exp.municipality or '?'}) como PDF profesional "
+                    "usando plan_compliance_export."
+                )
+                self._input.setPlainText(prompt)
+                dlg.accept()
+
+            detail_panel = ExpedienteDetailPanel(
+                on_attach_plan=lambda eid: _attach_plan(eid),
+                on_analyze=_on_analyze,
+                on_export=_on_export,
+            )
+
+            def _attach_plan(eid: str) -> None:
+                from PySide6.QtWidgets import QFileDialog as _QFD
+                paths, _ = _QFD.getOpenFileNames(
+                    dlg, "Adjuntar plano",
+                    str(Path.home()),
+                    "Planos (*.pdf *.dwg *.dxf *.png *.jpg);;Todos (*)",
+                )
+                if not paths:
+                    return
+                exp = store.get(eid)
+                if not exp:
+                    return
+                updated = dataclasses.replace(exp, plan_path=paths[0])
+                store.update(updated)
+                detail_panel.load_expediente(updated)
+
+            def _select(eid: str) -> None:
+                exp = store.get(eid)
+                if exp:
+                    detail_panel.load_expediente(exp)
+
+            def _new() -> None:
+                d = NewExpedienteDialog(dlg)
+                from PySide6.QtWidgets import QDialog as _QD
+                if d.exec() != _QD.DialogCode.Accepted:
+                    return
+                exp = store.create(
+                    title=d.title_text(),
+                    address=d.address_text(),
+                    notes=d.notes_text(),
+                )
+                list_panel.populate(store.list_all())
+                detail_panel.load_expediente(exp)
+                _launch_geo(exp)
+
+            def _delete(eid: str) -> None:
+                from PySide6.QtWidgets import QMessageBox as _QMB
+                exp = store.get(eid)
+                if not exp:
+                    return
+                reply = _QMB.question(
+                    dlg, "Eliminar",
+                    f"¿Eliminar «{exp.title}»?",
+                    _QMB.StandardButton.Yes | _QMB.StandardButton.No,
+                )
+                if reply == _QMB.StandardButton.Yes:
+                    store.delete(eid)
+                    list_panel.populate(store.list_all())
+                    detail_panel.clear()
+
+            list_panel = ExpedienteListPanel(
+                on_select=_select,
+                on_new=_new,
+                on_delete=_delete,
+            )
+
+            sep = QFrame()
+            sep.setFrameShape(QFrame.Shape.VLine)
+
+            dlg_layout.addWidget(list_panel)
+            dlg_layout.addWidget(sep)
+            dlg_layout.addWidget(detail_panel, 1)
+
+            list_panel.populate(store.list_all())
+            dlg.exec()
 
         # ── Municipality extraction from chat ────────────────────────────────
         def _try_extract_municipality_from_input(self, text: str) -> None:

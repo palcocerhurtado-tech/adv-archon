@@ -1303,6 +1303,9 @@ def launch_desktop_app(
             dlg = QDialog(self)
             dlg.setWindowTitle("Expedientes — ADV ARCHON")
             dlg.resize(1100, 680)
+            # WindowModal lets child file dialogs appear on top (macOS native sheets)
+            from PySide6.QtCore import Qt as _Qt
+            dlg.setWindowModality(_Qt.WindowModality.WindowModal)
             dlg_layout = _QHBoxLayout(dlg)
             dlg_layout.setContentsMargins(0, 0, 0, 0)
             dlg_layout.setSpacing(0)
@@ -1351,9 +1354,10 @@ def launch_desktop_app(
             def _attach_plan(eid: str) -> None:
                 from PySide6.QtWidgets import QFileDialog as _QFD
                 paths, _ = _QFD.getOpenFileNames(
-                    None, "Adjuntar plano",
+                    dlg, "Adjuntar plano",
                     str(Path.home()),
                     "Planos (*.pdf *.dwg *.dxf *.png *.jpg);;Todos (*)",
+                    options=_QFD.Option.DontUseNativeDialog,
                 )
                 if not paths:
                     return

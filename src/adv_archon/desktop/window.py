@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import dataclasses
+import json
 import os
 from contextlib import suppress
 from html import escape
@@ -8,7 +10,9 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any
 
-from adv_archon.core.expediente import ExpedienteStore
+from adv_archon.core.expediente import Expediente, ExpedienteStore
+from adv_archon.integrations import catastro as _catastro
+from adv_archon.integrations import nominatim as _nominatim
 from adv_archon.desktop.expediente_panel import (
     ExpedienteDetailPanel,
     ExpedienteListPanel,
@@ -110,6 +114,57 @@ if PYSIDE6_AVAILABLE:
                 self.failed.emit(str(exc))
                 return
             self.completed.emit(response)
+
+
+    class _GeoResolveWorker(QObject):  # type: ignore[misc]
+        """Background worker: forward-geocode an address and fetch Catastro data."""
+        resolved = Signal(object)   # emits updated Expediente
+        failed = Signal(str)
+
+        def __init__(self, expediente: Expediente) -> None:
+            super().__init__()
+            self._exp = expediente
+
+        def run(self) -> None:
+            try:
+                result = _nominatim.forward_geocode(self._exp.address)
+                if not result:
+                    self.failed.emit("Nominatim no encontró la dirección.")
+                    return
+
+                lat = float(result.get("lat", 0) or 0)
+                lon = float(result.get("lon", 0) or 0)
+                municipality, province, _ = _nominatim.extract_municipality(result)
+
+                # Try Catastro for cadastral reference
+                cadastral_ref = ""
+                try:
+                    catastro_data = _catastro.get_cadastral_data(lat, lon)
+                    cadastral_ref = catastro_data.get("cadastral_ref", "") or ""
+                except Exception:
+                    pass
+
+                # Build a minimal site_context JSON
+                site_ctx: dict[str, Any] = {
+                    "latitude": lat,
+                    "longitude": lon,
+                    "municipality": municipality,
+                    "province": province,
+                    "cadastral_ref": cadastral_ref,
+                    "resolution": "nominatim",
+                }
+                updated = dataclasses.replace(
+                    self._exp,
+                    latitude=lat,
+                    longitude=lon,
+                    municipality=municipality,
+                    province=province,
+                    cadastral_ref=cadastral_ref,
+                    site_context=json.dumps(site_ctx, ensure_ascii=False),
+                )
+                self.resolved.emit(updated)
+            except Exception as exc:  # pragma: no cover - defensive UI path
+                self.failed.emit(str(exc))
 
 
     class AttachmentListWidget(QListWidget):  # type: ignore[misc]
@@ -429,7 +484,33 @@ if PYSIDE6_AVAILABLE:
             )
             self._exp_list_panel.populate(self._exp_store.list_all())
             self._exp_detail_panel.load_expediente(exp)
-            self.statusBar().showMessage(f"Expediente «{exp.title}» creado.")
+            self.statusBar().showMessage(f"Expediente «{exp.title}» creado. Resolviendo ubicación…")
+            self._launch_geo_resolve(exp)
+
+        def _launch_geo_resolve(self, exp: Expediente) -> None:
+            thread = QThread(self)
+            worker = _GeoResolveWorker(exp)
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+            worker.resolved.connect(
+                lambda updated, t=thread, w=worker: self._handle_geo_resolved(updated, t, w)
+            )
+            worker.failed.connect(
+                lambda msg, t=thread, w=worker: self._handle_geo_failed(msg, t, w)
+            )
+            thread.finished.connect(thread.deleteLater)
+            self._active_threads.append((thread, worker))
+            thread.start()
+
+        def _handle_geo_resolved(self, updated: Expediente, thread: Any, worker: Any) -> None:
+            self._exp_store.update(updated)
+            self._exp_list_panel.populate(self._exp_store.list_all())
+            # Refresh detail panel if this expediente is still selected
+            self._exp_detail_panel.load_expediente(updated)
+            self._finish_worker(thread, worker, f"Ubicación resuelta: {updated.municipality or updated.address}")
+
+        def _handle_geo_failed(self, msg: str, thread: Any, worker: Any) -> None:
+            self._finish_worker(thread, worker, f"No se pudo resolver la ubicación: {msg}")
 
         def _on_exp_select(self, expediente_id: str) -> None:
             exp = self._exp_store.get(expediente_id)
@@ -464,7 +545,6 @@ if PYSIDE6_AVAILABLE:
             exp = self._exp_store.get(expediente_id)
             if not exp:
                 return
-            import dataclasses
             exp = dataclasses.replace(exp, plan_path=paths[0])
             self._exp_store.update(exp)
             self._exp_detail_panel.load_expediente(exp)
@@ -474,19 +554,32 @@ if PYSIDE6_AVAILABLE:
             exp = self._exp_store.get(expediente_id)
             if not exp:
                 return
-            # Pre-fill chat with expediente context so the user can trigger analysis
-            self.statusBar().showMessage("Abre la pestaña Chat para ejecutar el análisis.")
-            prompt = (
-                f"Analiza el plano del expediente «{exp.title}».\n"
-                f"Dirección: {exp.address}\n"
-                f"Municipio: {exp.municipality or '(pendiente de resolver)'}\n"
-                f"Ref. catastral: {exp.cadastral_ref or '(pendiente)'}\n"
-                f"Plano: {exp.plan_path}\n\n"
-                "Ejecuta plan_compliance_check con ese plano y el municipio indicado."
+
+            # Auto-attach the plan file so the user only needs to press Send
+            if exp.plan_path:
+                plan = Path(exp.plan_path)
+                if plan.exists():
+                    self.attach_paths([plan])
+
+            prompt_parts = [
+                f"Analiza el expediente «{exp.title}».",
+                f"Dirección: {exp.address}",
+            ]
+            if exp.municipality:
+                prompt_parts.append(f"Municipio: {exp.municipality}, {exp.province}")
+            if exp.cadastral_ref:
+                prompt_parts.append(f"Ref. catastral: {exp.cadastral_ref}")
+            if exp.latitude and exp.longitude:
+                prompt_parts.append(f"Coordenadas: {exp.latitude:.6f}, {exp.longitude:.6f}")
+            prompt_parts.append(
+                "\nEjecuta plan_compliance_check con el plano adjunto y el municipio indicado."
             )
-            self._prompt_input.setPlainText(prompt)
+            self._prompt_input.setPlainText("\n".join(prompt_parts))
+
             # Switch to chat tab
-            self.centralWidget().layout().itemAt(0).widget().setCurrentIndex(0)
+            tabs = self.centralWidget().layout().itemAt(0).widget()
+            tabs.setCurrentIndex(0)
+            self.statusBar().showMessage("Revisa el mensaje en Chat y pulsa Enviar para analizar.")
 
         def _on_exp_export(self, expediente_id: str) -> None:
             exp = self._exp_store.get(expediente_id)

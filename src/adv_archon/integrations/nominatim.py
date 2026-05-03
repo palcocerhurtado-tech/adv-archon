@@ -6,12 +6,45 @@ from typing import Any, cast
 
 import httpx
 
-_BASE_URL = "https://nominatim.openstreetmap.org/reverse"
+_REVERSE_URL = "https://nominatim.openstreetmap.org/reverse"
+_SEARCH_URL = "https://nominatim.openstreetmap.org/search"
 _USER_AGENT = "adv-archon-urban-compliance/1.0 (contact: admin@adv-archon.com)"
 _TIMEOUT = 10
 _MIN_INTERVAL = 1.1   # Nominatim policy: max 1 req/s
 
 _last_call: float = 0.0
+
+
+def forward_geocode(query: str, country: str = "es") -> dict[str, Any]:
+    """
+    Resolve a free-text address → best matching result dict via Nominatim /search.
+    Returns the first result (highest relevance) or {} on failure.
+    """
+    global _last_call
+    elapsed = time.monotonic() - _last_call
+    if elapsed < _MIN_INTERVAL:
+        time.sleep(_MIN_INTERVAL - elapsed)
+
+    try:
+        resp = httpx.get(
+            _SEARCH_URL,
+            params={
+                "q": query,
+                "format": "jsonv2",
+                "addressdetails": 1,
+                "accept-language": "es",
+                "countrycodes": country,
+                "limit": 1,
+            },
+            headers={"User-Agent": _USER_AGENT},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        _last_call = time.monotonic()
+        results = cast(list[dict[str, Any]], resp.json())
+        return results[0] if results else {}
+    except Exception:
+        return {}
 
 
 def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
@@ -27,7 +60,7 @@ def reverse_geocode(lat: float, lon: float) -> dict[str, Any]:
 
     try:
         resp = httpx.get(
-            _BASE_URL,
+            _REVERSE_URL,
             params={
                 "lat": lat,
                 "lon": lon,

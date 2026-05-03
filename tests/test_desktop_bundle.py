@@ -6,9 +6,25 @@ from adv_archon.desktop.bundle import create_macos_app_bundle
 
 
 def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> None:
+    project_root = tmp_path / "project"
+    qt_platforms = (
+        project_root
+        / ".venv"
+        / "lib"
+        / "python3.12"
+        / "site-packages"
+        / "PySide6"
+        / "Qt"
+        / "plugins"
+        / "platforms"
+    )
+    qt_platforms.mkdir(parents=True)
+    (qt_platforms / "libqcocoa.dylib").write_text("", encoding="utf-8")
+    python_executable = tmp_path / ".venv" / "bin" / "python"
     result = create_macos_app_bundle(
         destination_dir=tmp_path,
-        python_executable=Path("/usr/bin/python3"),
+        python_executable=python_executable,
+        project_root=project_root,
     )
 
     assert result.app_path.name == "ADV ARCHON.app"
@@ -19,7 +35,11 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
     assert result.icon_path.exists()
 
     launcher = result.launcher_path.read_text(encoding="utf-8")
-    assert "/usr/bin/python3" in launcher
+    assert str(python_executable) in launcher
+    assert f"cd '{project_root}'" in launcher
+    assert f"export PYTHONPATH='{project_root / 'src'}':\"$PYTHONPATH\"" in launcher
+    assert f"export QT_PLUGIN_PATH='{qt_platforms.parent}'" in launcher
+    assert f"export QT_QPA_PLATFORM_PLUGIN_PATH='{qt_platforms}'" in launcher
     assert "-m adv_archon.main desktop" in launcher
 
     with result.info_plist_path.open("rb") as handle:

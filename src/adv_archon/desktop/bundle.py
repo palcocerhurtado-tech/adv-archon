@@ -24,8 +24,11 @@ def create_macos_app_bundle(
     app_name: str = "ADV ARCHON",
     bundle_identifier: str = "com.advarchon.desktop",
     python_executable: Path | None = None,
+    project_root: Path | None = None,
 ) -> DesktopBundleResult:
     resolved_destination = destination_dir.expanduser().resolve()
+    resolved_project_root = (project_root or Path.cwd()).expanduser().resolve()
+    qt_plugins_path = _find_qt_plugins_path(resolved_project_root)
     app_path = resolved_destination / f"{app_name}.app"
     contents_path = app_path / "Contents"
     macos_path = contents_path / "MacOS"
@@ -37,12 +40,17 @@ def create_macos_app_bundle(
     resources_path.mkdir(parents=True, exist_ok=True)
     macos_path.mkdir(parents=True, exist_ok=True)
 
-    executable = (python_executable or Path(sys.executable)).expanduser().resolve()
+    executable = (python_executable or Path(sys.executable)).expanduser()
     launcher = "\n".join(
         [
             "#!/bin/zsh",
             "export PATH=\"/opt/homebrew/bin:/usr/local/bin:$PATH\"",
-            "cd \"$HOME\"",
+            f"cd '{resolved_project_root}'",
+            f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
+            *((
+                f"export QT_PLUGIN_PATH='{qt_plugins_path}'",
+                f"export QT_QPA_PLATFORM_PLUGIN_PATH='{qt_plugins_path / 'platforms'}'",
+            ) if qt_plugins_path is not None else ()),
             f"exec '{executable}' -m adv_archon.main desktop \"$@\"",
             "",
         ]
@@ -78,6 +86,16 @@ def create_macos_app_bundle(
         info_plist_path=info_plist_path,
         icon_path=bundled_icon_path,
     )
+
+
+def _find_qt_plugins_path(project_root: Path) -> Path | None:
+    candidates = sorted(
+        (project_root / ".venv" / "lib").glob("python*/site-packages/PySide6/Qt/plugins")
+    )
+    for candidate in candidates:
+        if (candidate / "platforms" / "libqcocoa.dylib").exists():
+            return candidate
+    return None
 
 
 __all__ = ["DesktopBundleResult", "create_macos_app_bundle"]

@@ -1351,7 +1351,7 @@ def launch_desktop_app(
             def _attach_plan(eid: str) -> None:
                 from PySide6.QtWidgets import QFileDialog as _QFD
                 paths, _ = _QFD.getOpenFileNames(
-                    dlg, "Adjuntar plano",
+                    None, "Adjuntar plano",
                     str(Path.home()),
                     "Planos (*.pdf *.dwg *.dxf *.png *.jpg);;Todos (*)",
                 )
@@ -1411,7 +1411,11 @@ def launch_desktop_app(
             dlg_layout.addWidget(sep)
             dlg_layout.addWidget(detail_panel, 1)
 
-            list_panel.populate(store.list_all())
+            exps = store.list_all()
+            list_panel.populate(exps)
+            if exps:
+                detail_panel.load_expediente(exps[0])
+                list_panel._list.setCurrentRow(0)
             dlg.exec()
 
         # ── Municipality extraction from chat ────────────────────────────────

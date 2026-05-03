@@ -39,13 +39,6 @@ def create_macos_app_bundle(
     resources_path.mkdir(parents=True, exist_ok=True)
     macos_path.mkdir(parents=True, exist_ok=True)
 
-    qt_plugin_exports: list[str] = []
-    if qt_plugins_path is not None:
-        qt_plugin_exports = [
-            f"export QT_PLUGIN_PATH='{qt_plugins_path}'",
-            f"export QT_QPA_PLATFORM_PLUGIN_PATH='{qt_plugins_path / 'platforms'}'",
-        ]
-
     launcher_lines = [
         "#!/bin/sh",
         "# Find uv — common locations",
@@ -59,7 +52,12 @@ def create_macos_app_bundle(
         f"cd '{resolved_project_root}'",
         f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
-        *qt_plugin_exports,
+        # Detect Qt plugin path at runtime so it survives venv recreations
+        'SITE=$("$UV" run python -c "import sysconfig; print(sysconfig.get_path(\'platlib\'))" 2>/dev/null)',
+        'if [ -n "$SITE" ] && [ -d "$SITE/PySide6/Qt/plugins" ]; then',
+        '    export QT_PLUGIN_PATH="$SITE/PySide6/Qt/plugins"',
+        '    export QT_QPA_PLATFORM_PLUGIN_PATH="$SITE/PySide6/Qt/plugins/platforms"',
+        "fi",
         'exec "$UV" run python -m adv_archon.main desktop "$@"',
         "",
     ]

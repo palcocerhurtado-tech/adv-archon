@@ -39,8 +39,9 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
     assert "uv" in launcher                         # uses uv run, not hardcoded Python
     assert f"cd '{project_root}'" in launcher
     assert f"export PYTHONPATH='{project_root / 'src'}':\"$PYTHONPATH\"" in launcher
-    assert f"export QT_PLUGIN_PATH='{qt_platforms.parent}'" in launcher
-    assert f"export QT_QPA_PLATFORM_PLUGIN_PATH='{qt_platforms}'" in launcher
+    # Qt plugin path is now detected dynamically at runtime, not baked in
+    assert "QT_PLUGIN_PATH" in launcher
+    assert "sysconfig" in launcher
     assert "-m adv_archon.main desktop" in launcher
 
     with result.info_plist_path.open("rb") as handle:

@@ -339,7 +339,13 @@ if PYSIDE6_AVAILABLE:
             self._export_btn.setEnabled(False)
 
         def _on_attach_clicked(self) -> None:
-            if self._on_attach_plan and self._expediente_id:
+            if not self._expediente_id:
+                QMessageBox.information(
+                    self, "Sin expediente",
+                    "Selecciona o crea un expediente primero."
+                )
+                return
+            if self._on_attach_plan:
                 self._on_attach_plan(self._expediente_id)
 
         def _on_analyze_clicked(self) -> None:

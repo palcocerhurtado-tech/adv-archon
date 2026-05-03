@@ -1353,12 +1353,17 @@ def launch_desktop_app(
 
             def _attach_plan(eid: str) -> None:
                 from PySide6.QtWidgets import QFileDialog as _QFD
-                paths, _ = _QFD.getOpenFileNames(
-                    dlg, "Adjuntar plano",
-                    str(Path.home()),
-                    "Planos (*.pdf *.dwg *.dxf *.png *.jpg);;Todos (*)",
-                    options=_QFD.Option.DontUseNativeDialog,
+                picker = _QFD(dlg)
+                picker.setWindowTitle("Adjuntar plano arquitectónico")
+                picker.setDirectory(str(Path.home()))
+                picker.setNameFilter(
+                    "Planos (*.pdf *.dwg *.dxf *.png *.jpg *.jpeg);;Todos (*)"
                 )
+                picker.setFileMode(_QFD.FileMode.ExistingFile)
+                picker.setOption(_QFD.Option.DontUseNativeDialog, True)
+                if picker.exec() != _QFD.DialogCode.Accepted:
+                    return
+                paths = picker.selectedFiles()
                 if not paths:
                     return
                 exp = store.get(eid)

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-
 # ── Parcel / site enrichment ──────────────────────────────────────────────────
 
 class ParcelDetail(BaseModel):
@@ -51,6 +50,20 @@ class CostasDetail(BaseModel):
     error: str = ""
 
 
+class CarreterasDetail(BaseModel):
+    """INSPIRE/CNIG road-geometry screening result for a coordinate point."""
+
+    queried: bool = False
+    in_domain_zone: bool | None = None
+    in_servitude_zone: bool | None = None
+    in_affection_zone: bool | None = None
+    zones: list[str] = Field(default_factory=list)
+    source: str = "Transportes INSPIRE / CNIG"
+    method: str = "cribado geométrico por proximidad a eje viario oficial"
+    nearest_distance_m: float | None = None
+    error: str = ""
+
+
 # ── Compliance ────────────────────────────────────────────────────────────────
 
 class ComplianceAnnotation(BaseModel):
@@ -91,6 +104,7 @@ class SiteContextSummary(BaseModel):
     flood_zone: FloodZoneDetail = Field(default_factory=FloodZoneDetail)
     natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
     costas: CostasDetail = Field(default_factory=CostasDetail)
+    carreteras: CarreterasDetail = Field(default_factory=CarreterasDetail)
 
 
 class ComplianceCheckResponse(BaseModel):

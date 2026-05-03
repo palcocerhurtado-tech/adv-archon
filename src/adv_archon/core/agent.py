@@ -2373,6 +2373,7 @@ class Agent:
         legal_checks = payload.get("legal_checks")
         parcel_detail = payload.get("parcel_detail") or {}
         flood_zone = payload.get("flood_zone") or {}
+        carreteras = payload.get("carreteras") or {}
 
         lines = [f"Ubicación resuelta: {display_location}."]
         lines.append(f"- Municipio: {municipality}")
@@ -2411,6 +2412,22 @@ class Agent:
                 lines.append("- Zona inundable SNCZI: no detectada (T10/T100/T500)")
             else:
                 lines.append("- Zona inundable SNCZI: servicio no disponible")
+
+        if isinstance(carreteras, dict) and carreteras.get("queried"):
+            in_domain = carreteras.get("in_domain_zone")
+            in_servitude = carreteras.get("in_servitude_zone")
+            in_affection = carreteras.get("in_affection_zone")
+            nearest = carreteras.get("nearest_distance_m")
+            distance = f" ({nearest} m aprox. al eje)" if nearest is not None else ""
+            if in_domain or in_servitude or in_affection:
+                lines.append(
+                    "- Carreteras CNIG/IDEE: proximidad relevante detectada"
+                    f"{distance}; cribado geométrico, no delimitación jurídica exacta"
+                )
+            elif in_domain is False or in_servitude is False or in_affection is False:
+                lines.append("- Carreteras CNIG/IDEE: sin proximidad relevante detectada")
+            else:
+                lines.append("- Carreteras CNIG/IDEE: servicio no disponible")
 
         if isinstance(pgou_indexed, bool):
             lines.append(f"- PGOU indexado: {'sí' if pgou_indexed else 'no'}")
@@ -3493,6 +3510,7 @@ def _describe_legal_check_status(value: str) -> str:
         "pending_review": "revisión pendiente",
         "conditional": "revisión condicionada",
         "missing": "dato pendiente",
+        "not_applicable": "no aplicable",
     }
     return mapping.get(value.lower(), value)
 

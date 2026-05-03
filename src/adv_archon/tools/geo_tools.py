@@ -7,6 +7,7 @@ from typing import Any
 from adv_archon.core.geo_store import GeoStore
 from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.site_context import LegalCheck, SiteContext
+from adv_archon.integrations import carreteras as _carreteras
 from adv_archon.integrations import catastro as _catastro
 from adv_archon.integrations import costas as _costas
 from adv_archon.integrations import natura2000 as _natura2000
@@ -202,6 +203,49 @@ class GeoTools:
                 }
         payload["costas"] = costas_data
 
+        # Pre-fetch official road geometry screening data.
+        carreteras_data: dict[str, Any] = {
+            "queried": False,
+            "in_domain_zone": None,
+            "in_servitude_zone": None,
+            "in_affection_zone": None,
+            "zones": [],
+            "source": "Transportes INSPIRE / CNIG",
+            "method": "cribado geométrico por proximidad a eje viario oficial",
+            "nearest_distance_m": None,
+            "error": "skipped",
+        }
+        if latitude and longitude:
+            try:
+                raw_r = _carreteras.query_road_zone(latitude, longitude)
+                carreteras_data = {
+                    "queried": True,
+                    "in_domain_zone": raw_r.get("in_domain_zone"),
+                    "in_servitude_zone": raw_r.get("in_servitude_zone"),
+                    "in_affection_zone": raw_r.get("in_affection_zone"),
+                    "zones": raw_r.get("zones", []),
+                    "source": raw_r.get("source", "Transportes INSPIRE / CNIG"),
+                    "method": raw_r.get(
+                        "method",
+                        "cribado geométrico por proximidad a eje viario oficial",
+                    ),
+                    "nearest_distance_m": raw_r.get("nearest_distance_m"),
+                    "error": raw_r.get("error", ""),
+                }
+            except Exception as exc:
+                carreteras_data = {
+                    "queried": True,
+                    "in_domain_zone": None,
+                    "in_servitude_zone": None,
+                    "in_affection_zone": None,
+                    "zones": [],
+                    "source": "Transportes INSPIRE / CNIG",
+                    "method": "cribado geométrico por proximidad a eje viario oficial",
+                    "nearest_distance_m": None,
+                    "error": str(exc)[:120],
+                }
+        payload["carreteras"] = carreteras_data
+
         legal_checks = self._build_legal_checks(
             payload,
             pgou_indexed=pgou_indexed,
@@ -211,6 +255,7 @@ class GeoTools:
             _flood_data=flood_data,
             _natura_data=natura_data,
             _costas_data=costas_data,
+            _carreteras_data=carreteras_data,
         )
         payload["legal_checks"] = [check.to_dict() for check in legal_checks]
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
@@ -305,6 +350,7 @@ class GeoTools:
         _flood_data: dict[str, Any] | None = None,
         _natura_data: dict[str, Any] | None = None,
         _costas_data: dict[str, Any] | None = None,
+        _carreteras_data: dict[str, Any] | None = None,
     ) -> list[LegalCheck]:
         municipality = str(payload.get("municipality") or "").strip()
         province = str(payload.get("province") or "").strip()
@@ -322,6 +368,15 @@ class GeoTools:
         costas_data: dict[str, Any] = _costas_data or {
             "in_dpmt": None, "in_protection_zone": None,
             "in_influence_zone": None, "zones": [], "error": "skipped",
+        }
+        carreteras_data: dict[str, Any] = _carreteras_data or {
+            "queried": False,
+            "in_domain_zone": None,
+            "in_servitude_zone": None,
+            "in_affection_zone": None,
+            "zones": [],
+            "nearest_distance_m": None,
+            "error": "skipped",
         }
 
         # Build cadastral detail text from real parcel data
@@ -496,6 +551,67 @@ class GeoTools:
             _costas_action = "Sin afección de Ley de Costas detectada."
             _costas_conf = "high"
 
+        # Build roads status from official INSPIRE transport geometry.
+        _roads_status: str
+        _roads_detail: str
+        _roads_action: str
+        _roads_conf: str
+        _roads_queried = carreteras_data.get("queried", False)
+        _in_domain = carreteras_data.get("in_domain_zone")
+        _in_servitude = carreteras_data.get("in_servitude_zone")
+        _in_affection = carreteras_data.get("in_affection_zone")
+        _nearest = carreteras_data.get("nearest_distance_m")
+        _zones = ", ".join(carreteras_data.get("zones") or [])
+
+        if not _roads_queried or (
+            _in_domain is None and _in_servitude is None and _in_affection is None
+        ):
+            _roads_status = "pending_review"
+            _roads_detail = (
+                "No se ha podido consultar la red viaria oficial de Transportes "
+                "INSPIRE/CNIG en este momento. "
+                f"{carreteras_data.get('error', '')}"
+            ).strip()
+            _roads_action = (
+                "Revisar manualmente el visor oficial de carreteras y la normativa "
+                "sectorial estatal, autonómica o local aplicable."
+            )
+            _roads_conf = "medium"
+        elif _in_domain or _in_servitude or _in_affection:
+            distance_text = (
+                f" Distancia aproximada al eje viario oficial: {_nearest} m."
+                if _nearest is not None
+                else ""
+            )
+            _roads_status = "conditional"
+            _roads_detail = (
+                "Se detecta proximidad relevante a geometría viaria oficial "
+                f"({_zones or 'afección viaria posible'})."
+                f"{distance_text} Fuente: Transportes INSPIRE/CNIG. "
+                "Este resultado es un cribado geométrico orientativo y no delimita "
+                "por sí solo dominio público, servidumbre ni afección legal exacta."
+            )
+            _roads_action = (
+                "Contrastar con la administración titular de la carretera y con "
+                "la línea límite de edificación, dominio público, servidumbre y "
+                "zona de afección que resulten legalmente aplicables al expediente."
+            )
+            _roads_conf = "medium"
+        else:
+            _roads_status = "ready"
+            _roads_detail = (
+                "No se detecta proximidad relevante a ejes o áreas viarias oficiales "
+                "en el cribado de Transportes INSPIRE/CNIG. "
+                "El resultado no sustituye una comprobación jurídica si el expediente "
+                "es sensible o está próximo a infraestructuras."
+            )
+            _roads_action = (
+                "Sin afección viaria detectada en el cribado. Verificar manualmente "
+                "si existen alineaciones, carreteras locales no modelizadas o "
+                "condicionantes sectoriales específicos."
+            )
+            _roads_conf = "medium"
+
         checks: list[LegalCheck] = [
             LegalCheck(
                 code="cadastral-identification",
@@ -573,18 +689,11 @@ class GeoTools:
             LegalCheck(
                 code="roads-servitudes",
                 title="Carreteras y servidumbres",
-                status="pending_review",
-                authority="Ministerio / comunidad autónoma / red local",
-                detail=(
-                    "No se ha comprobado si existen afecciones por carreteras, "
-                    "alineaciones, expropiaciones "
-                    "o servidumbres de infraestructuras."
-                ),
-                recommended_action=(
-                    "Contrastar la parcela con redes viarias y servidumbres "
-                    "sectoriales antes del informe final."
-                ),
-                confidence="medium",
+                status=_roads_status,  # type: ignore[arg-type]
+                authority="Transportes INSPIRE — CNIG/IDEE (geometría viaria oficial)",
+                detail=_roads_detail,
+                recommended_action=_roads_action,
+                confidence=_roads_conf,  # type: ignore[arg-type]
             ),
             LegalCheck(
                 code="heritage-environment",

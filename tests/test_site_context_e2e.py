@@ -6,15 +6,13 @@ run offline without credentials.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 from pathlib import Path
 from unittest.mock import patch
-
-import pytest
 
 from adv_archon.core.geo_store import GeoStore
 from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.tools.geo_tools import GeoTools
-
 
 # ── Shared return values ──────────────────────────────────────────────────────
 
@@ -73,6 +71,58 @@ _FLOOD_UNAVAILABLE = {
     "error": "connection timeout",
 }
 
+_NATURA_NONE = {
+    "in_protected_area": False,
+    "zones": [],
+    "source": "Red Natura 2000 / CNIG",
+    "error": "",
+}
+
+_COSTAS_NONE = {
+    "in_dpmt": False,
+    "in_protection_zone": False,
+    "in_influence_zone": False,
+    "zones": [],
+    "source": "SIGCOSTAS / MITECO",
+    "error": "",
+}
+
+_ROAD_NONE = {
+    "in_domain_zone": False,
+    "in_servitude_zone": False,
+    "in_affection_zone": False,
+    "zones": [],
+    "source": "Transportes INSPIRE / CNIG",
+    "method": "cribado geométrico por proximidad a eje viario oficial",
+    "nearest_distance_m": None,
+    "error": "",
+}
+
+_ROAD_HIT = {
+    "in_domain_zone": False,
+    "in_servitude_zone": True,
+    "in_affection_zone": True,
+    "zones": [
+        "Posible zona de servidumbre viaria",
+        "Posible zona de afección viaria",
+    ],
+    "source": "Transportes INSPIRE / CNIG",
+    "method": "cribado geométrico por proximidad a eje viario oficial",
+    "nearest_distance_m": 18.4,
+    "error": "",
+}
+
+_ROAD_UNAVAILABLE = {
+    "in_domain_zone": None,
+    "in_servitude_zone": None,
+    "in_affection_zone": None,
+    "zones": [],
+    "source": "Transportes INSPIRE / CNIG",
+    "method": "cribado geométrico por proximidad a eje viario oficial",
+    "nearest_distance_m": None,
+    "error": "connection timeout",
+}
+
 
 def _make_geo_tools(tmp_path: Path) -> GeoTools:
     return GeoTools(
@@ -81,8 +131,9 @@ def _make_geo_tools(tmp_path: Path) -> GeoTools:
     )
 
 
-def _base_patches(flood_return: dict):
-    """Return a list of context managers patching all three integrations."""
+def _base_patches(flood_return: dict, road_return: dict | None = None):
+    """Return context managers patching external integrations at function level."""
+    road_payload = road_return or _ROAD_NONE
     return [
         patch(
             "adv_archon.integrations.nominatim.reverse_geocode",
@@ -100,7 +151,30 @@ def _base_patches(flood_return: dict):
             "adv_archon.integrations.snczi.query_flood_zone",
             return_value=flood_return,
         ),
+        patch(
+            "adv_archon.integrations.natura2000.query_protected_area",
+            return_value=_NATURA_NONE,
+        ),
+        patch(
+            "adv_archon.integrations.costas.query_coastal_zone",
+            return_value=_COSTAS_NONE,
+        ),
+        patch(
+            "adv_archon.integrations.carreteras.query_road_zone",
+            return_value=road_payload,
+        ),
     ]
+
+
+def _run_with_patches(
+    tools: GeoTools,
+    flood_return: dict,
+    road_return: dict | None = None,
+):
+    with ExitStack() as stack:
+        for ctx in _base_patches(flood_return, road_return):
+            stack.enter_context(ctx)
+        return tools.site_compliance_context(40.4168, -3.7038)
 
 
 # ── Tests ─────────────────────────────────────────────────────────────────────
@@ -113,9 +187,7 @@ def test_site_compliance_context_full_flow_no_flood(tmp_path: Path) -> None:
     """
     tools = _make_geo_tools(tmp_path)
 
-    patches = _base_patches(_FLOOD_NONE)
-    with patches[0], patches[1], patches[2], patches[3]:
-        result = tools.site_compliance_context(40.4168, -3.7038)
+    result = _run_with_patches(tools, _FLOOD_NONE)
 
     p = result.payload
     assert p["ok"] is True
@@ -134,9 +206,14 @@ def test_site_compliance_context_full_flow_no_flood(tmp_path: Path) -> None:
     assert fz["in_flood_zone"] is False
     assert fz["periods"] == []
 
+    roads = p["carreteras"]
+    assert roads["queried"] is True
+    assert roads["in_affection_zone"] is False
+
     # Legal checks
     checks_by_code = {c["code"]: c for c in p["legal_checks"]}
     assert checks_by_code["hydraulic-domain"]["status"] == "ready"
+    assert checks_by_code["roads-servitudes"]["status"] == "ready"
     assert "aparece" in checks_by_code["hydraulic-domain"]["detail"].lower()
     assert checks_by_code["cadastral-identification"]["status"] == "ready"
     assert "245" in checks_by_code["cadastral-identification"]["detail"]
@@ -146,9 +223,7 @@ def test_site_compliance_context_flood_detected(tmp_path: Path) -> None:
     """When SNCZI returns features, flood check is 'conditional' with warning."""
     tools = _make_geo_tools(tmp_path)
 
-    patches = _base_patches(_FLOOD_HIT)
-    with patches[0], patches[1], patches[2], patches[3]:
-        result = tools.site_compliance_context(40.4168, -3.7038)
+    result = _run_with_patches(tools, _FLOOD_HIT)
 
     p = result.payload
     fz = p["flood_zone"]
@@ -164,9 +239,7 @@ def test_site_compliance_context_snczi_unavailable(tmp_path: Path) -> None:
     """SNCZI timeout degrades to pending_review, does not crash."""
     tools = _make_geo_tools(tmp_path)
 
-    patches = _base_patches(_FLOOD_UNAVAILABLE)
-    with patches[0], patches[1], patches[2], patches[3]:
-        result = tools.site_compliance_context(40.4168, -3.7038)
+    result = _run_with_patches(tools, _FLOOD_UNAVAILABLE)
 
     p = result.payload
     fz = p["flood_zone"]
@@ -198,6 +271,18 @@ def test_site_compliance_context_catastro_dnprc_unavailable(tmp_path: Path) -> N
             "adv_archon.integrations.snczi.query_flood_zone",
             return_value=_FLOOD_NONE,
         ),
+        patch(
+            "adv_archon.integrations.natura2000.query_protected_area",
+            return_value=_NATURA_NONE,
+        ),
+        patch(
+            "adv_archon.integrations.costas.query_coastal_zone",
+            return_value=_COSTAS_NONE,
+        ),
+        patch(
+            "adv_archon.integrations.carreteras.query_road_zone",
+            return_value=_ROAD_NONE,
+        ),
     ):
         result = tools.site_compliance_context(40.4168, -3.7038)
 
@@ -216,9 +301,36 @@ def test_legal_readiness_with_pgou_indexed(tmp_path: Path) -> None:
     # Index a dummy municipality so pgou_indexed is True
     tools._pgou.index_text("normativa de prueba", municipality="Madrid", source="test")
 
-    patches = _base_patches(_FLOOD_NONE)
-    with patches[0], patches[1], patches[2], patches[3]:
-        result = tools.site_compliance_context(40.4168, -3.7038)
+    result = _run_with_patches(tools, _FLOOD_NONE)
 
     assert result.payload["pgou_indexed"] is True
     assert result.payload["legal_readiness"] == "preliminary-ready"
+
+
+def test_site_compliance_context_roads_detected(tmp_path: Path) -> None:
+    """Road screening hit is carried into payload and legal checklist."""
+    tools = _make_geo_tools(tmp_path)
+
+    result = _run_with_patches(tools, _FLOOD_NONE, _ROAD_HIT)
+
+    roads = result.payload["carreteras"]
+    assert roads["queried"] is True
+    assert roads["in_servitude_zone"] is True
+    assert roads["nearest_distance_m"] == 18.4
+
+    checks_by_code = {c["code"]: c for c in result.payload["legal_checks"]}
+    roads_check = checks_by_code["roads-servitudes"]
+    assert roads_check["status"] == "conditional"
+    assert "cribado geométrico" in roads_check["detail"]
+    assert "no delimita" in roads_check["detail"]
+
+
+def test_site_compliance_context_roads_unavailable(tmp_path: Path) -> None:
+    """Road WFS outage degrades to pending review without breaking site context."""
+    tools = _make_geo_tools(tmp_path)
+
+    result = _run_with_patches(tools, _FLOOD_NONE, _ROAD_UNAVAILABLE)
+
+    assert result.payload["carreteras"]["in_affection_zone"] is None
+    checks_by_code = {c["code"]: c for c in result.payload["legal_checks"]}
+    assert checks_by_code["roads-servitudes"]["status"] == "pending_review"

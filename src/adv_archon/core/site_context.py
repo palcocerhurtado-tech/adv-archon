@@ -7,7 +7,13 @@ from typing import Any, Literal
 Resolution = Literal["nominatim", "catastro", "cache", "manual", "unknown"]
 
 ConfidenceLevel = Literal["high", "medium", "low"]
-LegalCheckStatus = Literal["ready", "pending_review", "conditional", "missing"]
+LegalCheckStatus = Literal[
+    "ready",
+    "pending_review",
+    "conditional",
+    "missing",
+    "not_applicable",
+]
 
 
 @dataclass(slots=True)

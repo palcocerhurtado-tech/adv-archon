@@ -528,6 +528,31 @@ def _format_site_context(ctx: dict[str, Any]) -> str:
         elif cos.get("in_dpmt") is False:
             lines.append("Costas (SIGCOSTAS/MITECO): parcela fuera de DPMT y servidumbres.")
 
+    roads = ctx.get("carreteras") or {}
+    if isinstance(roads, dict) and roads.get("queried"):
+        in_domain = roads.get("in_domain_zone")
+        in_servitude = roads.get("in_servitude_zone")
+        in_affection = roads.get("in_affection_zone")
+        nearest = roads.get("nearest_distance_m")
+        distance_text = f" Distancia aproximada: {nearest} m." if nearest is not None else ""
+        if in_domain or in_servitude or in_affection:
+            zones = ", ".join(roads.get("zones") or [])
+            lines.append(
+                "CARRETERAS (Transportes INSPIRE/CNIG): proximidad relevante "
+                f"a geometría viaria oficial — {zones or 'afección posible'}."
+                f"{distance_text} Cribado geométrico, no deslinde jurídico definitivo."
+            )
+        elif in_domain is False or in_servitude is False or in_affection is False:
+            lines.append(
+                "Carreteras (Transportes INSPIRE/CNIG): sin proximidad relevante "
+                "detectada en el cribado geométrico."
+            )
+        else:
+            lines.append(
+                "Carreteras: consulta no disponible — verificar servidumbres "
+                "y afecciones viarias manualmente."
+            )
+
     address = ctx.get("cadastral_address", "")
     if address:
         lines.append(f"Dirección catastral: {address}")
@@ -634,4 +659,5 @@ def _site_context_summary(payload: dict[str, Any]) -> dict[str, Any]:
         "flood_zone": payload.get("flood_zone", {}),
         "natura2000": payload.get("natura2000", {}),
         "costas": payload.get("costas", {}),
+        "carreteras": payload.get("carreteras", {}),
     }

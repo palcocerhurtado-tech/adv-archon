@@ -5,7 +5,13 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
 from adv_archon.api.deps import AuthKey, get_compliance_tools
-from adv_archon.api.models import CostasDetail, FloodZoneDetail, Natura2000Detail, ParcelDetail
+from adv_archon.api.models import (
+    CarreterasDetail,
+    CostasDetail,
+    FloodZoneDetail,
+    Natura2000Detail,
+    ParcelDetail,
+)
 from adv_archon.core.geo_store import GeoStore
 from adv_archon.tools.geo_tools import GeoTools
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
@@ -52,6 +58,7 @@ class SiteContextResponse(BaseModel):
     flood_zone: FloodZoneDetail = Field(default_factory=FloodZoneDetail)
     natura2000: Natura2000Detail = Field(default_factory=Natura2000Detail)
     costas: CostasDetail = Field(default_factory=CostasDetail)
+    carreteras: CarreterasDetail = Field(default_factory=CarreterasDetail)
     next_step: str | None = None
     legal_readiness: str = ""
     legal_summary: str = ""
@@ -86,6 +93,7 @@ def resolve_location(
     p.pop("flood_zone", None)
     p.pop("natura2000", None)
     p.pop("costas", None)
+    p.pop("carreteras", None)
     return SiteContextResponse(**p)
 
 

@@ -3,8 +3,6 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import pytest
-
 from adv_archon.integrations.natura2000 import query_protected_area
 
 

@@ -49,14 +49,14 @@ def create_macos_app_bundle(
         '[ -f "$HOME/.zshrc"    ] && . "$HOME/.zshrc" 2>/dev/null',
         '[ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile" 2>/dev/null',
         "# Find uv — common locations",
-        'for UV in "$HOME/.cargo/bin/uv" "/opt/homebrew/bin/uv" '
-        '"/usr/local/bin/uv" "$(command -v uv 2>/dev/null)"; do',
+        'for UV in "$HOME/.cargo/bin/uv" "/opt/homebrew/bin/uv"'
+        ' "/usr/local/bin/uv" "$(command -v uv 2>/dev/null)"; do',
         '    [ -x "$UV" ] && break',
         "done",
         'if [ ! -x "$UV" ]; then',
-        "    osascript -e 'display alert \"ADV ARCHON\" message "
-        "\"No se encontró uv. Instálalo con: curl -LsSf "
-        "https://astral.sh/uv/install.sh | sh\" as critical'",
+        "    osascript -e 'display alert \"ADV ARCHON\""
+        " message \"No se encontró uv."
+        " Instálalo con: curl -LsSf https://astral.sh/uv/install.sh | sh\" as critical'",
         "    exit 1",
         "fi",
         f"cd '{resolved_project_root}'",
@@ -64,10 +64,10 @@ def create_macos_app_bundle(
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
         # Use venv Python directly for sysconfig (fast, no uv overhead)
         f'VENV_PY="{venv_python}"',
-        '[ -x "$VENV_PY" ] || VENV_PY=$("$UV" run python -c '
-        '"import sys; print(sys.executable)" 2>/dev/null)',
-        'SITE=$("$VENV_PY" -c "import sysconfig; '
-        "print(sysconfig.get_path('platlib'))\" 2>/dev/null)",
+        '[ -x "$VENV_PY" ] || VENV_PY=$("$UV" run python'
+        ' -c "import sys; print(sys.executable)" 2>/dev/null)',
+        'SITE=$("$VENV_PY" -c'
+        " \"import sysconfig; print(sysconfig.get_path('platlib'))\" 2>/dev/null)",
         'if [ -n "$SITE" ] && [ -d "$SITE/PySide6/Qt/plugins" ]; then',
         '    export QT_PLUGIN_PATH="$SITE/PySide6/Qt/plugins"',
         '    export QT_QPA_PLATFORM_PLUGIN_PATH="$SITE/PySide6/Qt/plugins/platforms"',

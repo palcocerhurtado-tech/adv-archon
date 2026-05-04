@@ -156,24 +156,23 @@ if PYSIDE6_AVAILABLE:
             try:
                 import httpx
                 self.progress.emit(f"Descargando '{self._model}' desde Ollama registry…")
-                with httpx.Client(timeout=600.0) as client:
-                    with client.stream(
-                        "POST",
-                        f"{self._base_url}/api/pull",
-                        json={"name": self._model, "stream": True},
-                    ) as r:
-                        r.raise_for_status()
-                        for line in r.iter_lines():
-                            if not line:
-                                continue
-                            try:
-                                import json
-                                data = json.loads(line)
-                                status = data.get("status", "")
-                                if status:
-                                    self.progress.emit(f"Pull: {status}")
-                            except Exception:
-                                pass
+                with httpx.Client(timeout=600.0) as client, client.stream(
+                    "POST",
+                    f"{self._base_url}/api/pull",
+                    json={"name": self._model, "stream": True},
+                ) as r:
+                    r.raise_for_status()
+                    for line in r.iter_lines():
+                        if not line:
+                            continue
+                        try:
+                            import json
+                            data = json.loads(line)
+                            status = data.get("status", "")
+                            if status:
+                                self.progress.emit(f"Pull: {status}")
+                        except Exception:
+                            pass
                 self.model_found.emit(self._model)
                 return True
             except Exception as exc:
@@ -234,7 +233,7 @@ if PYSIDE6_AVAILABLE:
         on_model_found: Any = None,
         on_ready: Any = None,
         on_failed: Any = None,
-    ) -> tuple["OllamaWarmupAgent", Any]:
+    ) -> tuple[OllamaWarmupAgent, Any]:
         """
         Convenience factory: create agent + thread, wire signals, and start.
 

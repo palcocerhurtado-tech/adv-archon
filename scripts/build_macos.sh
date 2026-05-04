@@ -1,16 +1,24 @@
 #!/usr/bin/env bash
 # =============================================================================
-# build_macos.sh — Build ADV ARCHON.app for macOS (free, no signing required)
+# build_macos.sh — Build ADV ARCHON.app + DMG for macOS (coste cero)
 #
-# Requirements:
-#   uv (https://github.com/astral-sh/uv)
-#   PyInstaller  →  uv pip install pyinstaller
-#   PySide6      →  uv pip install PySide6 (already in pyproject extras)
+# Requisitos:
+#   uv  (https://astral.sh/uv)
 #
-# Usage:
-#   ./scripts/build_macos.sh              # standard build → dist/ADV ARCHON.app
-#   ./scripts/build_macos.sh --universal  # universal2 (Intel + Apple Silicon)
-#   ./scripts/build_macos.sh --sign       # ad-hoc sign (no Apple account needed)
+# No requiere:
+#   - Apple Developer Program
+#   - Notarización
+#   - PyInstaller ni dependencias adicionales
+#
+# El .app se genera con el bundler nativo (bundle.py) que ya forma parte
+# del propio paquete adv-archon. El DMG se crea con hdiutil, incluido en macOS.
+#
+# Uso:
+#   ./scripts/build_macos.sh               # build estándar → dist/
+#   ./scripts/build_macos.sh --sign        # firma ad-hoc (recomendado)
+#   ./scripts/build_macos.sh --dmg         # crea también .dmg
+#   ./scripts/build_macos.sh --sign --dmg  # firma + dmg
+#   ./scripts/build_macos.sh --dmg --open  # abre el DMG al terminar
 # =============================================================================
 set -euo pipefail
 
@@ -20,68 +28,101 @@ cd "${ROOT}"
 
 APP_NAME="ADV ARCHON"
 DIST_DIR="${ROOT}/dist"
-SPEC_FILE="${ROOT}/archon.spec"
+APP_PATH="${DIST_DIR}/${APP_NAME}.app"
+DMG_PATH="${DIST_DIR}/${APP_NAME}.dmg"
 
-UNIVERSAL=false
 SIGN=false
+MAKE_DMG=false
+OPEN_DMG=false
 for arg in "$@"; do
   case "$arg" in
-    --universal) UNIVERSAL=true ;;
-    --sign)      SIGN=true ;;
+    --sign)    SIGN=true ;;
+    --dmg)     MAKE_DMG=true ;;
+    --open)    OPEN_DMG=true ;;
   esac
 done
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " ADV ARCHON — macOS build"
+echo " ADV ARCHON — build macOS"
 echo " Root : ${ROOT}"
 echo " Dist : ${DIST_DIR}"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# ── 1. Ensure PyInstaller is available ────────────────────────────────────────
-if ! uv run python -c "import PyInstaller" 2>/dev/null; then
-  echo "→ Instalando PyInstaller…"
-  uv pip install pyinstaller
+mkdir -p "${DIST_DIR}"
+
+# ── 1. Instalar el paquete en modo editable si es necesario ──────────────────
+if ! uv run python -c "import adv_archon" 2>/dev/null; then
+  echo "→ Instalando adv-archon…"
+  uv pip install -e ".[desktop]"
 fi
 
-# ── 2. Build ──────────────────────────────────────────────────────────────────
-PYINSTALLER_ARGS=(
-  --clean
-  --noconfirm
-  --distpath "${DIST_DIR}"
-  --workpath "${ROOT}/build"
-)
-
-if $UNIVERSAL; then
-  echo "→ Modo universal2 (Intel + Apple Silicon)"
-  PYINSTALLER_ARGS+=(--target-arch universal2)
-fi
-
-echo "→ Ejecutando PyInstaller…"
-uv run pyinstaller "${PYINSTALLER_ARGS[@]}" "${SPEC_FILE}"
-
-APP_PATH="${DIST_DIR}/${APP_NAME}.app"
+# ── 2. Generar ADV ARCHON.app con el bundler nativo ──────────────────────────
+echo "→ Generando ${APP_NAME}.app…"
+uv run adv-archon desktop-bundle "${DIST_DIR}"
 
 if [ ! -d "${APP_PATH}" ]; then
-  echo "✗ Error: no se encontró ${APP_PATH}"
+  echo "✗ Error: no se generó ${APP_PATH}"
   exit 1
 fi
 
-# ── 3. Optional ad-hoc sign (no Apple Developer account needed) ───────────────
+# ── 3. Quitar cuarentena (permite abrir desde Finder sin aviso xattr) ─────────
+echo "→ Eliminando atributos de cuarentena…"
+xattr -cr "${APP_PATH}" 2>/dev/null || true
+
+# ── 4. Firma ad-hoc (no requiere cuenta Apple) ───────────────────────────────
 if $SIGN; then
-  echo "→ Firmando ad-hoc (sin cuenta Apple)…"
-  codesign --force --deep --sign - "${APP_PATH}" || true
+  if command -v codesign &>/dev/null; then
+    echo "→ Firmando con firma ad-hoc (codesign -s -)…"
+    codesign --force --deep --sign - "${APP_PATH}" && \
+      echo "  ✓ Firmado ad-hoc correctamente." || \
+      echo "  ⚠ codesign falló — la app funciona igual, pero Gatekeeper puede avisar."
+  else
+    echo "  ⚠ codesign no disponible — omitiendo firma."
+  fi
 fi
 
-# ── 4. Size report ────────────────────────────────────────────────────────────
-APP_SIZE=$(du -sh "${APP_PATH}" | cut -f1)
+# ── 5. Crear DMG con hdiutil (incluido en macOS) ─────────────────────────────
+if $MAKE_DMG; then
+  echo "→ Creando ${APP_NAME}.dmg…"
+
+  STAGING="$(mktemp -d)"
+  trap 'rm -rf "${STAGING}"' EXIT
+
+  cp -r "${APP_PATH}" "${STAGING}/"
+  ln -sf /Applications "${STAGING}/Aplicaciones"
+
+  hdiutil create \
+    -volname "${APP_NAME}" \
+    -srcfolder "${STAGING}" \
+    -ov \
+    -format UDZO \
+    "${DMG_PATH}" \
+    -quiet
+
+  echo "  ✓ DMG creado: ${DMG_PATH}"
+
+  if $OPEN_DMG; then
+    open "${DMG_PATH}"
+  fi
+fi
+
+# ── 6. Resumen final ──────────────────────────────────────────────────────────
+APP_SIZE=$(du -sh "${APP_PATH}" 2>/dev/null | cut -f1 || echo "?")
 echo ""
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " ✓  ${APP_NAME}.app  —  ${APP_SIZE}"
 echo " →  ${APP_PATH}"
+if $MAKE_DMG && [ -f "${DMG_PATH}" ]; then
+  DMG_SIZE=$(du -sh "${DMG_PATH}" 2>/dev/null | cut -f1 || echo "?")
+  echo " ✓  ${APP_NAME}.dmg  —  ${DMG_SIZE}"
+  echo " →  ${DMG_PATH}"
+fi
 echo ""
-echo " Para instalar:"
-echo "   cp -r \"${APP_PATH}\" ~/Applications/"
+echo " Cómo distribuir:"
+echo "   - Envía el .dmg al arquitecto"
+echo "   - Instrúyele que arrastre la app a Aplicaciones o Escritorio"
+echo "   - Si macOS bloquea: Ajustes → Privacidad → Abrir de todos modos"
+echo "   - O por terminal: xattr -dr com.apple.quarantine \"${APP_PATH}\""
 echo ""
-echo " Para distribuir sin Gatekeeper:"
-echo "   ./scripts/build_macos.sh --sign"
+echo " Leer docs/DISTRIBUCION_MACOS.md para la guía completa."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

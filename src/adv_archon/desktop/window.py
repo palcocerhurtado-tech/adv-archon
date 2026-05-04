@@ -11,8 +11,6 @@ from pathlib import Path
 from typing import Any
 
 from adv_archon.core.expediente import Expediente, ExpedienteStore
-from adv_archon.integrations import catastro as _catastro
-from adv_archon.integrations import nominatim as _nominatim
 from adv_archon.desktop.expediente_panel import (
     ExpedienteDetailPanel,
     ExpedienteListPanel,
@@ -31,6 +29,8 @@ from adv_archon.desktop.runtime import (
     EchoDesktopBackend,
     build_default_runtime_assumptions,
 )
+from adv_archon.integrations import catastro as _catastro
+from adv_archon.integrations import nominatim as _nominatim
 
 PYSIDE6_AVAILABLE = find_spec("PySide6") is not None
 
@@ -507,7 +507,8 @@ if PYSIDE6_AVAILABLE:
             self._exp_list_panel.populate(self._exp_store.list_all())
             # Refresh detail panel if this expediente is still selected
             self._exp_detail_panel.load_expediente(updated)
-            self._finish_worker(thread, worker, f"Ubicación resuelta: {updated.municipality or updated.address}")
+            loc = updated.municipality or updated.address
+            self._finish_worker(thread, worker, f"Ubicación resuelta: {loc}")
 
         def _handle_geo_failed(self, msg: str, thread: Any, worker: Any) -> None:
             self._finish_worker(thread, worker, f"No se pudo resolver la ubicación: {msg}")

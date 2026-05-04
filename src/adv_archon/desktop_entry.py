@@ -12,7 +12,6 @@ import sys
 def main() -> None:
     # Fix sys.path so adv_archon is importable in frozen builds
     if getattr(sys, "frozen", False):
-        import os
         bundle_dir = sys._MEIPASS  # type: ignore[attr-defined]
         if bundle_dir not in sys.path:
             sys.path.insert(0, bundle_dir)

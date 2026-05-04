@@ -111,10 +111,14 @@ QFrame#ToolBadge {{
     border: 1px solid {ACCENT_GLOW};
     border-radius: 6px;
 }}
-QFrame#OkBadge    {{ background: {OK_DIM};   border: 1px solid rgba(34,197,94,0.25);  border-radius: 6px; }}
-QFrame#WarnBadge  {{ background: {WARN_DIM}; border: 1px solid rgba(245,158,11,0.25); border-radius: 6px; }}
-QFrame#ErrBadge   {{ background: {ERR_DIM};  border: 1px solid rgba(239,68,68,0.25);  border-radius: 6px; }}
-QFrame#InfoBadge  {{ background: {INFO_DIM}; border: 1px solid rgba(139,92,246,0.25); border-radius: 6px; }}
+QFrame#OkBadge   {{ background: {OK_DIM};
+    border: 1px solid rgba(34,197,94,0.25);   border-radius: 6px; }}
+QFrame#WarnBadge {{ background: {WARN_DIM};
+    border: 1px solid rgba(245,158,11,0.25);  border-radius: 6px; }}
+QFrame#ErrBadge  {{ background: {ERR_DIM};
+    border: 1px solid rgba(239,68,68,0.25);   border-radius: 6px; }}
+QFrame#InfoBadge {{ background: {INFO_DIM};
+    border: 1px solid rgba(139,92,246,0.25);  border-radius: 6px; }}
 QFrame#Divider    {{ background: {BORDER};   max-height: 1px; min-height: 1px; border: none; }}
 QFrame#DropZone   {{
     background: {ACCENT_DIM};

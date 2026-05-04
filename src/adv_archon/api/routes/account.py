@@ -2,10 +2,9 @@
 from __future__ import annotations
 
 import re
-from typing import Annotated
 
-from fastapi import APIRouter, Body, HTTPException, status
-from pydantic import BaseModel, EmailStr, field_validator
+from fastapi import APIRouter, HTTPException, status
+from pydantic import BaseModel, field_validator
 
 from adv_archon.api.deps import ApiStoreDep, AuthKey
 from adv_archon.api.models import AccountResponse, UsageEntry, UsageResponse

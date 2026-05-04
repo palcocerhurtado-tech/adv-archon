@@ -1233,15 +1233,24 @@ def launch_desktop_app(
             import dataclasses
             import json
             import os
+            import re
+            import subprocess
+            from datetime import datetime
 
-            from PySide6.QtCore import QObject, QThread, Signal as _Signal
+            from PySide6.QtCore import QObject, QThread
+            from PySide6.QtCore import Signal as _Signal
             from PySide6.QtWidgets import (
                 QDialog,
                 QFrame,
+            )
+            from PySide6.QtWidgets import (
                 QHBoxLayout as _QHBoxLayout,
             )
 
             from adv_archon.core.expediente import Expediente, ExpedienteStore
+            from adv_archon.core.geo_store import GeoStore
+            from adv_archon.core.pgou_store import PGOUStore
+            from adv_archon.core.report_generator import generate_expediente_pdf
             from adv_archon.desktop.expediente_panel import (
                 ExpedienteDetailPanel,
                 ExpedienteListPanel,
@@ -1249,47 +1258,171 @@ def launch_desktop_app(
             )
             from adv_archon.integrations import catastro as _catastro
             from adv_archon.integrations import nominatim as _nominatim
+            from adv_archon.tools.geo_tools import GeoTools
 
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
             store = ExpedienteStore(data_dir / "expedientes.db")
+
+            def _parse_coordinate_text(text: str) -> tuple[float, float] | None:
+                match = re.search(
+                    r"(-?\d+(?:\.\d+)?)\s*[,; ]\s*(-?\d+(?:\.\d+)?)",
+                    text,
+                )
+                if not match:
+                    return None
+                lat = float(match.group(1))
+                lon = float(match.group(2))
+                if -90 <= lat <= 90 and -180 <= lon <= 180:
+                    return (lat, lon)
+                return None
+
+            def _parse_cadastral_ref_text(text: str) -> str:
+                normalized = re.sub(r"\s+", "", text).upper()
+                return normalized if re.fullmatch(r"[A-Z0-9]{14,20}", normalized) else ""
+
+            def _build_expediente_analysis(exp: Expediente) -> dict[str, Any]:
+                try:
+                    ctx = json.loads(exp.site_context) if exp.site_context else {}
+                except (TypeError, ValueError):
+                    ctx = {}
+                checks = ctx.get("legal_checks") if isinstance(ctx, dict) else []
+                checks = checks if isinstance(checks, list) else []
+                statuses = {
+                    str(check.get("status") or "")
+                    for check in checks
+                    if isinstance(check, dict)
+                }
+                if not checks:
+                    verdict = "revisar"
+                    verdict_label = "REVISAR"
+                    summary = (
+                        "El expediente no tiene todavía un contexto legal completo. "
+                        "Debe resolverse la parcela y las fuentes sectoriales antes de "
+                        "emitir un criterio preliminar."
+                    )
+                elif {"pending_review", "missing"} & statuses:
+                    verdict = "revisar"
+                    verdict_label = "REVISAR"
+                    summary = (
+                        "El expediente necesita revisión técnica antes de emitir criterio. "
+                        "Hay datos pendientes o comprobaciones sectoriales que deben confirmarse."
+                    )
+                elif "conditional" in statuses:
+                    verdict = "condicionado"
+                    verdict_label = "CONDICIONADO"
+                    summary = (
+                        "El expediente es analizable, pero presenta afecciones o indicios "
+                        "que condicionan la viabilidad y requieren contraste administrativo."
+                    )
+                else:
+                    verdict = "viable"
+                    verdict_label = "VIABLE"
+                    summary = (
+                        "No se detectan alertas sectoriales relevantes en el cribado preliminar. "
+                        "La viabilidad queda sujeta a confirmar ordenanza y plano de proyecto."
+                    )
+
+                annotations: list[dict[str, str]] = []
+                next_steps: list[str] = []
+                status_map = {
+                    "ready": "ok",
+                    "not_applicable": "info",
+                    "conditional": "warning",
+                    "pending_review": "info",
+                    "missing": "violation",
+                }
+                for check in checks:
+                    if not isinstance(check, dict):
+                        continue
+                    status = str(check.get("status") or "")
+                    title = str(check.get("title") or "")
+                    detail = str(check.get("detail") or "")
+                    action = str(check.get("recommended_action") or "")
+                    annotations.append(
+                        {
+                            "status": status_map.get(status, "info"),
+                            "description": f"{title}: {detail}".strip(": "),
+                            "recommendation": action,
+                        }
+                    )
+                    if status not in {"ready", "not_applicable"} and action:
+                        next_steps.append(action)
+                if exp.plan_path:
+                    next_steps.append("Revisar el plano adjunto frente a la ordenanza aplicable.")
+                return {
+                    "verdict": verdict,
+                    "verdict_label": verdict_label,
+                    "summary": summary,
+                    "annotations": annotations[:30],
+                    "next_steps": next_steps[:12],
+                    "generated_at": datetime.now().isoformat(timespec="minutes"),
+                }
 
             # -- Background geo-resolver ----------------------------------------
             class _GeoWorker(QObject):
                 resolved = _Signal(object)
                 failed   = _Signal(str)
 
-                def __init__(self, exp: Expediente) -> None:
+                def __init__(self, exp: Expediente, data_root: Path) -> None:
                     super().__init__()
                     self._exp = exp
+                    self._data_root = data_root
 
                 def run(self) -> None:
                     try:
-                        result = _nominatim.forward_geocode(self._exp.address)
-                        if not result:
-                            self.failed.emit("Nominatim no encontró la dirección.")
-                            return
-                        lat = float(result.get("lat", 0) or 0)
-                        lon = float(result.get("lon", 0) or 0)
-                        municipality, province, _ = _nominatim.extract_municipality(result)
-                        cadastral_ref = ""
-                        try:
-                            cd = _catastro.get_cadastral_data(lat, lon)
-                            cadastral_ref = cd.get("cadastral_ref", "") or ""
-                        except Exception:
-                            pass
-                        site_ctx = json.dumps(
-                            {"latitude": lat, "longitude": lon,
-                             "municipality": municipality, "province": province,
-                             "cadastral_ref": cadastral_ref, "resolution": "nominatim"},
-                            ensure_ascii=False,
+                        coords = _parse_coordinate_text(self._exp.address)
+                        if coords is None:
+                            ref = _parse_cadastral_ref_text(self._exp.address)
+                            if ref:
+                                result = _catastro.get_coordinates_by_ref(ref)
+                                if result.get("error"):
+                                    self.failed.emit(str(result["error"]))
+                                    return
+                                lat = float(result.get("latitude", 0) or 0)
+                                lon = float(result.get("longitude", 0) or 0)
+                            else:
+                                result = _nominatim.forward_geocode(self._exp.address)
+                                if not result:
+                                    self.failed.emit("Nominatim no encontró la dirección.")
+                                    return
+                                lat = float(result.get("lat", 0) or 0)
+                                lon = float(result.get("lon", 0) or 0)
+                        else:
+                            lat, lon = coords
+
+                        geo_tools = GeoTools(
+                            GeoStore(self._data_root / "geo.db"),
+                            PGOUStore(self._data_root / "pgou.db"),
                         )
+                        site_result = geo_tools.site_compliance_context(lat, lon)
+                        site_payload = dict(site_result.payload)
+                        if not site_payload.get("ok"):
+                            self.failed.emit(
+                                str(
+                                    site_payload.get("error")
+                                    or "No se pudo resolver el contexto de parcela."
+                                )
+                            )
+                            return
+                        municipality = str(site_payload.get("municipality") or "")
+                        province = str(site_payload.get("province") or "")
+                        cadastral_ref = str(site_payload.get("cadastral_ref") or "")
+
+                        if not cadastral_ref:
+                            try:
+                                cd = _catastro.get_cadastral_data(lat, lon)
+                                cadastral_ref = cd.get("cadastral_ref", "") or ""
+                            except Exception:
+                                pass
+                        site_ctx = json.dumps(site_payload, ensure_ascii=False)
                         updated = dataclasses.replace(
                             self._exp,
                             latitude=lat, longitude=lon,
                             municipality=municipality, province=province,
                             cadastral_ref=cadastral_ref,
                             site_context=site_ctx,
+                            status="geocodificado",
                         )
                         self.resolved.emit(updated)
                     except Exception as exc:
@@ -1299,7 +1432,7 @@ def launch_desktop_app(
 
             def _launch_geo(exp: Expediente) -> None:
                 t = QThread(dlg)
-                w = _GeoWorker(exp)
+                w = _GeoWorker(exp, data_dir)
                 w.moveToThread(t)
                 t.started.connect(w.run)
 
@@ -1310,6 +1443,7 @@ def launch_desktop_app(
                     t.quit()
 
                 def _on_failed(msg: str) -> None:
+                    self.statusBar().showMessage(f"No se pudo resolver el expediente: {msg}")
                     t.quit()
 
                 w.resolved.connect(_on_resolved)
@@ -1333,59 +1467,84 @@ def launch_desktop_app(
                 exp = store.get(eid)
                 if not exp:
                     return
-                # Attach plan PDF to compliance session so result card appears
-                if exp.plan_path:
-                    plan = Path(exp.plan_path)
-                    if plan.exists():
-                        self._compliance.attach_pdf(plan)
-                        self._add_attachments([plan])
-                # Wire municipality / coordinates into compliance session
-                if exp.latitude and exp.longitude:
-                    self._compliance.set_coordinates(exp.latitude, exp.longitude)
-                if exp.municipality:
-                    self._compliance.set_municipality(exp.municipality)
-                # Build the best prompt based on available data
-                if exp.latitude and exp.longitude and exp.plan_path:
-                    plan_path = Path(exp.plan_path)
-                    prompt = build_coordinate_compliance_prompt(
-                        plan_path, exp.latitude, exp.longitude
-                    )
-                else:
-                    parts = [f"Analiza el expediente «{exp.title}»."]
-                    parts.append(f"Dirección: {exp.address}")
+
+                plan = Path(exp.plan_path) if exp.plan_path else None
+                if plan and plan.exists():
+                    self._compliance.attach_pdf(plan)
+                    self._add_attachments([plan])
+                    if exp.latitude and exp.longitude:
+                        self._compliance.set_coordinates(exp.latitude, exp.longitude)
                     if exp.municipality:
-                        parts.append(f"Municipio: {exp.municipality}")
-                    if exp.cadastral_ref:
-                        parts.append(f"Ref. catastral: {exp.cadastral_ref}")
-                    parts.append(
-                        "Usa plan_compliance_check con el plano adjunto "
-                        "y el municipio indicado."
+                        self._compliance.set_municipality(exp.municipality)
+                    plan_path = Path(exp.plan_path)
+                    if exp.latitude and exp.longitude:
+                        prompt = build_coordinate_compliance_prompt(
+                            plan_path, exp.latitude, exp.longitude
+                        )
+                    else:
+                        parts = [f"Analiza el expediente «{exp.title}»."]
+                        parts.append(f"Dirección: {exp.address}")
+                        if exp.municipality:
+                            parts.append(f"Municipio: {exp.municipality}")
+                        if exp.cadastral_ref:
+                            parts.append(f"Ref. catastral: {exp.cadastral_ref}")
+                        parts.append(
+                            "Usa plan_compliance_check con el plano adjunto "
+                            "y el municipio indicado."
+                        )
+                        prompt = "\n".join(parts)
+                    self._active_exp_store = store
+                    self._active_exp_id = eid
+                    dlg.accept()
+                    QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
+                else:
+                    analysis = _build_expediente_analysis(exp)
+                    updated = dataclasses.replace(
+                        exp,
+                        analysis_result=json.dumps(analysis, ensure_ascii=False),
+                        status="analizado",
                     )
-                    prompt = "\n".join(parts)
-                # Track active expediente so result can be saved on completion
-                self._active_exp_store = store
-                self._active_exp_id = eid
-                dlg.accept()
-                # Auto-submit after the dialog event loop unwinds
-                QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
+                    store.update(updated)
+                    list_panel.populate(store.list_all())
+                    detail_panel.load_expediente(updated)
+                    self.statusBar().showMessage(
+                        f"Expediente analizado: {analysis['verdict_label']}"
+                    )
 
             def _on_export(eid: str) -> None:
                 exp = store.get(eid)
                 if not exp:
                     return
-                # Generate PDF directly — no LLM call, instant
+                if not exp.analysis_result:
+                    analysis = _build_expediente_analysis(exp)
+                    exp = dataclasses.replace(
+                        exp,
+                        analysis_result=json.dumps(analysis, ensure_ascii=False),
+                        status="analizado",
+                    )
+                    store.update(exp)
+                safe_title = re.sub(r"[^a-zA-Z0-9_-]+", "_", exp.title).strip("_").lower()
+                stamp = datetime.now().strftime("%Y%m%d_%H%M")
+                output_path = (
+                    Path.home()
+                    / "Desktop"
+                    / f"informe_adv_archon_{safe_title}_{stamp}.pdf"
+                )
                 try:
-                    from adv_archon.core.report_generator import generate_expediente_pdf
-                    pdf_path = generate_expediente_pdf(exp)
-                    import dataclasses as _dc
-                    updated = _dc.replace(exp, report_path=str(pdf_path), status="informe_generado")
-                    store.update(updated)
-                    detail_panel.load_expediente(updated)
-                    import subprocess as _sp
-                    _sp.Popen(["open", str(pdf_path)])   # macOS: open with Preview
+                    generate_expediente_pdf(expediente=exp, output_path=output_path)
                 except Exception as exc:
-                    from PySide6.QtWidgets import QMessageBox as _MBX
-                    _MBX.warning(dlg, "Error al exportar", str(exc))
+                    self.statusBar().showMessage(f"No se pudo exportar el informe: {exc}")
+                    return
+                updated = dataclasses.replace(
+                    exp,
+                    report_path=str(output_path),
+                    status="informe_listo",
+                )
+                store.update(updated)
+                list_panel.populate(store.list_all())
+                detail_panel.load_expediente(updated)
+                subprocess.run(["open", str(output_path)], check=False)
+                self.statusBar().showMessage(f"Informe exportado: {output_path.name}")
 
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),

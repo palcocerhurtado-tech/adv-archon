@@ -9,9 +9,10 @@ Provides:
 from __future__ import annotations
 
 import json
+from html import escape
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 PYSIDE6_AVAILABLE = find_spec("PySide6") is not None
 
@@ -62,12 +63,14 @@ if PYSIDE6_AVAILABLE:
 
 _STATUS_COLOUR = {
     "borrador":       "#888888",
+    "geocodificado":  "#7B4DFF",
     "analizado":      "#2979FF",
     "informe_listo":  "#2E7D32",
 }
 
 _STATUS_LABEL = {
     "borrador":       "Borrador",
+    "geocodificado":  "Geocodificado",
     "analizado":      "Analizado",
     "informe_listo":  "Informe listo",
 }
@@ -80,7 +83,13 @@ if PYSIDE6_AVAILABLE:
     class ExpedienteListPanel(QWidget):  # type: ignore[misc]
         """Left sidebar: list of expedientes + New / Delete buttons."""
 
-        def __init__(self, *, on_select=None, on_new=None, on_delete=None) -> None:
+        def __init__(
+            self,
+            *,
+            on_select: Any = None,
+            on_new: Any = None,
+            on_delete: Any = None,
+        ) -> None:
             super().__init__()
             self._on_select = on_select
             self._on_new = on_new
@@ -114,10 +123,9 @@ if PYSIDE6_AVAILABLE:
             self.setMinimumWidth(200)
             self.setMaximumWidth(280)
 
-        def populate(self, expedientes: list) -> None:
+        def populate(self, expedientes: list[Any]) -> None:
             self._list.clear()
             for exp in expedientes:
-                colour = _STATUS_COLOUR.get(exp.status, "#888888")
                 label = _STATUS_LABEL.get(exp.status, exp.status)
                 item = QListWidgetItem(f"{exp.title}\n{exp.municipality or exp.address[:30]}")
                 item.setData(Qt.ItemDataRole.UserRole, exp.id)
@@ -159,8 +167,10 @@ if PYSIDE6_AVAILABLE:
             form.addRow("Nombre del expediente *", self._title)
 
             self._address = QLineEdit()
-            self._address.setPlaceholderText("Ej: Calle Gran Vía 1, Madrid")
-            form.addRow("Dirección o referencia *", self._address)
+            self._address.setPlaceholderText(
+                "Ej: Calle Gran Vía 1, Madrid, 40.4168, -3.7038 o ref. catastral"
+            )
+            form.addRow("Dirección, coordenadas o referencia *", self._address)
 
             self._notes = QLineEdit()
             self._notes.setPlaceholderText("Opcional")
@@ -177,28 +187,40 @@ if PYSIDE6_AVAILABLE:
 
         def _on_accept(self) -> None:
             if not self._title.text().strip():
-                QMessageBox.warning(self, "Campo requerido", "El nombre del expediente es obligatorio.")
+                QMessageBox.warning(
+                    self, "Campo requerido", "El nombre del expediente es obligatorio."
+                )
                 return
             if not self._address.text().strip():
-                QMessageBox.warning(self, "Campo requerido", "La dirección o referencia es obligatoria.")
+                QMessageBox.warning(
+                    self,
+                    "Campo requerido",
+                    "La dirección, coordenadas o referencia son obligatorias.",
+                )
                 return
             self.accept()
 
         def title_text(self) -> str:
-            return self._title.text().strip()
+            return cast(str, self._title.text()).strip()
 
         def address_text(self) -> str:
-            return self._address.text().strip()
+            return cast(str, self._address.text()).strip()
 
         def notes_text(self) -> str:
-            return self._notes.text().strip()
+            return cast(str, self._notes.text()).strip()
 
     # ── Detail panel ──────────────────────────────────────────────────────────
 
     class ExpedienteDetailPanel(QWidget):  # type: ignore[misc]
         """Right panel: shows site context, plan attachment, actions."""
 
-        def __init__(self, *, on_attach_plan=None, on_analyze=None, on_export=None) -> None:
+        def __init__(
+            self,
+            *,
+            on_attach_plan: Any = None,
+            on_analyze: Any = None,
+            on_export: Any = None,
+        ) -> None:
             super().__init__()
             self._on_attach_plan = on_attach_plan
             self._on_analyze = on_analyze
@@ -279,11 +301,13 @@ if PYSIDE6_AVAILABLE:
                 self._plan_label.setStyleSheet("color: #888; font-size: 11px;")
 
             self._context_browser.setHtml(self._render_context(exp))
-            self._analyze_btn.setEnabled(bool(exp.plan_path) and bool(exp.municipality))
+            self._analyze_btn.setEnabled(bool(exp.municipality) or bool(exp.site_context))
             self._export_btn.setEnabled(exp.status in ("analizado", "informe_listo"))
 
         def _render_context(self, exp: Any) -> str:
-            lines: list[str] = ["<style>td{padding:2px 8px;} th{text-align:left;color:#555;}</style>"]
+            lines: list[str] = [
+                "<style>td{padding:2px 8px;} th{text-align:left;color:#555;}</style>"
+            ]
 
             if not exp.municipality and not exp.site_context:
                 lines.append(
@@ -292,11 +316,14 @@ if PYSIDE6_AVAILABLE:
                 )
                 return "".join(lines)
 
-            lines.append(f"<p><b>{exp.address}</b></p>")
+            lines.append(f"<p><b>{escape(str(exp.address))}</b></p>")
             if exp.municipality:
-                lines.append(f"<p>{exp.municipality}, {exp.province}</p>")
+                lines.append(f"<p>{escape(str(exp.municipality))}, {escape(str(exp.province))}</p>")
             if exp.cadastral_ref:
-                lines.append(f"<p style='font-size:11px;color:#555;'>Ref. catastral: {exp.cadastral_ref}</p>")
+                lines.append(
+                    "<p style='font-size:11px;color:#555;'>"
+                    f"Ref. catastral: {escape(str(exp.cadastral_ref))}</p>"
+                )
 
             if exp.site_context:
                 try:
@@ -306,11 +333,18 @@ if PYSIDE6_AVAILABLE:
                         lines.append("<hr><p><b>Verificaciones sectoriales</b></p><table>")
                         for c in checks:
                             status = c.get("status", "")
-                            icon = {"ready": "✅", "conditional": "⚠️", "pending_review": "🔍",
-                                    "not_applicable": "—", "missing": "❌"}.get(status, "·")
+                            icon = {
+                                "ready": "✅",
+                                "conditional": "⚠️",
+                                "pending_review": "🔍",
+                                "not_applicable": "—",
+                                "missing": "❌",
+                            }.get(status, "·")
                             lines.append(
-                                f"<tr><td>{icon}</td><td><b>{c.get('title','')}</b></td>"
-                                f"<td style='font-size:10px;color:#555;'>{c.get('detail','')[:80]}</td></tr>"
+                                f"<tr><td>{icon}</td><td><b>"
+                                f"{escape(str(c.get('title','')))}</b></td>"
+                                "<td style='font-size:10px;color:#555;'>"
+                                f"{escape(str(c.get('detail',''))[:80])}</td></tr>"
                             )
                         lines.append("</table>")
                 except (json.JSONDecodeError, TypeError):
@@ -321,12 +355,18 @@ if PYSIDE6_AVAILABLE:
                     ar = json.loads(exp.analysis_result)
                     summary = ar.get("summary", "")
                     if summary:
-                        lines.append(f"<hr><p><b>Resumen análisis</b><br>{summary[:400]}</p>")
+                        lines.append(
+                            "<hr><p><b>Resumen análisis</b><br>"
+                            f"{escape(str(summary)[:400])}</p>"
+                        )
                 except (json.JSONDecodeError, TypeError):
                     pass
 
             if exp.notes:
-                lines.append(f"<hr><p style='color:#555;font-size:11px;'>Notas: {exp.notes}</p>")
+                lines.append(
+                    "<hr><p style='color:#555;font-size:11px;'>"
+                    f"Notas: {escape(str(exp.notes))}</p>"
+                )
 
             return "".join(lines)
 

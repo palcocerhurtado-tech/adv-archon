@@ -1,14 +1,17 @@
 """Tests for SNCZI flood zone integration and Catastro parcel detail."""
 from __future__ import annotations
 
-import json
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from adv_archon.integrations.catastro import _parse_parcel_xml, get_parcel_by_ref
-from adv_archon.integrations.snczi import _query_layer, query_flood_zone
-
+from adv_archon.integrations.catastro import (
+    _parse_coordinates_by_ref_xml,
+    _parse_parcel_xml,
+    get_coordinates_by_ref,
+    get_parcel_by_ref,
+)
+from adv_archon.integrations.snczi import query_flood_zone
 
 # ── Catastro parcel detail ────────────────────────────────────────────────────
 
@@ -34,6 +37,23 @@ _SAMPLE_DNPRC_XML = """<?xml version="1.0" encoding="utf-8"?>
     </bi>
   </bico>
 </consulta_dnprc>"""
+
+_SAMPLE_CPMRC_XML = """<?xml version="1.0" encoding="utf-8"?>
+<consulta_coordenadas>
+  <coordenadas>
+    <coord>
+      <geo>
+        <xcen>-3.703800</xcen>
+        <ycen>40.416800</ycen>
+        <srs>EPSG:4326</srs>
+      </geo>
+      <pc><pc1>7537903</pc1><pc2>VK4873N0001OU</pc2></pc>
+      <ldt>CL MAYOR 1, MADRID</ldt>
+      <lmun>Madrid</lmun>
+      <lprov>Madrid</lprov>
+    </coord>
+  </coordenadas>
+</consulta_coordenadas>"""
 
 
 def test_parse_parcel_xml_extracts_fields() -> None:
@@ -87,6 +107,40 @@ def test_get_parcel_by_ref_network_error(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert "timeout" in result["error"]
     assert result["surface_m2"] is None
+
+
+def test_parse_coordinates_by_ref_xml_extracts_centroid() -> None:
+    result = _parse_coordinates_by_ref_xml(
+        _SAMPLE_CPMRC_XML,
+        {
+            "cadastral_ref": "",
+            "latitude": None,
+            "longitude": None,
+            "address": "",
+            "municipality": "",
+            "province": "",
+            "error": "",
+        },
+    )
+
+    assert result["latitude"] == 40.4168
+    assert result["longitude"] == -3.7038
+    assert result["cadastral_ref"] == "7537903VK4873N0001OU"
+    assert result["municipality"] == "Madrid"
+    assert result["error"] == ""
+
+
+def test_get_coordinates_by_ref_mocked() -> None:
+    mock_resp = MagicMock()
+    mock_resp.text = _SAMPLE_CPMRC_XML
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("adv_archon.integrations.catastro.httpx.get", return_value=mock_resp):
+        result = get_coordinates_by_ref("7537903VK4873N0001OU")
+
+    assert result["latitude"] == 40.4168
+    assert result["longitude"] == -3.7038
+    assert result["error"] == ""
 
 
 # ── SNCZI flood zone ──────────────────────────────────────────────────────────

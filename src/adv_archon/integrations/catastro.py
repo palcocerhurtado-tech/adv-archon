@@ -6,6 +6,7 @@ Docs: https://ovc.catastro.meh.es/ovcservweb/OVCSWlocalizacionRC/OVCCoordenadas.
 from __future__ import annotations
 
 import re
+from contextlib import suppress
 from typing import Any
 
 import httpx
@@ -90,6 +91,85 @@ def get_parcel_by_ref(ref_cat: str) -> dict[str, Any]:
         return result
 
 
+def get_coordinates_by_ref(
+    ref_cat: str,
+    *,
+    province: str = "",
+    municipality: str = "",
+) -> dict[str, Any]:
+    """
+    Geocode a cadastral reference using Catastro OVC Consulta_CPMRC.
+
+    Returns EPSG:4326 coordinates when Catastro publishes a centroid for the
+    reference. This is enough to continue the same sectorial screening flow used
+    for manually entered coordinates.
+    """
+    ref_cat = ref_cat.strip().upper()
+    result: dict[str, Any] = {
+        "cadastral_ref": ref_cat,
+        "latitude": None,
+        "longitude": None,
+        "address": "",
+        "municipality": "",
+        "province": "",
+        "error": "",
+    }
+    if not ref_cat:
+        result["error"] = "Referencia catastral vacía"
+        return result
+    try:
+        resp = httpx.get(
+            f"{_BASE}/Consulta_CPMRC",
+            params={
+                "RC": ref_cat,
+                "SRS": "EPSG:4326",
+                "Provincia": province,
+                "Municipio": municipality,
+            },
+            headers={"User-Agent": _USER_AGENT, "Accept": "application/xml, text/xml"},
+            timeout=_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return _parse_coordinates_by_ref_xml(resp.text, result)
+    except Exception as exc:
+        result["error"] = str(exc)[:200]
+        return result
+
+
+def _parse_coordinates_by_ref_xml(xml: str, base: dict[str, Any]) -> dict[str, Any]:
+    """Parse Consulta_CPMRC XML response."""
+    err = re.search(r"<lerr>.*?<cod>(.*?)</cod>.*?<des>(.*?)</des>", xml, re.DOTALL)
+    if err:
+        base["error"] = err.group(2).strip() or f"Catastro error {err.group(1).strip()}"
+        return base
+
+    def _first(pattern: str) -> str:
+        m = re.search(pattern, xml, re.DOTALL | re.IGNORECASE)
+        return m.group(1).strip() if m else ""
+
+    xcoord = _first(r"<xcen>(.*?)</xcen>")
+    ycoord = _first(r"<ycen>(.*?)</ycen>")
+    if xcoord and ycoord:
+        try:
+            base["longitude"] = float(xcoord)
+            base["latitude"] = float(ycoord)
+        except ValueError:
+            base["error"] = "Catastro devolvió coordenadas no numéricas"
+            return base
+
+    pc1 = _first(r"<pc1>(.*?)</pc1>")
+    pc2 = _first(r"<pc2>(.*?)</pc2>")
+    if pc1 or pc2:
+        base["cadastral_ref"] = f"{pc1}{pc2}".strip()
+
+    base["address"] = _first(r"<ldt>(.*?)</ldt>")
+    base["municipality"] = _first(r"<lmun>(.*?)</lmun>")
+    base["province"] = _first(r"<lprov>(.*?)</lprov>")
+    if base["latitude"] is None or base["longitude"] is None:
+        base["error"] = "Catastro no devolvió coordenadas para la referencia catastral"
+    return base
+
+
 def _parse_parcel_xml(xml: str, base: dict[str, Any]) -> dict[str, Any]:
     """Parse Consulta_DNPRC response XML."""
     err = re.search(r"<cod>(\d+)</cod>", xml)
@@ -105,10 +185,8 @@ def _parse_parcel_xml(xml: str, base: dict[str, Any]) -> dict[str, Any]:
     # Surface (sup total construida or superficie)
     sup = _first(r"<stotloc>(.*?)</stotloc>") or _first(r"<sfc>(.*?)</sfc>")
     if sup:
-        try:
+        with suppress(ValueError):
             base["surface_m2"] = int(float(sup))
-        except ValueError:
-            pass
 
     # Year of construction
     anyo = _first(r"<ant>(.*?)</ant>") or _first(r"<cpt>(.*?)</cpt>")
@@ -177,4 +255,3 @@ def _parse_xml(xml: str) -> dict[str, Any]:
     result["catastro_province"] = lprov.group(1).strip() if lprov else ""
 
     return result
-

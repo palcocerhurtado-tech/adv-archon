@@ -2,10 +2,11 @@ import os
 import plistlib
 from pathlib import Path
 
-from adv_archon.desktop.bundle import create_macos_app_bundle
+from adv_archon.desktop import bundle as bundle_module
 
 
-def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> None:
+def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(bundle_module, "_write_native_launcher", lambda _path: False)
     project_root = tmp_path / "project"
     qt_platforms = (
         project_root
@@ -21,7 +22,7 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
     qt_platforms.mkdir(parents=True)
     (qt_platforms / "libqcocoa.dylib").write_text("", encoding="utf-8")
     python_executable = tmp_path / ".venv" / "bin" / "python"
-    result = create_macos_app_bundle(
+    result = bundle_module.create_macos_app_bundle(
         destination_dir=tmp_path,
         python_executable=python_executable,
         project_root=project_root,
@@ -34,7 +35,13 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path) -> No
     assert result.icon_path is not None
     assert result.icon_path.exists()
 
-    launcher = result.launcher_path.read_text(encoding="utf-8")
+    launcher_script = (
+        result.app_path / "Contents" / "Resources" / "launch-adv-archon.sh"
+    )
+    assert launcher_script.exists()
+    assert os.access(launcher_script, os.X_OK)
+
+    launcher = launcher_script.read_text(encoding="utf-8")
     assert "#!/bin/sh" in launcher
     assert "uv" in launcher                         # uses uv run, not hardcoded Python
     assert f"cd '{project_root}'" in launcher

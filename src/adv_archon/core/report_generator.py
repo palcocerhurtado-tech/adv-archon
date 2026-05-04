@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -8,8 +10,15 @@ from typing import Any
 from fpdf import FPDF, XPos, YPos
 
 # ── Font paths ────────────────────────────────────────────────────────────────
-_DEJAVU_REGULAR = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf")
-_DEJAVU_BOLD = Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf")
+_FONT_REGULAR_CANDIDATES = [
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial Unicode.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial.ttf"),
+]
+_FONT_BOLD_CANDIDATES = [
+    Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+]
 
 # ── Palette ──────────────────────────────────────────────────────────────────
 _C_BLACK = (30, 30, 30)
@@ -59,11 +68,14 @@ class ArchonPDF(FPDF):
         self.plan_name = plan_name
         self.set_margins(18, 18, 18)
         self.set_auto_page_break(auto=True, margin=22)
-        if _DEJAVU_REGULAR.exists():
-            self.add_font("DejaVu", "", str(_DEJAVU_REGULAR))
-        if _DEJAVU_BOLD.exists():
-            self.add_font("DejaVu", "B", str(_DEJAVU_BOLD))
-        self._fn = "DejaVu" if _DEJAVU_REGULAR.exists() else "Helvetica"
+        regular = next((path for path in _FONT_REGULAR_CANDIDATES if path.exists()), None)
+        bold = next((path for path in _FONT_BOLD_CANDIDATES if path.exists()), regular)
+        if regular is not None:
+            self.add_font("Archon", "", str(regular))
+            self.add_font("Archon", "B", str(bold or regular))
+            self._fn = "Archon"
+        else:
+            self._fn = "Helvetica"
 
     def header(self) -> None:
         self.set_fill_color(*_C_HEADER_BG)
@@ -148,7 +160,189 @@ def generate_compliance_pdf(
     return output_path
 
 
+def _generate_expediente_pdf_legacy(
+    *,
+    expediente: Any,
+    output_path: Path,
+) -> Path:
+    site_context = _loads_json(getattr(expediente, "site_context", ""))
+    analysis = _loads_json(getattr(expediente, "analysis_result", ""))
+    municipality = getattr(expediente, "municipality", "") or site_context.get(
+        "municipality", ""
+    )
+    plan_path = getattr(expediente, "plan_path", "") or "Sin plano adjunto"
+
+    pdf = ArchonPDF(municipality=municipality or "—", plan_name=Path(plan_path).name)
+    pdf.add_page()
+
+    pdf.set_font(pdf._fn, "B", 18)
+    pdf.set_text_color(*_C_ACCENT)
+    pdf.cell(0, 10, "EXPEDIENTE URBANÍSTICO PRELIMINAR", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_font(pdf._fn, "", 11)
+    pdf.set_text_color(*_C_DARK)
+    pdf.multi_cell(0, 6, _clean_text(getattr(expediente, "title", "")))
+    pdf.set_text_color(*_C_BLACK)
+    pdf.ln(3)
+
+    _expediente_meta_table(pdf, expediente, site_context)
+    pdf.ln(5)
+
+    _section_title(pdf, "VEREDICTO EJECUTIVO")
+    verdict = str(analysis.get("verdict") or "revisar").upper()
+    summary = str(analysis.get("summary") or "Expediente pendiente de análisis completo.")
+    _summary_box(pdf, f"{verdict}\n\n{summary}")
+    pdf.ln(4)
+
+    parcel_detail = site_context.get("parcel_detail") or {}
+    if isinstance(parcel_detail, dict) and parcel_detail:
+        _section_title(pdf, "CATASTRO")
+        _simple_key_value_table(
+            pdf,
+            [
+                (
+                    "Referencia catastral",
+                    getattr(expediente, "cadastral_ref", "")
+                    or site_context.get("cadastral_ref", ""),
+                ),
+                (
+                    "Dirección",
+                    site_context.get("cadastral_address", "")
+                    or getattr(expediente, "address", ""),
+                ),
+                (
+                    "Uso",
+                    parcel_detail.get("use_detail", "")
+                    or site_context.get("cadastral_use", ""),
+                ),
+                ("Superficie construida", _fmt_optional(parcel_detail.get("surface_m2"), " m²")),
+                ("Año construcción", str(parcel_detail.get("construction_year") or "")),
+                ("Plantas sobre rasante", str(parcel_detail.get("floors_above") or "")),
+            ],
+        )
+        pdf.ln(4)
+
+    checks = site_context.get("legal_checks") or []
+    if isinstance(checks, list) and checks:
+        _section_title(pdf, "CHECKS SECTORIALES Y URBANÍSTICOS")
+        _legal_checks_table(pdf, checks)
+        pdf.ln(4)
+
+    annotations = analysis.get("annotations") or []
+    if isinstance(annotations, list) and annotations:
+        _section_title(pdf, "ANOTACIONES DEL EXPEDIENTE")
+        _annotations_table(pdf, annotations)
+        pdf.ln(4)
+
+    _section_title(pdf, "ADVERTENCIAS Y PRÓXIMOS PASOS")
+    next_steps = analysis.get("next_steps") or []
+    if not isinstance(next_steps, list) or not next_steps:
+        next_steps = [
+            "Confirmar la ordenanza exacta en planos de ordenación o visor municipal.",
+            (
+                "Revisar afecciones sectoriales con la administración competente "
+                "si el expediente es sensible."
+            ),
+            "No usar este informe como certificado jurídico vinculante sin revisión técnica final.",
+        ]
+    _full_analysis_block(pdf, "\n".join(f"- {step}" for step in next_steps))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    pdf.output(str(output_path))
+    return output_path
+
+
 # ── Private helpers ───────────────────────────────────────────────────────────
+
+def _loads_json(raw: str) -> dict[str, Any]:
+    if not raw:
+        return {}
+    try:
+        parsed = json.loads(raw)
+    except (TypeError, ValueError):
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _fmt_optional(value: Any, suffix: str = "") -> str:
+    return f"{value}{suffix}" if value not in (None, "") else ""
+
+
+def _expediente_meta_table(pdf: ArchonPDF, expediente: Any, site_context: dict[str, Any]) -> None:
+    rows = [
+        ("Dirección", getattr(expediente, "address", "")),
+        (
+            "Municipio",
+            getattr(expediente, "municipality", "") or site_context.get("municipality", ""),
+        ),
+        ("Provincia", getattr(expediente, "province", "") or site_context.get("province", "")),
+        (
+            "Referencia catastral",
+            getattr(expediente, "cadastral_ref", "")
+            or site_context.get("cadastral_ref", ""),
+        ),
+        (
+            "Coordenadas",
+            _format_coords(
+                getattr(expediente, "latitude", None) or site_context.get("latitude"),
+                getattr(expediente, "longitude", None) or site_context.get("longitude"),
+            ),
+        ),
+        ("Plano", Path(getattr(expediente, "plan_path", "") or "Sin plano").name),
+        ("Fecha", datetime.now().strftime("%d/%m/%Y %H:%M")),
+    ]
+    _simple_key_value_table(pdf, rows)
+
+
+def _format_coords(lat: Any, lon: Any) -> str:
+    try:
+        return f"{float(lat):.6f}, {float(lon):.6f}"
+    except (TypeError, ValueError):
+        return ""
+
+
+def _simple_key_value_table(pdf: ArchonPDF, rows: list[tuple[str, Any]]) -> None:
+    col_w = [48, 124]
+    pdf.set_font(pdf._fn, "", 8)
+    for label, value in rows:
+        text = _clean_text(str(value or "—"))
+        pdf.set_fill_color(*_C_LIGHT_BG)
+        pdf.set_font(pdf._fn, "B", 8)
+        pdf.cell(col_w[0], 6, f"  {_clean_text(label)}", border=1, fill=True)
+        pdf.set_font(pdf._fn, "", 8)
+        pdf.set_fill_color(*_C_WHITE)
+        pdf.cell(col_w[1], 6, f"  {text[:95]}", border=1, fill=True,
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+
+def _legacy_legal_checks_table(pdf: ArchonPDF, checks: list[Any]) -> None:
+    headers = ["Check", "Estado", "Detalle"]
+    col_w = [54, 30, 90]
+    pdf.set_fill_color(*_C_HEADER_BG)
+    pdf.set_text_color(*_C_WHITE)
+    pdf.set_font(pdf._fn, "B", 8)
+    for header, width in zip(headers, col_w, strict=True):
+        pdf.cell(width, 7, f"  {header}", border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(*_C_BLACK)
+
+    status_labels = {
+        "ready": "OK",
+        "conditional": "COND.",
+        "pending_review": "REVISAR",
+        "missing": "FALTA",
+        "not_applicable": "N/A",
+    }
+    for idx, check in enumerate(checks[:12]):
+        if not isinstance(check, dict):
+            continue
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        status = str(check.get("status") or "")
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "", 7)
+        pdf.cell(col_w[0], 7, _clean_text(str(check.get("title") or ""))[:34], border=1, fill=True)
+        pdf.cell(col_w[1], 7, status_labels.get(status, status)[:12], border=1, fill=True)
+        pdf.cell(col_w[2], 7, _clean_text(str(check.get("detail") or ""))[:62], border=1, fill=True,
+                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 def _section_title(pdf: ArchonPDF, title: str) -> None:
     pdf.set_fill_color(*_C_LIGHT_BG)
@@ -312,6 +506,10 @@ def _clean_text(text: str) -> str:
         "✘": "[NOK]",   # heavy ballot x
         "⚠": "[!]",     # warning sign
         "ℹ": "[i]",     # info
+        "\ufe0f": "",    # emoji variation selector
+        "✅": "[OK]",
+        "❌": "[NOK]",
+        "🔍": "[REV]",
     }
     for char, replacement in replacements.items():
         text = text.replace(char, replacement)
@@ -352,10 +550,8 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     # Parse stored JSON fields
     site_ctx: dict[str, Any] = {}
     if expediente.site_context:
-        try:
+        with suppress(json.JSONDecodeError, TypeError):
             site_ctx = json.loads(expediente.site_context)
-        except (json.JSONDecodeError, TypeError):
-            pass
 
     analysis: dict[str, Any] = {}
     if expediente.analysis_result:
@@ -363,11 +559,21 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
             analysis = json.loads(expediente.analysis_result)
         except (json.JSONDecodeError, TypeError):
             # If stored as plain text, wrap it
-            analysis = {"summary": expediente.analysis_result, "annotations": [], "full_analysis": expediente.analysis_result}
+            analysis = {
+                "summary": expediente.analysis_result,
+                "annotations": [],
+                "full_analysis": expediente.analysis_result,
+            }
 
     summary = analysis.get("summary", "Análisis pendiente.")
+    verdict = str(analysis.get("verdict") or analysis.get("verdict_label") or "").strip()
+    if verdict and verdict.lower() not in str(summary).lower()[:80]:
+        summary = f"{verdict.upper()}\n\n{summary}"
     annotations = analysis.get("annotations", [])
     full_analysis = analysis.get("full_analysis", analysis.get("raw_analysis", ""))
+    next_steps = analysis.get("next_steps") or []
+    if not full_analysis and isinstance(next_steps, list) and next_steps:
+        full_analysis = "Próximos pasos:\n" + "\n".join(f"- {step}" for step in next_steps)
 
     # Default output path: Desktop
     if output_path is None:
@@ -405,7 +611,10 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
         ("Fecha expediente", fecha_exp),
     ]
     if expediente.latitude and expediente.longitude:
-        cover_rows.insert(4, ("Coordenadas GPS", f"{expediente.latitude:.6f}, {expediente.longitude:.6f}"))
+        cover_rows.insert(
+            4,
+            ("Coordenadas GPS", f"{expediente.latitude:.6f}, {expediente.longitude:.6f}"),
+        )
 
     col_w = [52, 120]
     for label, value in cover_rows:
@@ -414,8 +623,15 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
         pdf.cell(col_w[0], 7, f"  {label}", border=1, fill=True)
         pdf.set_font(pdf._fn, "", 9)
         pdf.set_fill_color(*_C_WHITE)
-        pdf.cell(col_w[1], 7, f"  {_clean_text(str(value))}", border=1, fill=True,
-                 new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.cell(
+            col_w[1],
+            7,
+            f"  {_clean_text(str(value))}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
     pdf.ln(6)
 
     # ── Parcel data from site_context ─────────────────────────────────────
@@ -435,8 +651,15 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
             pdf.cell(60, 6, f"  {label}", border=1, fill=True)
             pdf.set_font(pdf._fn, "", 9)
             pdf.set_fill_color(*_C_WHITE)
-            pdf.cell(112, 6, f"  {_clean_text(value)}", border=1, fill=True,
-                     new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+            pdf.cell(
+                112,
+                6,
+                f"  {_clean_text(value)}",
+                border=1,
+                fill=True,
+                new_x=XPos.LMARGIN,
+                new_y=YPos.NEXT,
+            )
         pdf.ln(5)
 
     # ── Legal checks panel ────────────────────────────────────────────────
@@ -481,6 +704,7 @@ def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:
         "ready": "OK",
         "conditional": "REV",
         "pending_review": "PEN",
+        "missing": "FAL",
         "not_applicable": "N/A",
     }
     headers = ["Verificación", "Estado", "Detalle"]
@@ -495,7 +719,15 @@ def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:
     pdf.set_text_color(*_C_BLACK)
 
     for idx, check in enumerate(checks):
-        name = _clean_text(str(check.get("name") or check.get("check") or ""))
+        name = _clean_text(
+            str(
+                check.get("title")
+                or check.get("name")
+                or check.get("check")
+                or check.get("code")
+                or ""
+            )
+        )
         status = str(check.get("status") or "pending_review")
         detail = _clean_text(str(check.get("detail") or check.get("description") or ""))
 
@@ -506,7 +738,6 @@ def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:
         pdf.set_fill_color(*fill_color)
         pdf.set_font(pdf._fn, "", 8)
 
-        x0 = pdf.get_x()
         y0 = pdf.get_y()
         if y0 + 7 > pdf.h - pdf.b_margin - 5:
             pdf.add_page()

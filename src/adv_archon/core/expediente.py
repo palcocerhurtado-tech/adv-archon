@@ -61,6 +61,33 @@ class ExpedienteStore:
                 notes TEXT NOT NULL DEFAULT ''
             );
         """)
+        existing = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(expedientes)").fetchall()
+        }
+        columns = {
+            "address": "TEXT NOT NULL DEFAULT ''",
+            "municipality": "TEXT NOT NULL DEFAULT ''",
+            "province": "TEXT NOT NULL DEFAULT ''",
+            "latitude": "REAL",
+            "longitude": "REAL",
+            "cadastral_ref": "TEXT NOT NULL DEFAULT ''",
+            "status": "TEXT NOT NULL DEFAULT 'borrador'",
+            "plan_path": "TEXT NOT NULL DEFAULT ''",
+            "site_context": "TEXT NOT NULL DEFAULT ''",
+            "analysis_result": "TEXT NOT NULL DEFAULT ''",
+            "report_path": "TEXT NOT NULL DEFAULT ''",
+            "created_at": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+            "notes": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE expedientes ADD COLUMN {name} {definition}")
+
+        now = datetime.now(UTC).isoformat()
+        conn.execute("UPDATE expedientes SET created_at = ? WHERE created_at = ''", (now,))
+        conn.execute("UPDATE expedientes SET updated_at = ? WHERE updated_at = ''", (now,))
         conn.commit()
 
     # ------------------------------------------------------------------ #

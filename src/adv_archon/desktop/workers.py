@@ -157,6 +157,15 @@ if PYSIDE6_AVAILABLE:
                 self._profile = active_profile
             self._emit_state(DesktopBusyState(backend_ready=self._backend_ready))
 
+        def set_ollama_model(self, model: str) -> None:
+            model = model.strip()
+            if not model:
+                return
+            self._config.llm.ollama_model = model
+            if self._runtime is not None:
+                self._runtime.llm.set_ollama_model(model)
+            self._emit_state(DesktopBusyState(backend_ready=self._backend_ready))
+
         def run_prompt(self, prompt: str, attachments: list[str]) -> None:
             runtime = self._runtime
             if runtime is None or not self._backend_ready:

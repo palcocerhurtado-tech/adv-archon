@@ -72,6 +72,12 @@ class LLMRouter:
     def set_mode(self, mode: ProviderMode) -> None:
         self._config.mode = mode
 
+    def set_ollama_model(self, model: str) -> None:
+        model = model.strip()
+        if not model:
+            raise ValueError("El modelo de Ollama no puede estar vacío.")
+        self._config.ollama_model = model
+
     @contextmanager
     def temporary_mode(self, mode: ProviderMode) -> Iterator[None]:
         self._mode_overrides.append(mode)

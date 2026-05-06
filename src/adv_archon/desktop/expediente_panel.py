@@ -30,6 +30,7 @@ QListWidget: Any = None
 QListWidgetItem: Any = None
 QMessageBox: Any = None
 QPushButton: Any = None
+QProgressBar: Any = None
 QScrollArea: Any = None
 QSizePolicy: Any = None
 QTextBrowser: Any = None
@@ -55,6 +56,7 @@ if PYSIDE6_AVAILABLE:
     QListWidgetItem = _w.QListWidgetItem
     QMessageBox = _w.QMessageBox
     QPushButton = _w.QPushButton
+    QProgressBar = _w.QProgressBar
     QScrollArea = _w.QScrollArea
     QSizePolicy = _w.QSizePolicy
     QTextBrowser = _w.QTextBrowser
@@ -262,6 +264,7 @@ if PYSIDE6_AVAILABLE:
             self._on_export = on_export
             self._expediente_id: str | None = None
             self._expediente: Any = None
+            self._operation_busy = False
 
             layout = QVBoxLayout(self)
             layout.setContentsMargins(12, 8, 12, 8)
@@ -276,6 +279,18 @@ if PYSIDE6_AVAILABLE:
             self._status_label = QLabel("")
             self._status_label.setStyleSheet("font-size: 11px; color: #888;")
             layout.addWidget(self._status_label)
+
+            self._operation_label = QLabel("")
+            self._operation_label.setStyleSheet("font-size: 11px; color: #E65100;")
+            self._operation_label.setVisible(False)
+            layout.addWidget(self._operation_label)
+
+            self._operation_progress = QProgressBar()
+            self._operation_progress.setRange(0, 0)
+            self._operation_progress.setTextVisible(False)
+            self._operation_progress.setMaximumHeight(3)
+            self._operation_progress.setVisible(False)
+            layout.addWidget(self._operation_progress)
 
             sep = QFrame()
             sep.setFrameShape(QFrame.Shape.HLine)
@@ -368,14 +383,25 @@ if PYSIDE6_AVAILABLE:
 
             self._context_browser.setHtml(self._render_context(exp))
             can_analyze = bool(exp.plan_path) and bool(exp.municipality or exp.latitude)
-            self._analyze_btn.setEnabled(can_analyze)
+            self._analyze_btn.setEnabled(can_analyze and not self._operation_busy)
             exportable = exp.status in (
                 "analizado", "informe_listo", "informe_generado"
             )
-            self._export_btn.setEnabled(exportable)
+            self._export_btn.setEnabled(exportable and not self._operation_busy)
             has_report = bool(exp.report_path) and Path(exp.report_path).exists()
-            self._open_report_btn.setEnabled(has_report)
+            self._open_report_btn.setEnabled(has_report and not self._operation_busy)
             self._open_report_btn.setVisible(has_report)
+
+        def set_operation_busy(self, busy: bool, label: str = "") -> None:
+            self._operation_busy = busy
+            self._operation_label.setText(label)
+            self._operation_label.setVisible(busy and bool(label))
+            self._operation_progress.setVisible(busy)
+            self._analyze_btn.setEnabled(False)
+            self._export_btn.setEnabled(False)
+            self._open_report_btn.setEnabled(False)
+            if not busy and self._expediente is not None:
+                self.load_expediente(self._expediente)
 
         def _render_context(self, exp: Any) -> str:  # noqa: C901
             style = (
@@ -513,6 +539,9 @@ if PYSIDE6_AVAILABLE:
         def clear(self) -> None:
             self._expediente_id = None
             self._expediente = None
+            self._operation_busy = False
+            self._operation_label.setVisible(False)
+            self._operation_progress.setVisible(False)
             self._title_label.setText("Selecciona o crea un expediente")
             self._status_label.setText("")
             self._context_browser.clear()

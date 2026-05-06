@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import stat
 import tomllib
 from dataclasses import dataclass, field
@@ -105,7 +106,7 @@ class PathsConfig:
 class LLMConfig:
     mode: str = "cloud"
     gemini_model: str = "gemini-2.5-flash"
-    ollama_model: str = "llama3.1:8b"
+    ollama_model: str = "qwen2.5:7b"
     fast_local_model: str | None = None
     planner_local_model: str | None = None
     document_local_model: str | None = None
@@ -303,6 +304,47 @@ def _lookup(data: dict[str, Any], *keys: str, default: Any) -> Any:
     return current
 
 
+def save_ollama_model_preference(config_file: Path, model: str) -> None:
+    """Persist the preferred local Ollama model without rewriting the whole config."""
+    model = model.strip()
+    if not model:
+        raise ValueError("El modelo de Ollama no puede estar vacío.")
+    escaped = model.replace("\\", "\\\\").replace('"', '\\"')
+    config_file.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        text = config_file.read_text(encoding="utf-8")
+    except OSError:
+        text = ""
+
+    setting = f'ollama_model = "{escaped}"'
+    llm_match = re.search(r"(?m)^\[llm\]\s*$", text)
+    if llm_match is None:
+        trailing_newline = "\n" if text and not text.endswith("\n") else ""
+        prefix = f"{text}{trailing_newline}"
+        separator = "\n" if prefix else ""
+        config_file.write_text(f"{prefix}{separator}[llm]\n{setting}\n", encoding="utf-8")
+        return
+
+    next_section = re.search(r"(?m)^\[[^\]]+\]\s*$", text[llm_match.end():])
+    section_end = (
+        llm_match.end() + next_section.start()
+        if next_section is not None
+        else len(text)
+    )
+    section = text[llm_match.end():section_end]
+    key_match = re.search(r"(?m)^(\s*)ollama_model\s*=.*$", section)
+    if key_match is not None:
+        start = llm_match.end() + key_match.start()
+        end = llm_match.end() + key_match.end()
+        replacement = f"{key_match.group(1)}{setting}"
+        updated = f"{text[:start]}{replacement}{text[end:]}"
+    else:
+        insert_at = llm_match.end()
+        newline = "" if text[insert_at:insert_at + 1] == "\n" else "\n"
+        updated = f"{text[:insert_at]}{newline}{setting}\n{text[insert_at:]}"
+    config_file.write_text(updated, encoding="utf-8")
+
+
 def load_app_config(
     *,
     mode_override: str | None = None,
@@ -321,7 +363,7 @@ def load_app_config(
         gemini_model=os.getenv("ADV_ARCHON_DEFAULT_GEMINI_MODEL")
         or _lookup(data, "llm", "gemini_model", default="gemini-2.5-flash"),
         ollama_model=os.getenv("ADV_ARCHON_DEFAULT_OLLAMA_MODEL")
-        or _lookup(data, "llm", "ollama_model", default="llama3.1:8b"),
+        or _lookup(data, "llm", "ollama_model", default="qwen2.5:7b"),
         fast_local_model=str(_lookup(data, "llm", "fast_local_model", default="")).strip()
         or None,
         planner_local_model=str(

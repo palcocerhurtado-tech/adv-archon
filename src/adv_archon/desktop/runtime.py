@@ -29,10 +29,10 @@ def build_default_runtime_assumptions() -> tuple[DesktopRuntimeAssumption, ...]:
             ),
         ),
         DesktopRuntimeAssumption(
-            title="Sin streaming todavía",
+            title="Streaming local activo",
             description=(
-                "La UI inicial resuelve una petición completa y devuelve un bloque de texto. "
-                "No fuerza aún el pipeline de streaming del REPL."
+                "La UI pinta la respuesta del modelo local a medida que llegan tokens, "
+                "sin esperar al bloque completo."
             ),
         ),
     )

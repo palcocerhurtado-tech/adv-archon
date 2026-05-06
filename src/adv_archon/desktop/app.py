@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from adv_archon.core.attachments import normalize_attachment_paths
-from adv_archon.core.config import AppConfig
+from adv_archon.core.config import AppConfig, save_ollama_model_preference
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.desktop.branding import desktop_stylesheet, logo_path
@@ -167,6 +167,7 @@ def launch_desktop_app(
         import_requested = Signal(object)
         mode_requested   = Signal(str)
         profile_requested = Signal(str)
+        ollama_model_requested = Signal(str)
         cancel_requested  = Signal()
         shutdown_requested = Signal()
 
@@ -219,11 +220,16 @@ def launch_desktop_app(
             self._pending_attachments: list[Path] = []
             self._current_stream_edit: _AutoTextEdit | None = None
             self._current_stream_text = ""
+            self._stream_buffer = ""
             self._progress_animation  = None
+            self._model_loader_ref: tuple[Any, Any] | None = None
             self._busy_state = DesktopBusyState(
                 backend_ready=False, busy=True, task="initializing"
             )
             self._close_requested = False
+            self._stream_flush_timer = QTimer(self)
+            self._stream_flush_timer.setInterval(45)
+            self._stream_flush_timer.timeout.connect(self._flush_assistant_stream)
 
             # Worker
             self._backend_thread = QThread(self)
@@ -241,6 +247,7 @@ def launch_desktop_app(
             self.import_requested.connect(self._backend_worker.import_paths)
             self.mode_requested.connect(self._backend_worker.set_mode)
             self.profile_requested.connect(self._backend_worker.set_profile)
+            self.ollama_model_requested.connect(self._backend_worker.set_ollama_model)
             self.cancel_requested.connect(self._backend_worker.cancel_prompt)
             self.shutdown_requested.connect(self._backend_worker.shutdown)
             self._backend_thread.started.connect(self._backend_worker.initialize)
@@ -372,6 +379,11 @@ def launch_desktop_app(
             self._profile_combo.addItems(self._profile_manager.available_profiles())
             self._profile_combo.currentTextChanged.connect(self._change_profile)
             sl.addWidget(self._profile_combo)
+
+            sl.addSpacing(8)
+            self._settings_button = self._make_nav_btn("  Ajustes")
+            self._settings_button.clicked.connect(self._open_settings)
+            sl.addWidget(self._settings_button)
 
             sl.addSpacing(6)
             self._mode_status_lbl = QLabel("")
@@ -686,6 +698,8 @@ def launch_desktop_app(
 
             self._current_stream_edit = _AutoTextEdit()
             self._current_stream_text = ""
+            self._stream_buffer = ""
+            self._stream_flush_timer.stop()
             fl.addWidget(self._current_stream_edit)
 
             self._insert_bubble(frame)
@@ -719,7 +733,16 @@ def launch_desktop_app(
             self._start_assistant_stream()
 
         def _append_assistant_chunk(self, chunk: str) -> None:
-            self._current_stream_text += chunk
+            self._stream_buffer += chunk
+            if not self._stream_flush_timer.isActive():
+                self._stream_flush_timer.start()
+
+        def _flush_assistant_stream(self) -> None:
+            if not self._stream_buffer:
+                self._stream_flush_timer.stop()
+                return
+            self._current_stream_text += self._stream_buffer
+            self._stream_buffer = ""
             if self._current_stream_edit is not None:
                 self._current_stream_edit.setPlainText(self._current_stream_text)
             QTimer.singleShot(0, self._scroll_to_bottom)
@@ -758,10 +781,13 @@ def launch_desktop_app(
             self._refresh_sources_view()
 
         def _handle_prompt_finished(self, text: str) -> None:
+            self._flush_assistant_stream()
             if not self._current_stream_text and text:
                 self._add_message_bubble("assistant", text)
             self._current_stream_edit = None
             self._current_stream_text = ""
+            self._stream_buffer = ""
+            self._stream_flush_timer.stop()
             self._handle_compliance_result_from_text(text)
             self._remember_desktop_history(text)
             self._attachments = []
@@ -782,12 +808,16 @@ def launch_desktop_app(
         def _handle_worker_error(self, message: str) -> None:
             self._current_stream_edit = None
             self._current_stream_text = ""
+            self._stream_buffer = ""
+            self._stream_flush_timer.stop()
             self._add_notice(f"Error: {message}", object_name="Err")
             self._set_busy(False)
 
         def _handle_worker_cancelled(self, message: str) -> None:
             self._current_stream_edit = None
             self._current_stream_text = ""
+            self._stream_buffer = ""
+            self._stream_flush_timer.stop()
             self._append_system(message)
             self._set_busy(False)
 
@@ -935,6 +965,7 @@ def launch_desktop_app(
             self._append_user(prompt, attachments)
             self._append_assistant_prefix()
             self._current_stream_text = ""
+            self._stream_buffer = ""
             # Capture municipality hint from user text before sending
             self._try_extract_municipality_from_input(prompt)
             self._set_busy(True, task="prompt")
@@ -1045,6 +1076,7 @@ def launch_desktop_app(
             self._nav_daily_btn.setEnabled(can_send)
             self._nav_pgou_btn.setEnabled(can_send)
             self._nav_geo_btn.setEnabled(can_send)
+            self._settings_button.setEnabled(allows_cfg)
             self._cancel_button.setVisible(state.cancellable)
 
             if state.busy:
@@ -1116,6 +1148,153 @@ def launch_desktop_app(
             div = QFrame()
             div.setObjectName("Divider")
             return div
+
+        # ── Settings ─────────────────────────────────────────────────────────
+        def _open_settings(self) -> None:
+            from PySide6.QtCore import QObject as _QObject
+            from PySide6.QtCore import Signal as _Signal
+            from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+            class _ModelListWorker(_QObject):
+                loaded = _Signal(object)
+                failed = _Signal(str)
+
+                def run(self) -> None:
+                    try:
+                        from adv_archon.desktop.ollama_models import fetch_ollama_models
+
+                        self.loaded.emit(
+                            fetch_ollama_models(
+                                config.llm.ollama_base_url,
+                                timeout=3.0,
+                            )
+                        )
+                    except Exception as exc:
+                        self.failed.emit(str(exc))
+                    finally:
+                        QThread.currentThread().quit()
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Ajustes — ADV ARCHON")
+            dlg.setMinimumWidth(500)
+            layout = QVBoxLayout(dlg)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(10)
+
+            title = QLabel("Modelo local Ollama")
+            title.setObjectName("AppName")
+            layout.addWidget(title)
+
+            help_lbl = QLabel(
+                "Elige el modelo local que usará ADV ARCHON para análisis y chat. "
+                "Los modelos más pequeños responden antes; los grandes suelen razonar mejor."
+            )
+            help_lbl.setObjectName("Sub")
+            help_lbl.setWordWrap(True)
+            layout.addWidget(help_lbl)
+
+            model_combo = QComboBox()
+            model_combo.addItem(f"{self._ollama_model} · actual", self._ollama_model)
+            layout.addWidget(model_combo)
+
+            status_lbl = QLabel("Consultando modelos instalados en Ollama…")
+            status_lbl.setObjectName("Faint")
+            status_lbl.setWordWrap(True)
+            layout.addWidget(status_lbl)
+
+            model_progress = QProgressBar()
+            model_progress.setRange(0, 0)
+            model_progress.setTextVisible(False)
+            model_progress.setMaximumHeight(3)
+            layout.addWidget(model_progress)
+
+            refresh_btn = QPushButton("Actualizar lista")
+            refresh_btn.setObjectName("Ghost")
+            layout.addWidget(refresh_btn)
+
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Save
+                | QDialogButtonBox.StandardButton.Cancel
+            )
+            buttons.button(QDialogButtonBox.StandardButton.Save).setText("Guardar")
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
+            layout.addWidget(buttons)
+
+            def load_models() -> None:
+                status_lbl.setText("Consultando modelos instalados en Ollama…")
+                model_progress.setVisible(True)
+                refresh_btn.setEnabled(False)
+                thread = QThread(dlg)
+                worker = _ModelListWorker()
+                worker.moveToThread(thread)
+
+                def on_loaded(models: object) -> None:
+                    current = self._ollama_model
+                    model_combo.clear()
+                    seen: set[str] = set()
+                    for item in models if isinstance(models, list) else []:
+                        name = getattr(item, "name", "")
+                        if not name:
+                            continue
+                        seen.add(name)
+                        model_combo.addItem(getattr(item, "display_label", name), name)
+                    if current and current not in seen:
+                        model_combo.insertItem(0, f"{current} · actual", current)
+                    idx = model_combo.findData(current)
+                    if idx >= 0:
+                        model_combo.setCurrentIndex(idx)
+                    count = model_combo.count()
+                    status_lbl.setText(
+                        f"{count} modelo{'s' if count != 1 else ''} disponible"
+                        if count
+                        else "Ollama responde, pero no hay modelos instalados."
+                    )
+                    model_progress.setVisible(False)
+                    refresh_btn.setEnabled(True)
+                    self._model_loader_ref = None
+
+                def on_failed(message: str) -> None:
+                    status_lbl.setText(
+                        "No se pudo leer Ollama. Mantén la app usable y arranca "
+                        f"Ollama cuando vayas a analizar. Detalle: {message[:140]}"
+                    )
+                    model_progress.setVisible(False)
+                    refresh_btn.setEnabled(True)
+                    self._model_loader_ref = None
+
+                thread.started.connect(worker.run)
+                worker.loaded.connect(on_loaded)
+                worker.failed.connect(on_failed)
+                thread.finished.connect(worker.deleteLater)
+                thread.finished.connect(thread.deleteLater)
+                self._model_loader_ref = (thread, worker)
+                thread.start()
+
+            def save() -> None:
+                selected = str(model_combo.currentData() or model_combo.currentText()).strip()
+                if not selected:
+                    status_lbl.setText("Selecciona un modelo válido.")
+                    return
+                try:
+                    save_ollama_model_preference(config.paths.config_file, selected)
+                except Exception as exc:
+                    status_lbl.setText(f"No se pudo guardar la preferencia: {exc}")
+                    return
+                config.llm.ollama_model = selected
+                llm.set_ollama_model(selected)
+                self._ollama_model = selected
+                self.ollama_model_requested.emit(selected)
+                self._refresh_status_bar()
+                self.statusBar().showMessage(f"Modelo local seleccionado: {selected}", 4000)
+                if self._selected_mode == "local":
+                    self._start_warmup_agent()
+                dlg.accept()
+
+            refresh_btn.clicked.connect(load_models)
+            buttons.accepted.connect(save)
+            buttons.rejected.connect(dlg.reject)
+            load_models()
+            dlg.open()
 
         # ── Warmup agent (Phase 7B) ───────────────────────────────────────────
         def _start_warmup_agent(self) -> None:
@@ -1574,9 +1753,36 @@ def launch_desktop_app(
                     except Exception as exc:
                         self.failed.emit(str(exc))
 
+            class _ExportWorker(QObject):
+                exported = _Signal(str)
+                failed = _Signal(str)
+
+                def __init__(self, exp: Expediente, output_path: Path) -> None:
+                    super().__init__()
+                    self._exp = exp
+                    self._output_path = output_path
+
+                def run(self) -> None:
+                    try:
+                        generate_expediente_pdf(
+                            expediente=self._exp,
+                            output_path=self._output_path,
+                        )
+                    except Exception as exc:
+                        self.failed.emit(str(exc))
+                    else:
+                        self.exported.emit(str(self._output_path))
+                    finally:
+                        QThread.currentThread().quit()
+
             _active_geo_threads: list[tuple[Any, Any]] = []
+            _active_export_threads: list[tuple[Any, Any]] = []
 
             def _launch_geo(exp: Expediente) -> None:
+                detail_panel.set_operation_busy(
+                    True,
+                    "Resolviendo parcela y consultando fuentes oficiales…",
+                )
                 t = QThread(dlg)
                 w = _GeoWorker(exp, data_dir)
                 w.moveToThread(t)
@@ -1588,10 +1794,12 @@ def launch_desktop_app(
                     detail_panel.load_expediente(updated)
                     self._last_exp_label = updated.title
                     self._refresh_status_bar()
+                    detail_panel.set_operation_busy(False)
                     t.quit()
 
                 def _on_failed(msg: str) -> None:
                     self.statusBar().showMessage(f"No se pudo resolver el expediente: {msg}")
+                    detail_panel.set_operation_busy(False)
                     t.quit()
 
                 w.resolved.connect(_on_resolved)
@@ -1680,23 +1888,40 @@ def launch_desktop_app(
                     / "Desktop"
                     / f"informe_adv_archon_{safe_title}_{stamp}.pdf"
                 )
-                try:
-                    generate_expediente_pdf(expediente=exp, output_path=output_path)
-                except Exception as exc:
-                    self.statusBar().showMessage(f"No se pudo exportar el informe: {exc}")
-                    return
-                updated = dataclasses.replace(
-                    exp,
-                    report_path=str(output_path),
-                    status="informe_listo",
-                )
-                store.update(updated)
-                list_panel.populate(store.list_all())
-                detail_panel.load_expediente(updated)
-                self._last_exp_label = updated.title
-                self._refresh_status_bar()
-                subprocess.run(["open", str(output_path)], check=False)
-                self.statusBar().showMessage(f"Informe exportado: {output_path.name}")
+                detail_panel.set_operation_busy(True, "Generando informe PDF profesional…")
+                self.statusBar().showMessage("Generando informe PDF…")
+                t = QThread(dlg)
+                w = _ExportWorker(exp, output_path)
+                w.moveToThread(t)
+                t.started.connect(w.run)
+
+                def _on_exported(path_text: str) -> None:
+                    path = Path(path_text)
+                    updated = dataclasses.replace(
+                        exp,
+                        report_path=str(path),
+                        status="informe_listo",
+                    )
+                    store.update(updated)
+                    list_panel.populate(store.list_all())
+                    detail_panel.load_expediente(updated)
+                    detail_panel.set_operation_busy(False)
+                    self._last_exp_label = updated.title
+                    self._refresh_status_bar()
+                    subprocess.Popen(["open", str(path)])
+                    self.statusBar().showMessage(f"Informe exportado: {path.name}")
+
+                def _on_export_failed(message: str) -> None:
+                    detail_panel.set_operation_busy(False)
+                    self.statusBar().showMessage(
+                        f"No se pudo exportar el informe: {message}"
+                    )
+
+                w.exported.connect(_on_exported)
+                w.failed.connect(_on_export_failed)
+                t.finished.connect(t.deleteLater)
+                _active_export_threads.append((t, w))
+                t.start()
 
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),

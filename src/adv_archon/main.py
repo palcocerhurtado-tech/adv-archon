@@ -9,38 +9,55 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from rich.console import Console
 
-from adv_archon.core.attachments import format_prompt_with_attachments
-from adv_archon.core.benchmark import (
-    BenchmarkCase,
-    BenchmarkEvidence,
-    BenchmarkExecutor,
-    BenchmarkSummary,
-    run_benchmarks,
-)
-from adv_archon.core.config import AppConfig, load_app_config
-from adv_archon.core.daily import DailyBrief, DailyReport, build_daily_brief, build_daily_report
-from adv_archon.core.eval_store import EvalStore
-from adv_archon.core.evals import evaluate_knowledge_retrieval
-from adv_archon.core.executive_automation import (
-    build_executive_automation_bundle,
-    install_executive_automation,
-    list_executive_automation_presets,
-)
-from adv_archon.core.knowledge import KnowledgeStore, install_knowledge_launch_agent
-from adv_archon.core.llm import LLMRouter
-from adv_archon.core.logging import AppLogger
-from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
-from adv_archon.core.research import install_research_launch_agent, run_research_cycle
-from adv_archon.core.tasks import TaskStore
-from adv_archon.core.web_library import WebLibraryStore
-from adv_archon.desktop.app import launch_desktop_app
-from adv_archon.desktop.bundle import create_macos_app_bundle
-from adv_archon.tools.google_workspace import GoogleWorkspaceTools
-from adv_archon.tools.personal import PersonalTools
-from adv_archon.ui.render import Renderer
-from adv_archon.ui.repl import ReplApp
+def Console(*args: Any, **kwargs: Any) -> Any:
+    from rich.console import Console as _Console
+
+    return _Console(*args, **kwargs)
+
+
+def Renderer(*args: Any, **kwargs: Any) -> Any:
+    from adv_archon.ui.render import Renderer as _Renderer
+
+    return _Renderer(*args, **kwargs)
+
+
+def LLMRouter(*args: Any, **kwargs: Any) -> Any:
+    from adv_archon.core.llm import LLMRouter as _LLMRouter
+
+    return _LLMRouter(*args, **kwargs)
+
+
+def ReplApp(*args: Any, **kwargs: Any) -> Any:
+    from adv_archon.ui.repl import ReplApp as _ReplApp
+
+    return _ReplApp(*args, **kwargs)
+
+
+def load_app_config(*args: Any, **kwargs: Any) -> Any:
+    from adv_archon.core.config import load_app_config as _load_app_config
+
+    return _load_app_config(*args, **kwargs)
+
+
+def launch_desktop_app(*args: Any, **kwargs: Any) -> int:
+    from adv_archon.desktop.app import launch_desktop_app as _launch_desktop_app
+
+    return _launch_desktop_app(*args, **kwargs)
+
+
+def create_macos_app_bundle(*args: Any, **kwargs: Any) -> Any:
+    from adv_archon.desktop.bundle import create_macos_app_bundle as _create_bundle
+
+    return _create_bundle(*args, **kwargs)
+
+
+def format_prompt_with_attachments(*args: Any, **kwargs: Any) -> str:
+    from adv_archon.core.attachments import (
+        format_prompt_with_attachments as _format_prompt_with_attachments,
+    )
+
+    return _format_prompt_with_attachments(*args, **kwargs)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -90,7 +107,7 @@ def desktop_main() -> int:
 
 def _handle_desktop_bundle(
     *,
-    renderer: Renderer,
+    renderer: Any,
     bundle_args: list[str],
 ) -> int:
     destination_dir = (
@@ -105,19 +122,28 @@ def _handle_desktop_bundle(
     return 0
 
 
-def _build_logger(config_root: Path, *, prefix: str, persist: bool) -> AppLogger:
+def _build_logger(config_root: Path, *, prefix: str, persist: bool) -> Any:
+    from adv_archon.core.logging import AppLogger
+
     session_id = datetime.now().strftime(f"{prefix}-%Y%m%d%H%M%S")
     return AppLogger(config_root, session_id=session_id, persist=persist)
 
 
 def _handle_daily(
     *,
-    config: AppConfig,
-    renderer: Renderer,
+    config: Any,
+    renderer: Any,
     project_root: Path,
     incognito: bool,
     daily_args: list[str],
 ) -> int:
+    from adv_archon.core.daily import build_daily_brief, build_daily_report
+    from adv_archon.core.knowledge import KnowledgeStore
+    from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
+    from adv_archon.core.tasks import TaskStore
+    from adv_archon.tools.google_workspace import GoogleWorkspaceTools
+    from adv_archon.tools.personal import PersonalTools
+
     logger = _build_logger(
         config.paths.logs_dir,
         prefix="daily",
@@ -163,7 +189,7 @@ def _handle_daily(
         logger=logger,
     )
     command = daily_args[0] if daily_args else "brief"
-    report: DailyBrief | DailyReport
+    report: Any
     if command == "raw":
         report = build_daily_report(
             project_root=project_root,
@@ -192,10 +218,17 @@ def _handle_daily(
 
 def _handle_tasks(
     *,
-    config: AppConfig,
-    renderer: Renderer,
+    config: Any,
+    renderer: Any,
     task_args: list[str],
 ) -> int:
+    from adv_archon.core.executive_automation import (
+        build_executive_automation_bundle,
+        install_executive_automation,
+        list_executive_automation_presets,
+    )
+    from adv_archon.core.tasks import TaskStore
+
     logger = _build_logger(config.paths.logs_dir, prefix="tasks", persist=True)
     store = TaskStore(
         config.paths.tasks_db,
@@ -280,11 +313,15 @@ def _handle_tasks(
 
 def _handle_knowledge(
     *,
-    config: AppConfig,
-    renderer: Renderer,
+    config: Any,
+    renderer: Any,
     knowledge_args: list[str],
     incognito: bool,
 ) -> int:
+    from adv_archon.core.evals import evaluate_knowledge_retrieval
+    from adv_archon.core.knowledge import KnowledgeStore, install_knowledge_launch_agent
+    from adv_archon.core.memory import SentenceTransformerEncoder
+
     logger = _build_logger(config.paths.logs_dir, prefix="knowledge", persist=not incognito)
     encoder = SentenceTransformerEncoder(config.memory.embedding_model)
     store = KnowledgeStore(
@@ -401,11 +438,15 @@ def _handle_knowledge(
 
 def _handle_research(
     *,
-    config: AppConfig,
-    renderer: Renderer,
+    config: Any,
+    renderer: Any,
     research_args: list[str],
     incognito: bool,
 ) -> int:
+    from adv_archon.core.memory import SentenceTransformerEncoder
+    from adv_archon.core.research import install_research_launch_agent, run_research_cycle
+    from adv_archon.core.web_library import WebLibraryStore
+
     logger = _build_logger(config.paths.logs_dir, prefix="research", persist=not incognito)
     encoder = SentenceTransformerEncoder(config.memory.embedding_model)
     store = WebLibraryStore(
@@ -500,12 +541,15 @@ def _handle_research(
 
 def _handle_benchmark(
     *,
-    config: AppConfig,
-    renderer: Renderer,
+    config: Any,
+    renderer: Any,
     project_root: Path,
     incognito: bool,
     benchmark_args: list[str],
 ) -> int:
+    from adv_archon.core.benchmark import run_benchmarks
+    from adv_archon.core.eval_store import EvalStore
+
     store = EvalStore(config.paths.evals_db)
     command = benchmark_args[0] if benchmark_args else "status"
 
@@ -623,12 +667,14 @@ def _handle_benchmark(
 
 def _build_benchmark_executor(
     *,
-    config: AppConfig,
+    config: Any,
     system_prompt: str,
     project_root: Path,
     incognito: bool,
-) -> BenchmarkExecutor:
-    def executor(case: BenchmarkCase) -> BenchmarkEvidence:
+) -> Any:
+    from adv_archon.core.benchmark import BenchmarkEvidence
+
+    def executor(case: Any) -> BenchmarkEvidence:
         quiet_renderer = Renderer(
             Console(file=io.StringIO(), force_terminal=False, no_color=True),
             show_tool_input=False,
@@ -686,13 +732,13 @@ def _build_benchmark_executor(
 
 def _resolve_benchmark_cases_path(
     *,
-    config: AppConfig,
+    config: Any,
     benchmark_args: list[str],
 ) -> Path:
     if benchmark_args:
         return Path(benchmark_args[0]).expanduser()
     if config.paths.benchmark_cases_file.exists():
-        return config.paths.benchmark_cases_file
+        return cast(Path, config.paths.benchmark_cases_file)
     return _bundled_benchmark_cases_path()
 
 
@@ -706,12 +752,14 @@ def _load_benchmark_cases(
     cwd: Path,
     home: Path,
     max_cases: int,
-) -> list[BenchmarkCase]:
+) -> list[Any]:
+    from adv_archon.core.benchmark import BenchmarkCase
+
     raw = json.loads(cases_path.read_text(encoding="utf-8"))
     if not isinstance(raw, list):
         raise ValueError("El fichero de casos debe contener una lista JSON.")
     replacements = {"{cwd}": str(cwd), "{home}": str(home)}
-    cases: list[BenchmarkCase] = []
+    cases: list[Any] = []
     for item in raw[: max(1, max_cases)]:
         if not isinstance(item, dict):
             continue
@@ -754,7 +802,7 @@ def _load_benchmark_cases(
     return cases
 
 
-def _benchmark_model_label(config: AppConfig) -> str:
+def _benchmark_model_label(config: Any) -> str:
     if config.llm.mode == "local":
         return f"ollama/{config.llm.ollama_model}"
     return f"gemini/{config.llm.gemini_model}"
@@ -804,7 +852,7 @@ def _render_benchmark_status(recent: list[Any], aggregate: Any) -> str:
 
 
 def _render_benchmark_summary(
-    summary: BenchmarkSummary,
+    summary: Any,
     *,
     run_id: int,
     cases_path: Path,
@@ -935,9 +983,9 @@ def main() -> int:
 
     if args.prompt:
         prompt = format_prompt_with_attachments(args.prompt, args.paths, label="Referenced paths")
-        return app.ask_once(prompt)
+        return cast(int, app.ask_once(prompt))
 
-    return app.run()
+    return cast(int, app.run())
 
 
 if __name__ == "__main__":

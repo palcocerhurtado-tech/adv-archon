@@ -15,6 +15,8 @@ from typing import Any
 
 import httpx
 
+from adv_archon.core.ttl_cache import TTLCache
+
 log = logging.getLogger(__name__)
 
 # INSPIRE WFS published by CNIG (Centro Nacional de Información Geográfica)
@@ -24,6 +26,7 @@ _WFS_BASE = (
 )
 _TIMEOUT = 12.0
 _UA = "adv-archon-urban-compliance/1.0"
+_CACHE = TTLCache(ttl_seconds=3600.0)
 
 _PERIODS = {
     "T10":  "SNCZI_Zona_Inundable_T10",
@@ -45,6 +48,11 @@ def query_flood_zone(lat: float, lon: float) -> dict[str, Any]:
           "error": ""                    # non-empty if service unavailable
         }
     """
+    key = ("flood", round(lat, 7), round(lon, 7), id(httpx.get))
+    cached = _CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
+
     result: dict[str, Any] = {
         "in_flood_zone": False,
         "periods": [],
@@ -65,13 +73,19 @@ def query_flood_zone(lat: float, lon: float) -> dict[str, Any]:
     if errors and not matched and len(errors) == len(_PERIODS):
         result["in_flood_zone"] = None   # service unavailable — unknown, not false
         result["error"] = "; ".join(errors[:2])
+        _CACHE.set(key, result)
         return result
 
     result["in_flood_zone"] = bool(matched)
     result["periods"] = matched
     if errors:
         log.debug("SNCZI partial errors: %s", errors)
+    _CACHE.set(key, result)
     return result
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
 
 
 def _query_layer(typename: str, *, lat: float, lon: float) -> bool:

@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -63,6 +64,7 @@ def launch_desktop_app(
             QScrollArea,
             QSizePolicy,
             QSplitter,
+            QStatusBar,
             QTextEdit,
             QVBoxLayout,
             QWidget,
@@ -193,6 +195,11 @@ def launch_desktop_app(
             self._active_exp_store: Any = None   # set when expediente analysis starts
             self._active_exp_id: str = ""
             self._warmup_agent_ref: tuple[Any, Any] | None = None
+            self._onboarding_dialog: Any = None
+            self._onboarding_config_path = config.paths.root / "config.json"
+            self._ollama_state = "Cargando…" if llm.mode == "local" else "Cloud"
+            self._ollama_model = config.llm.ollama_model
+            self._last_exp_label = "Sin expediente"
 
             self._confirm_bridge   = ConfirmBridge()
             self._confirm_bridge.requested.connect(self._show_confirmation_dialog)
@@ -253,11 +260,13 @@ def launch_desktop_app(
 
             self._build_ui()
             self._apply_branding()
+            self._build_professional_status_bar()
             self._load_controls_state()
             self._fit_to_screen()
             self._append_system("Preparando motor…")
             self._backend_thread.start()
             self._start_warmup_agent()
+            QTimer.singleShot(600, self._maybe_show_onboarding)
 
         # ── Lifecycle ─────────────────────────────────────────────────────────
         def closeEvent(self, ev) -> None:
@@ -417,6 +426,21 @@ def launch_desktop_app(
             tl.addWidget(self._cancel_button)
 
             return bar
+
+        def _build_professional_status_bar(self) -> None:
+            bar = QStatusBar(self)
+            bar.setObjectName("BottomBar")
+            self.setStatusBar(bar)
+            self._ollama_badge_lbl = QLabel("")
+            self._ollama_badge_lbl.setObjectName("Sub")
+            self._model_badge_lbl = QLabel("")
+            self._model_badge_lbl.setObjectName("Sub")
+            self._last_exp_badge_lbl = QLabel("")
+            self._last_exp_badge_lbl.setObjectName("Faint")
+            bar.addPermanentWidget(self._ollama_badge_lbl)
+            bar.addPermanentWidget(self._model_badge_lbl)
+            bar.addPermanentWidget(self._last_exp_badge_lbl, 1)
+            self._refresh_status_bar()
 
         def _build_chat_column(self) -> QWidget:
             col = QWidget()
@@ -948,8 +972,11 @@ def launch_desktop_app(
 
         def _change_mode(self, mode: str) -> None:
             self._selected_mode = mode
+            self._ollama_state = "Cargando…" if mode == "local" else "Cloud"
             self.mode_requested.emit(mode)
             self._refresh_status()
+            if mode == "local":
+                self._start_warmup_agent()
 
         def _change_profile(self, profile: str) -> None:
             resolved = self._profile_manager.resolve(profile)
@@ -967,6 +994,24 @@ def launch_desktop_app(
             self._mode_status_lbl.setText(
                 f"{self._selected_mode} · {self._selected_profile}"
             )
+            self._refresh_status_bar()
+
+        def _refresh_status_bar(self) -> None:
+            if not hasattr(self, "_ollama_badge_lbl"):
+                return
+            colors = {
+                "Listo": "#22C55E",
+                "Cargando…": "#F59E0B",
+                "Sin conexión": "#EF4444",
+                "Cloud": "#8B5CF6",
+            }
+            color = colors.get(self._ollama_state, "#9F9FAA")
+            self._ollama_badge_lbl.setText(
+                f"<span style='color:{color}'>●</span> Ollama: {self._ollama_state}"
+            )
+            self._ollama_badge_lbl.setTextFormat(Qt.TextFormat.RichText)
+            self._model_badge_lbl.setText(f"Modelo: {self._ollama_model}")
+            self._last_exp_badge_lbl.setText(f"Último expediente: {self._last_exp_label}")
 
         def _set_busy(self, busy: bool, *, task: str | None = None) -> None:
             next_task = task or self._busy_state.task
@@ -1091,20 +1136,121 @@ def launch_desktop_app(
                 pass  # warmup is optional; never block startup
 
         def _handle_warmup_progress(self, message: str) -> None:
-            self._append_system(f"[warmup] {message}")
+            self._ollama_state = "Cargando…"
+            self._refresh_status_bar()
+            self.statusBar().showMessage(message, 3500)
 
         def _handle_warmup_model_found(self, model_name: str) -> None:
-            self._append_system(f"Modelo local: {model_name}")
+            self._ollama_model = model_name
+            self._refresh_status_bar()
 
         def _handle_warmup_ready(self, elapsed: float) -> None:
-            self._append_system(
-                f"Modelo listo en {elapsed:.1f}s — respuestas locales a plena velocidad."
-            )
+            self._ollama_state = "Listo"
+            self._refresh_status_bar()
+            self.statusBar().showMessage(f"Modelo local listo en {elapsed:.1f}s", 4000)
             self._warmup_agent_ref = None
 
         def _handle_warmup_failed(self, error: str) -> None:
-            self._add_notice(f"Warmup: {error}", object_name="Warn")
+            self._ollama_state = "Sin conexión"
+            self._refresh_status_bar()
+            self.statusBar().showMessage(f"Modelo no cargado: {error}", 6000)
             self._warmup_agent_ref = None
+
+        def _maybe_show_onboarding(self) -> None:
+            if self._onboarding_done():
+                return
+            from PySide6.QtWidgets import QDialog as _QDialog
+
+            dlg = _QDialog(self)
+            dlg.setWindowTitle("Bienvenido a ADV ARCHON")
+            dlg.setMinimumWidth(460)
+            layout = QVBoxLayout(dlg)
+            layout.addWidget(self._make_logo(72), alignment=Qt.AlignmentFlag.AlignCenter)
+            title = QLabel("Bienvenido a ADV ARCHON")
+            title.setObjectName("AppName")
+            title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            layout.addWidget(title)
+            body = QLabel("")
+            body.setWordWrap(True)
+            body.setObjectName("Sub")
+            layout.addWidget(body)
+            actions = QHBoxLayout()
+            skip_btn = QPushButton("Omitir")
+            skip_btn.setObjectName("Ghost")
+            verify_btn = QPushButton("Verificar ahora")
+            next_btn = QPushButton("Siguiente")
+            next_btn.setObjectName("Primary")
+            actions.addWidget(skip_btn)
+            actions.addStretch()
+            actions.addWidget(verify_btn)
+            actions.addWidget(next_btn)
+            layout.addLayout(actions)
+
+            steps = [
+                (
+                    "Bienvenido a ADV ARCHON",
+                    "Gestiona expedientes urbanísticos con contexto catastral, PGOU, "
+                    "afecciones sectoriales e informe PDF profesional.",
+                ),
+                (
+                    "Comprueba Ollama",
+                    "ADV ARCHON funciona local-first. Verifica que Ollama está activo "
+                    "para que el análisis del plano esté listo cuando lo necesites.",
+                ),
+                (
+                    "Crea tu primer expediente",
+                    "Empieza con dirección, coordenadas o referencia catastral; después "
+                    "adjunta el plano y exporta el informe.",
+                ),
+            ]
+            state = {"idx": 0}
+
+            def render_step() -> None:
+                heading, copy = steps[state["idx"]]
+                title.setText(heading)
+                body.setText(copy)
+                verify_btn.setVisible(state["idx"] == 1)
+                next_btn.setText("Crear expediente" if state["idx"] == 2 else "Siguiente")
+
+            def finish(*, open_expedientes: bool = False) -> None:
+                self._mark_onboarding_done()
+                dlg.accept()
+                if open_expedientes:
+                    QTimer.singleShot(150, self._open_expedientes)
+
+            def advance() -> None:
+                if state["idx"] >= 2:
+                    finish(open_expedientes=True)
+                    return
+                state["idx"] += 1
+                render_step()
+
+            skip_btn.clicked.connect(lambda: finish(open_expedientes=False))
+            verify_btn.clicked.connect(self._start_warmup_agent)
+            next_btn.clicked.connect(advance)
+            dlg.finished.connect(lambda _code: setattr(self, "_onboarding_dialog", None))
+            self._onboarding_dialog = dlg
+            render_step()
+            dlg.open()
+
+        def _onboarding_done(self) -> bool:
+            try:
+                data = json.loads(self._onboarding_config_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                return False
+            return bool(data.get("onboarding_done"))
+
+        def _mark_onboarding_done(self) -> None:
+            try:
+                data = json.loads(self._onboarding_config_path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                data = {}
+            data["onboarding_done"] = True
+            self._onboarding_config_path.parent.mkdir(parents=True, exist_ok=True)
+            self._onboarding_config_path.write_text(
+                json.dumps(data, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
 
         # ── Compliance flow (Phase 7) ─────────────────────────────────────────
         def _on_pdf_attached(self, path: Path) -> None:
@@ -1440,6 +1586,8 @@ def launch_desktop_app(
                     store.update(updated)
                     list_panel.populate(store.list_all())
                     detail_panel.load_expediente(updated)
+                    self._last_exp_label = updated.title
+                    self._refresh_status_bar()
                     t.quit()
 
                 def _on_failed(msg: str) -> None:
@@ -1507,6 +1655,8 @@ def launch_desktop_app(
                     store.update(updated)
                     list_panel.populate(store.list_all())
                     detail_panel.load_expediente(updated)
+                    self._last_exp_label = updated.title
+                    self._refresh_status_bar()
                     self.statusBar().showMessage(
                         f"Expediente analizado: {analysis['verdict_label']}"
                     )
@@ -1543,6 +1693,8 @@ def launch_desktop_app(
                 store.update(updated)
                 list_panel.populate(store.list_all())
                 detail_panel.load_expediente(updated)
+                self._last_exp_label = updated.title
+                self._refresh_status_bar()
                 subprocess.run(["open", str(output_path)], check=False)
                 self.statusBar().showMessage(f"Informe exportado: {output_path.name}")
 
@@ -1573,6 +1725,8 @@ def launch_desktop_app(
                     updated = dataclasses.replace(exp, plan_path=paths[0])
                     store.update(updated)
                     detail_panel.load_expediente(updated)
+                    self._last_exp_label = updated.title
+                    self._refresh_status_bar()
 
                 picker.accepted.connect(_on_accepted)
                 picker.open()   # non-blocking — avoids nested exec() crash on macOS

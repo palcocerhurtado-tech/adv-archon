@@ -48,6 +48,18 @@ def logo_path() -> Path:
     return PACKAGE_ROOT / "resources" / "branding" / "archon-logo.png"
 
 
+def logo_full_path() -> Path:
+    return PACKAGE_ROOT / "resources" / "branding" / "archon-logo-full.png"
+
+
+def logo_outline_path() -> Path:
+    return PACKAGE_ROOT / "resources" / "branding" / "archon-logo-outline.png"
+
+
+def report_logo_path() -> Path:
+    return logo_full_path()
+
+
 def desktop_stylesheet() -> str:
     return f"""
 * {{
@@ -111,15 +123,32 @@ QFrame#ToolBadge {{
     border: 1px solid {ACCENT_GLOW};
     border-radius: 6px;
 }}
-QFrame#OkBadge   {{ background: {OK_DIM};
-    border: 1px solid rgba(34,197,94,0.25);   border-radius: 6px; }}
-QFrame#WarnBadge {{ background: {WARN_DIM};
-    border: 1px solid rgba(245,158,11,0.25);  border-radius: 6px; }}
-QFrame#ErrBadge  {{ background: {ERR_DIM};
-    border: 1px solid rgba(239,68,68,0.25);   border-radius: 6px; }}
-QFrame#InfoBadge {{ background: {INFO_DIM};
-    border: 1px solid rgba(139,92,246,0.25);  border-radius: 6px; }}
-QFrame#Divider    {{ background: {BORDER};   max-height: 1px; min-height: 1px; border: none; }}
+QFrame#OkBadge {{
+    background: {OK_DIM};
+    border: 1px solid rgba(34,197,94,0.25);
+    border-radius: 6px;
+}}
+QFrame#WarnBadge {{
+    background: {WARN_DIM};
+    border: 1px solid rgba(245,158,11,0.25);
+    border-radius: 6px;
+}}
+QFrame#ErrBadge {{
+    background: {ERR_DIM};
+    border: 1px solid rgba(239,68,68,0.25);
+    border-radius: 6px;
+}}
+QFrame#InfoBadge {{
+    background: {INFO_DIM};
+    border: 1px solid rgba(139,92,246,0.25);
+    border-radius: 6px;
+}}
+QFrame#Divider {{
+    background: {BORDER};
+    max-height: 1px;
+    min-height: 1px;
+    border: none;
+}}
 QFrame#DropZone   {{
     background: {ACCENT_DIM};
     border: 1px dashed {ACCENT};
@@ -320,5 +349,6 @@ __all__ = [
     "TEXT", "TEXT_FAINT", "TEXT_SUB", "WARN", "WARN_DIM",
     "GRAPHITE", "MATTE_BLACK", "MUTED_TEXT", "NEON_GREEN",
     "NEON_PINK", "SOFT_GRAPHITE", "WHITE",
-    "desktop_stylesheet", "logo_path",
+    "desktop_stylesheet", "logo_full_path", "logo_outline_path", "logo_path",
+    "report_logo_path",
 ]

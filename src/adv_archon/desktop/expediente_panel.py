@@ -23,6 +23,7 @@ QFileDialog: Any = None
 QFormLayout: Any = None
 QFrame: Any = None
 QHBoxLayout: Any = None
+QIcon: Any = None
 QLabel: Any = None
 QLineEdit: Any = None
 QListWidget: Any = None
@@ -37,9 +38,11 @@ QWidget: Any = None
 
 if PYSIDE6_AVAILABLE:
     from importlib import import_module
-    _w = import_module("PySide6.QtWidgets")
     _c = import_module("PySide6.QtCore")
+    _g = import_module("PySide6.QtGui")
+    _w = import_module("PySide6.QtWidgets")
     Qt = _c.Qt
+    QIcon = _g.QIcon
     QDialog = _w.QDialog
     QDialogButtonBox = _w.QDialogButtonBox
     QFileDialog = _w.QFileDialog
@@ -94,7 +97,7 @@ _DISCLAIMER = (
 
 # ── Veredicto derivado del panel de checks ────────────────────────────────────
 
-def _veredicto_from_checks(checks: list[dict]) -> tuple[str, str]:
+def _veredicto_from_checks(checks: list[dict[str, Any]]) -> tuple[str, str]:
     """Return (label, colour) VIABLE / CONDICIONADO / REVISAR."""
     if not checks:
         return "", ""
@@ -299,6 +302,7 @@ if PYSIDE6_AVAILABLE:
             # Action buttons
             btn_row = QHBoxLayout()
             self._analyze_btn = QPushButton("Analizar con PGOU")
+            self._set_brand_icon(self._analyze_btn)
             self._analyze_btn.setEnabled(False)
             self._analyze_btn.setToolTip(
                 "Enviar el plano al agente ARCHON para análisis de cumplimiento"
@@ -311,6 +315,7 @@ if PYSIDE6_AVAILABLE:
             btn_row.addWidget(self._analyze_btn)
 
             self._export_btn = QPushButton("Exportar informe PDF")
+            self._set_brand_icon(self._export_btn)
             self._export_btn.setEnabled(False)
             self._export_btn.setToolTip(
                 "Generar informe PDF profesional con todos los datos del expediente"
@@ -330,6 +335,15 @@ if PYSIDE6_AVAILABLE:
             btn_row.addWidget(self._open_report_btn)
             btn_row.addStretch()
             layout.addLayout(btn_row)
+
+        def _set_brand_icon(self, button: Any) -> None:
+            try:
+                from adv_archon.desktop.branding import logo_path
+                icon_path = logo_path()
+                if icon_path.exists():
+                    button.setIcon(QIcon(str(icon_path)))
+            except Exception:
+                return
 
         def load_expediente(self, exp: Any) -> None:
             """Populate the panel with data from an Expediente."""

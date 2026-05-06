@@ -1,4 +1,9 @@
-from adv_archon.desktop.branding import desktop_stylesheet, logo_path
+from adv_archon.desktop.branding import (
+    desktop_stylesheet,
+    logo_full_path,
+    logo_path,
+    report_logo_path,
+)
 
 
 def test_logo_path_points_to_packaged_brand_asset() -> None:
@@ -6,6 +11,8 @@ def test_logo_path_points_to_packaged_brand_asset() -> None:
 
     assert path.name == "archon-logo.png"
     assert path.exists()
+    assert logo_full_path().exists()
+    assert report_logo_path().exists()
 
 
 def test_desktop_stylesheet_contains_brand_colors() -> None:

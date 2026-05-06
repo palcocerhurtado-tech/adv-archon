@@ -22,6 +22,8 @@ from typing import Any
 
 import httpx
 
+from adv_archon.core.ttl_cache import TTLCache
+
 log = logging.getLogger(__name__)
 
 # Primary INSPIRE WFS published by MITECO / CNIG
@@ -30,6 +32,7 @@ log = logging.getLogger(__name__)
 _WFS_BASE = "https://servicios.idee.es/wfs-inspire/costas"
 _TIMEOUT = 12.0
 _UA = "adv-archon-urban-compliance/1.0"
+_CACHE = TTLCache(ttl_seconds=3600.0)
 
 # typename → (human label, zone_key stored in result)
 # Order matters: from most restrictive to least
@@ -55,6 +58,11 @@ def query_coastal_zone(lat: float, lon: float) -> dict[str, Any]:
           "error":               ""
         }
     """
+    cache_key = ("costas", round(lat, 7), round(lon, 7), id(httpx.get))
+    cached = _CACHE.get(cache_key)
+    if isinstance(cached, dict):
+        return cached
+
     result: dict[str, Any] = {
         "in_dpmt": False,
         "in_protection_zone": False,
@@ -66,12 +74,12 @@ def query_coastal_zone(lat: float, lon: float) -> dict[str, Any]:
     matched: list[str] = []
     errors: list[str] = []
 
-    for typename, (label, key) in _LAYERS.items():
+    for typename, (label, zone_key) in _LAYERS.items():
         try:
             hit = _query_layer(typename, lat=lat, lon=lon)
             if hit:
                 matched.append(label)
-                result[key] = True
+                result[zone_key] = True
         except Exception as exc:
             errors.append(f"{typename}: {exc}")
 
@@ -80,12 +88,18 @@ def query_coastal_zone(lat: float, lon: float) -> dict[str, Any]:
         for key in ("in_dpmt", "in_protection_zone", "in_influence_zone"):
             result[key] = None
         result["error"] = "; ".join(errors[:2])
+        _CACHE.set(cache_key, result)
         return result
 
     result["zones"] = matched
     if errors:
         log.debug("SIGCOSTAS partial errors: %s", errors)
+    _CACHE.set(cache_key, result)
     return result
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
 
 
 def _query_layer(typename: str, *, lat: float, lon: float) -> bool:

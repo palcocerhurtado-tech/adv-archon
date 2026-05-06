@@ -77,8 +77,11 @@ def test_generate_expediente_pdf_with_site_context(tmp_path: Path) -> None:
         "legal_checks": [
             {"name": "Identificación catastral", "status": "ready", "detail": "Ref. verificada"},
             {"name": "PGOU municipal", "status": "ready", "detail": "PGOU indexado"},
-            {"name": "Dominio hidráulico", "status": "conditional",
-             "detail": "T500 zona inundable"},
+            {
+                "name": "Dominio hidráulico",
+                "status": "conditional",
+                "detail": "T500 zona inundable",
+            },
             {"name": "Costas", "status": "not_applicable", "detail": "Interior"},
         ],
     }

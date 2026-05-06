@@ -14,11 +14,14 @@ from typing import Any
 
 import httpx
 
+from adv_archon.core.ttl_cache import TTLCache
+
 log = logging.getLogger(__name__)
 
 _WFS_BASE = "https://servicios.idee.es/wfs-inspire/espacios-naturales"
 _TIMEOUT = 12.0
 _UA = "adv-archon-urban-compliance/1.0"
+_CACHE = TTLCache(ttl_seconds=3600.0)
 
 # Typename → human label for each Natura 2000 layer
 _LAYERS: dict[str, str] = {
@@ -40,6 +43,11 @@ def query_protected_area(lat: float, lon: float) -> dict[str, Any]:
           "error": ""
         }
     """
+    key = ("natura2000", round(lat, 7), round(lon, 7), id(httpx.get))
+    cached = _CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
+
     result: dict[str, Any] = {
         "in_protected_area": False,
         "zones": [],
@@ -59,13 +67,19 @@ def query_protected_area(lat: float, lon: float) -> dict[str, Any]:
     if errors and not matched and len(errors) == len(_LAYERS):
         result["in_protected_area"] = None   # service unavailable
         result["error"] = "; ".join(errors[:2])
+        _CACHE.set(key, result)
         return result
 
     result["in_protected_area"] = bool(matched)
     result["zones"] = matched
     if errors:
         log.debug("Natura 2000 partial errors: %s", errors)
+    _CACHE.set(key, result)
     return result
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
 
 
 def _query_layer(typename: str, *, lat: float, lon: float) -> bool:

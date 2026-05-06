@@ -86,6 +86,9 @@ def test_get_parcel_by_ref_returns_error_on_empty_ref() -> None:
 
 
 def test_get_parcel_by_ref_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
+    from adv_archon.integrations import catastro
+
+    catastro.clear_cache()
     mock_resp = MagicMock()
     mock_resp.text = _SAMPLE_DNPRC_XML
     mock_resp.raise_for_status = MagicMock()
@@ -99,6 +102,9 @@ def test_get_parcel_by_ref_mocked(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_get_parcel_by_ref_network_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    from adv_archon.integrations import catastro
+
+    catastro.clear_cache()
     with patch(
         "adv_archon.integrations.catastro.httpx.get",
         side_effect=Exception("timeout"),
@@ -131,6 +137,9 @@ def test_parse_coordinates_by_ref_xml_extracts_centroid() -> None:
 
 
 def test_get_coordinates_by_ref_mocked() -> None:
+    from adv_archon.integrations import catastro
+
+    catastro.clear_cache()
     mock_resp = MagicMock()
     mock_resp.text = _SAMPLE_CPMRC_XML
     mock_resp.raise_for_status = MagicMock()
@@ -141,6 +150,22 @@ def test_get_coordinates_by_ref_mocked() -> None:
     assert result["latitude"] == 40.4168
     assert result["longitude"] == -3.7038
     assert result["error"] == ""
+
+
+def test_get_parcel_by_ref_uses_memory_cache() -> None:
+    from adv_archon.integrations import catastro
+
+    catastro.clear_cache()
+    mock_resp = MagicMock()
+    mock_resp.text = _SAMPLE_DNPRC_XML
+    mock_resp.raise_for_status = MagicMock()
+
+    with patch("adv_archon.integrations.catastro.httpx.get", return_value=mock_resp) as mocked:
+        first = get_parcel_by_ref("7537903VK4873N0001OU")
+        second = get_parcel_by_ref("7537903VK4873N0001OU")
+
+    assert first == second
+    assert mocked.call_count == 1
 
 
 # ── SNCZI flood zone ──────────────────────────────────────────────────────────

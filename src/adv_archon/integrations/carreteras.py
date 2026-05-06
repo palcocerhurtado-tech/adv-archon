@@ -17,12 +17,15 @@ from typing import Any
 
 import httpx
 
+from adv_archon.core.ttl_cache import TTLCache
+
 log = logging.getLogger(__name__)
 
 _WFS_BASE = "https://servicios.idee.es/wfs-inspire/transportes"
 _TIMEOUT = 12.0
 _UA = "adv-archon-urban-compliance/1.0"
 _SEARCH_RADIUS_M = 150.0
+_CACHE = TTLCache(ttl_seconds=3600.0)
 
 _DOMAIN_M = 8.0
 _SERVITUDE_M = 25.0
@@ -51,6 +54,11 @@ def query_road_zone(lat: float, lon: float) -> dict[str, Any]:
           "error": ""
         }
     """
+    key = ("roads", round(lat, 7), round(lon, 7), id(httpx.get))
+    cached = _CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
+
     result: dict[str, Any] = {
         "in_domain_zone": False,
         "in_servitude_zone": False,
@@ -92,6 +100,7 @@ def query_road_zone(lat: float, lon: float) -> dict[str, Any]:
         result["in_servitude_zone"] = None
         result["in_affection_zone"] = None
         result["error"] = "; ".join(errors[:2])
+        _CACHE.set(key, result)
         return result
 
     if not road_axis_success and not service_area_hit:
@@ -99,6 +108,7 @@ def query_road_zone(lat: float, lon: float) -> dict[str, Any]:
         result["in_servitude_zone"] = None
         result["in_affection_zone"] = None
         result["error"] = "; ".join(errors[:2])
+        _CACHE.set(key, result)
         return result
 
     if nearest_distance_m is not None:
@@ -136,7 +146,12 @@ def query_road_zone(lat: float, lon: float) -> dict[str, Any]:
     result["zones"] = matched
     if errors:
         log.debug("Carreteras partial errors: %s", errors)
+    _CACHE.set(key, result)
     return result
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
 
 
 def _query_layer(typename: str, *, lat: float, lon: float) -> list[dict[str, Any]]:

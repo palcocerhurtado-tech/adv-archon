@@ -11,10 +11,13 @@ from typing import Any
 
 import httpx
 
+from adv_archon.core.ttl_cache import TTLCache
+
 _BASE = "https://ovc.catastro.meh.es/ovcservweb/OVCSWlocalizacionRC/OVCCoordenadas.asmx"
 _BASE_RC = "https://ovc.catastro.meh.es/ovcservweb/OVCSWLocalizacionRC/OVCCallejero.asmx"
 _TIMEOUT = 10
 _USER_AGENT = "adv-archon-urban-compliance/1.0"
+_CACHE = TTLCache(ttl_seconds=3600.0)
 
 
 def get_cadastral_data(lat: float, lon: float) -> dict[str, Any]:
@@ -22,6 +25,11 @@ def get_cadastral_data(lat: float, lon: float) -> dict[str, Any]:
     Query Catastro OVC with EPSG:4326 coordinates.
     Returns dict with keys: cadastral_ref, address, use, error.
     """
+    key = ("rccoor", round(lat, 7), round(lon, 7), id(httpx.get))
+    cached = _CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
+
     url = f"{_BASE}/Consulta_RCCOOR"
     try:
         resp = httpx.get(
@@ -38,9 +46,11 @@ def get_cadastral_data(lat: float, lon: float) -> dict[str, Any]:
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
-        return _parse_xml(resp.text)
+        result = _parse_xml(resp.text)
     except Exception as exc:
-        return {"error": str(exc)[:200], "raw_xml": ""}
+        result = {"error": str(exc)[:200], "raw_xml": ""}
+    _CACHE.set(key, result)
+    return result
 
 
 def get_parcel_by_ref(ref_cat: str) -> dict[str, Any]:
@@ -77,6 +87,10 @@ def get_parcel_by_ref(ref_cat: str) -> dict[str, Any]:
     if not ref_cat:
         result["error"] = "Referencia catastral vacía"
         return result
+    key = ("dnprc", ref_cat, id(httpx.get))
+    cached = _CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
     try:
         resp = httpx.get(
             f"{_BASE_RC}/Consulta_DNPRC",
@@ -85,10 +99,11 @@ def get_parcel_by_ref(ref_cat: str) -> dict[str, Any]:
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
-        return _parse_parcel_xml(resp.text, result)
+        result = _parse_parcel_xml(resp.text, result)
     except Exception as exc:
         result["error"] = str(exc)[:200]
-        return result
+    _CACHE.set(key, result)
+    return result
 
 
 def get_coordinates_by_ref(
@@ -117,6 +132,10 @@ def get_coordinates_by_ref(
     if not ref_cat:
         result["error"] = "Referencia catastral vacía"
         return result
+    key = ("cpmrc", ref_cat, province.strip().upper(), municipality.strip().upper(), id(httpx.get))
+    cached = _CACHE.get(key)
+    if isinstance(cached, dict):
+        return cached
     try:
         resp = httpx.get(
             f"{_BASE}/Consulta_CPMRC",
@@ -130,10 +149,15 @@ def get_coordinates_by_ref(
             timeout=_TIMEOUT,
         )
         resp.raise_for_status()
-        return _parse_coordinates_by_ref_xml(resp.text, result)
+        result = _parse_coordinates_by_ref_xml(resp.text, result)
     except Exception as exc:
         result["error"] = str(exc)[:200]
-        return result
+    _CACHE.set(key, result)
+    return result
+
+
+def clear_cache() -> None:
+    _CACHE.clear()
 
 
 def _parse_coordinates_by_ref_xml(xml: str, base: dict[str, Any]) -> dict[str, Any]:

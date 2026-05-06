@@ -587,6 +587,11 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     pdf.add_page()
 
     # ── Cover: expediente metadata ────────────────────────────────────────
+    report_logo = _default_report_logo_path()
+    if report_logo is not None:
+        pdf.image(str(report_logo), x=18, y=18, w=18)
+        pdf.set_xy(40, 18)
+
     pdf.set_font(pdf._fn, "B", 20)
     pdf.set_text_color(*_C_ACCENT)
     pdf.cell(0, 12, "INFORME DE CUMPLIMIENTO NORMATIVO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
@@ -691,6 +696,15 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     pdf.output(str(output_path))
     return output_path
+
+
+def _default_report_logo_path() -> Path | None:
+    try:
+        from adv_archon.desktop.branding import report_logo_path
+    except Exception:
+        return None
+    path = report_logo_path()
+    return path if path.exists() else None
 
 
 def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:

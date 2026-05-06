@@ -16,6 +16,7 @@ class DesktopBundleResult:
     launcher_path: Path
     info_plist_path: Path
     icon_path: Path | None = None
+    embedded_project_path: Path | None = None
 
 
 def create_macos_app_bundle(
@@ -25,6 +26,7 @@ def create_macos_app_bundle(
     bundle_identifier: str = "com.advarchon.desktop",
     python_executable: Path | None = None,
     project_root: Path | None = None,
+    embed_project: bool = False,
 ) -> DesktopBundleResult:
     resolved_destination = destination_dir.expanduser().resolve()
     resolved_project_root = (project_root or Path.cwd()).expanduser().resolve()
@@ -35,15 +37,29 @@ def create_macos_app_bundle(
     info_plist_path = contents_path / "Info.plist"
     launcher_path = macos_path / "adv-archon-desktop"
     launcher_script_path = resources_path / "launch-adv-archon.sh"
+    embedded_project_path = resources_path / "adv-archon-source"
     bundled_icon_path: Path | None = None
 
     resources_path.mkdir(parents=True, exist_ok=True)
     macos_path.mkdir(parents=True, exist_ok=True)
 
-    venv_python = resolved_project_root / ".venv" / "bin" / "python"
+    if embed_project:
+        if embedded_project_path.exists():
+            shutil.rmtree(embedded_project_path)
+        shutil.copytree(
+            resolved_project_root,
+            embedded_project_path,
+            ignore=_project_copy_ignore,
+        )
 
     launcher_lines = [
         "#!/bin/sh",
+        'RESOURCE_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)',
+        'EMBEDDED_PROJECT="$RESOURCE_DIR/adv-archon-source"',
+        f"PROJECT_ROOT='{resolved_project_root}'",
+        'if [ -d "$EMBEDDED_PROJECT/src/adv_archon" ]; then',
+        '    PROJECT_ROOT="$EMBEDDED_PROJECT"',
+        "fi",
         # Source user shell so PATH includes homebrew/cargo even from Finder
         '[ -f "$HOME/.zprofile" ] && . "$HOME/.zprofile"',
         '[ -f "$HOME/.zshrc"    ] && . "$HOME/.zshrc" 2>/dev/null',
@@ -59,11 +75,11 @@ def create_macos_app_bundle(
         " Instálalo con: curl -LsSf https://astral.sh/uv/install.sh | sh\" as critical'",
         "    exit 1",
         "fi",
-        f"cd '{resolved_project_root}'",
-        f"export PYTHONPATH='{resolved_project_root / 'src'}':\"$PYTHONPATH\"",
+        'cd "$PROJECT_ROOT"',
+        'export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"',
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
         # Use venv Python directly for sysconfig (fast, no uv overhead)
-        f'VENV_PY="{venv_python}"',
+        'VENV_PY="$PROJECT_ROOT/.venv/bin/python"',
         '[ -x "$VENV_PY" ] || VENV_PY=$("$UV" run python'
         ' -c "import sys; print(sys.executable)" 2>/dev/null)',
         'SITE=$("$VENV_PY" -c'
@@ -126,7 +142,22 @@ def create_macos_app_bundle(
         launcher_path=launcher_path,
         info_plist_path=info_plist_path,
         icon_path=bundled_icon_path,
+        embedded_project_path=embedded_project_path if embed_project else None,
     )
+
+
+def _project_copy_ignore(directory: str, names: list[str]) -> set[str]:
+    ignored = {
+        ".git",
+        ".mypy_cache",
+        ".pytest_cache",
+        ".ruff_cache",
+        ".venv",
+        "__pycache__",
+        "dist",
+    }
+    ignored.update(name for name in names if name.endswith((".pyc", ".pyo")))
+    return ignored.intersection(names)
 
 
 def _write_native_launcher(output_path: Path) -> bool:

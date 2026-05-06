@@ -47,9 +47,10 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path, monke
     assert f"PROJECT_ROOT='{project_root}'" in launcher
     assert 'cd "$PROJECT_ROOT"' in launcher
     assert 'export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"' in launcher
-    # Qt plugin path is now detected dynamically at runtime, not baked in
-    assert "QT_PLUGIN_PATH" in launcher
-    assert "sysconfig" in launcher
+    # Let PySide6 discover Qt plugins itself; forcing platforms can break cocoa.
+    assert "unset QT_PLUGIN_PATH" in launcher
+    assert "unset QT_QPA_PLATFORM_PLUGIN_PATH" in launcher
+    assert "sysconfig" not in launcher
     assert "-m adv_archon.main desktop" in launcher
 
     with result.info_plist_path.open("rb") as handle:

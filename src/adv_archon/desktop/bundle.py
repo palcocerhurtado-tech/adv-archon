@@ -78,16 +78,8 @@ def create_macos_app_bundle(
         'cd "$PROJECT_ROOT"',
         'export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"',
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
-        # Use venv Python directly for sysconfig (fast, no uv overhead)
-        'VENV_PY="$PROJECT_ROOT/.venv/bin/python"',
-        '[ -x "$VENV_PY" ] || VENV_PY=$("$UV" run python'
-        ' -c "import sys; print(sys.executable)" 2>/dev/null)',
-        'SITE=$("$VENV_PY" -c'
-        " \"import sysconfig; print(sysconfig.get_path('platlib'))\" 2>/dev/null)",
-        'if [ -n "$SITE" ] && [ -d "$SITE/PySide6/Qt/plugins" ]; then',
-        '    export QT_PLUGIN_PATH="$SITE/PySide6/Qt/plugins"',
-        '    export QT_QPA_PLATFORM_PLUGIN_PATH="$SITE/PySide6/Qt/plugins/platforms"',
-        "fi",
+        "unset QT_PLUGIN_PATH",
+        "unset QT_QPA_PLATFORM_PLUGIN_PATH",
         'exec "$UV" run python -m adv_archon.main desktop "$@"',
         "",
     ]

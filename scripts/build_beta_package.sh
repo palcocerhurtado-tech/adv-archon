@@ -127,7 +127,7 @@ PROJECT_ROOT="$APP_DST/Contents/Resources/adv-archon-source"
 
 echo "3/5 Instalando dependencias locales de ADV ARCHON…"
 cd "$PROJECT_ROOT"
-"$UV" sync --extra desktop
+"$UV" sync --extra desktop --reinstall-package python-dotenv --reinstall-package PySide6 --reinstall-package PySide6-Addons --reinstall-package PySide6-Essentials --reinstall-package shiboken6
 
 echo "4/5 Comprobando Ollama…"
 OLLAMA_BIN="$(command -v ollama 2>/dev/null || true)"
@@ -199,6 +199,10 @@ if not exist "%PROJECT_ROOT%\src\adv_archon" (
 set "PATH=%USERPROFILE%\.local\bin;%USERPROFILE%\.cargo\bin;%LOCALAPPDATA%\Programs\Ollama;%PATH%"
 cd /d "%PROJECT_ROOT%"
 set "PYTHONPATH=%PROJECT_ROOT%\src;%PYTHONPATH%"
+uv run python -c "import dotenv.main; from PySide6.QtWidgets import QApplication; app = QApplication([])" >nul 2>&1
+if errorlevel 1 (
+  uv sync --extra desktop --reinstall-package python-dotenv --reinstall-package PySide6 --reinstall-package PySide6-Addons --reinstall-package PySide6-Essentials --reinstall-package shiboken6
+)
 uv run python -m adv_archon.main desktop
 WIN_LAUNCHER_EOF
 
@@ -249,7 +253,7 @@ if errorlevel 1 (
 
 echo 3/5 Instalando dependencias locales...
 cd /d "%PROJECT_ROOT%"
-uv sync --extra desktop
+uv sync --extra desktop --reinstall-package python-dotenv --reinstall-package PySide6 --reinstall-package PySide6-Addons --reinstall-package PySide6-Essentials --reinstall-package shiboken6
 if errorlevel 1 (
   echo ERROR: No se pudieron instalar las dependencias.
   pause

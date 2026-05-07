@@ -80,6 +80,18 @@ def create_macos_app_bundle(
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
         "unset QT_PLUGIN_PATH",
         "unset QT_QPA_PLATFORM_PLUGIN_PATH",
+        "# Repair generated uv environments when Finder launches a stale/corrupt .venv.",
+        (
+            'if ! "$UV" run python -c "import dotenv.main; '
+            'from PySide6.QtWidgets import QApplication; '
+            'app = QApplication([])" >/dev/null 2>&1; then'
+        ),
+        (
+            '    "$UV" sync --extra desktop --reinstall-package python-dotenv '
+            "--reinstall-package PySide6 --reinstall-package PySide6-Addons "
+            "--reinstall-package PySide6-Essentials --reinstall-package shiboken6"
+        ),
+        "fi",
         'exec "$UV" run python -m adv_archon.main desktop "$@"',
         "",
     ]

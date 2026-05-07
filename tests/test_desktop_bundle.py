@@ -50,6 +50,9 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path, monke
     # Let PySide6 discover Qt plugins itself; forcing platforms can break cocoa.
     assert "unset QT_PLUGIN_PATH" in launcher
     assert "unset QT_QPA_PLATFORM_PLUGIN_PATH" in launcher
+    assert "import dotenv.main" in launcher
+    assert "--reinstall-package python-dotenv" in launcher
+    assert "--reinstall-package PySide6" in launcher
     assert "sysconfig" not in launcher
     assert "-m adv_archon.main desktop" in launcher
 

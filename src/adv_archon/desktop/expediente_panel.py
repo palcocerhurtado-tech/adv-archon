@@ -14,6 +14,8 @@ from importlib.util import find_spec
 from pathlib import Path
 from typing import Any, cast
 
+from adv_archon.desktop.branding import ACCENT, BG, ERR, OK, TEXT_FAINT, TEXT_SUB, WARN
+
 PYSIDE6_AVAILABLE = find_spec("PySide6") is not None
 
 Qt: Any = None
@@ -67,15 +69,15 @@ if PYSIDE6_AVAILABLE:
 # ── Status colours / labels ───────────────────────────────────────────────────
 
 _STATUS_COLOUR = {
-    "borrador":          "#888888",
-    "geocodificando":    "#1565C0",
-    "geocodificado":     "#00796B",
-    "analizando":        "#1565C0",
-    "analizado":         "#2979FF",
-    "informe_generado":  "#2E7D32",
-    "informe_listo":     "#2E7D32",
-    "requiere_revision": "#E65100",
-    "error":             "#C62828",
+    "borrador":          TEXT_FAINT,
+    "geocodificando":    ACCENT,
+    "geocodificado":     OK,
+    "analizando":        ACCENT,
+    "analizado":         ACCENT,
+    "informe_generado":  OK,
+    "informe_listo":     OK,
+    "requiere_revision": WARN,
+    "error":             ERR,
 }
 
 _STATUS_LABEL = {
@@ -91,7 +93,7 @@ _STATUS_LABEL = {
 }
 
 _DISCLAIMER = (
-    "<p style='color:#777;font-size:10px;margin-top:12px;'>"
+    f"<p style='color:{TEXT_FAINT};font-size:10px;margin-top:12px;'>"
     "⚠ Análisis preliminar de ADV ARCHON — no vinculante jurídicamente. "
     "Verifique siempre con el PGOU municipal vigente y con técnico competente."
     "</p>"
@@ -105,12 +107,12 @@ def _veredicto_from_checks(checks: list[dict[str, Any]]) -> tuple[str, str]:
         return "", ""
     statuses = [c.get("status", "") for c in checks]
     if any(s == "missing" for s in statuses):
-        return "REVISAR", "#C62828"
+        return "REVISAR", ERR
     if any(s in ("conditional", "pending_review") for s in statuses):
-        return "CONDICIONADO", "#E65100"
+        return "CONDICIONADO", WARN
     if all(s in ("ready", "not_applicable") for s in statuses):
-        return "VIABLE", "#2E7D32"
-    return "CONDICIONADO", "#E65100"
+        return "VIABLE", OK
+    return "CONDICIONADO", WARN
 
 
 if PYSIDE6_AVAILABLE:
@@ -272,16 +274,19 @@ if PYSIDE6_AVAILABLE:
 
             # Header
             self._title_label = QLabel("Selecciona o crea un expediente")
-            self._title_label.setStyleSheet("font-weight: bold; font-size: 15px;")
+            self._title_label.setStyleSheet(
+                "font-family:'Libre Baskerville','Georgia',serif;"
+                "font-weight:bold;font-size:15px;"
+            )
             self._title_label.setWordWrap(True)
             layout.addWidget(self._title_label)
 
             self._status_label = QLabel("")
-            self._status_label.setStyleSheet("font-size: 11px; color: #888;")
+            self._status_label.setStyleSheet(f"font-size:11px;color:{TEXT_SUB};")
             layout.addWidget(self._status_label)
 
             self._operation_label = QLabel("")
-            self._operation_label.setStyleSheet("font-size: 11px; color: #E65100;")
+            self._operation_label.setStyleSheet(f"font-size:11px;color:{WARN};")
             self._operation_label.setVisible(False)
             layout.addWidget(self._operation_label)
 
@@ -305,7 +310,7 @@ if PYSIDE6_AVAILABLE:
             # Plano row
             plan_row = QHBoxLayout()
             self._plan_label = QLabel("Sin plano adjunto")
-            self._plan_label.setStyleSheet("color: #888; font-size: 11px;")
+            self._plan_label.setStyleSheet(f"color:{TEXT_SUB};font-size:11px;")
             plan_row.addWidget(self._plan_label)
             plan_row.addStretch()
             attach_btn = QPushButton("Adjuntar plano…")
@@ -323,8 +328,8 @@ if PYSIDE6_AVAILABLE:
                 "Enviar el plano al agente ARCHON para análisis de cumplimiento"
             )
             self._analyze_btn.setStyleSheet(
-                "background:#1565C0; color:white;"
-                " padding:6px 16px; border-radius:4px;"
+                f"background:{ACCENT};color:{BG};"
+                "padding:6px 16px;border-radius:4px;font-weight:700;"
             )
             self._analyze_btn.clicked.connect(self._on_analyze_clicked)
             btn_row.addWidget(self._analyze_btn)
@@ -343,8 +348,8 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setVisible(False)
             self._open_report_btn.setToolTip("Abrir el informe PDF generado")
             self._open_report_btn.setStyleSheet(
-                "background:#2E7D32; color:white;"
-                " padding:6px 14px; border-radius:4px;"
+                f"background:{OK};color:{BG};"
+                "padding:6px 14px;border-radius:4px;font-weight:700;"
             )
             self._open_report_btn.clicked.connect(self._on_open_report_clicked)
             btn_row.addWidget(self._open_report_btn)
@@ -365,7 +370,7 @@ if PYSIDE6_AVAILABLE:
             self._expediente_id = exp.id
             self._expediente = exp
             self._title_label.setText(exp.title)
-            colour = _STATUS_COLOUR.get(exp.status, "#888")
+            colour = _STATUS_COLOUR.get(exp.status, TEXT_FAINT)
             label = _STATUS_LABEL.get(exp.status, exp.status)
             self._status_label.setText(
                 f"<span style='color:{colour}'>● {label}</span>"
@@ -376,10 +381,10 @@ if PYSIDE6_AVAILABLE:
 
             if exp.plan_path:
                 self._plan_label.setText(f"Plano: {Path(exp.plan_path).name}")
-                self._plan_label.setStyleSheet("color: #333; font-size: 11px;")
+                self._plan_label.setStyleSheet(f"color:{TEXT_SUB};font-size:11px;")
             else:
                 self._plan_label.setText("Sin plano adjunto — adjunta el plano antes de analizar")
-                self._plan_label.setStyleSheet("color: #888; font-size: 11px;")
+                self._plan_label.setStyleSheet(f"color:{TEXT_FAINT};font-size:11px;")
 
             self._context_browser.setHtml(self._render_context(exp))
             can_analyze = bool(exp.plan_path) and bool(exp.municipality or exp.latitude)

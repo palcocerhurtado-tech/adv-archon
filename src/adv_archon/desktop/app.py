@@ -10,7 +10,7 @@ from adv_archon.core.attachments import normalize_attachment_paths
 from adv_archon.core.config import AppConfig, save_ollama_model_preference
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
-from adv_archon.desktop.branding import desktop_stylesheet, logo_path
+from adv_archon.desktop.branding import ERR, INFO, OK, TEXT_SUB, WARN, desktop_stylesheet, logo_path
 from adv_archon.desktop.compliance_session import (
     ComplianceSession,
     build_compliance_prompt,
@@ -1031,12 +1031,12 @@ def launch_desktop_app(
             if not hasattr(self, "_ollama_badge_lbl"):
                 return
             colors = {
-                "Listo": "#22C55E",
-                "Cargando…": "#F59E0B",
-                "Sin conexión": "#EF4444",
-                "Cloud": "#8B5CF6",
+                "Listo": OK,
+                "Cargando…": WARN,
+                "Sin conexión": ERR,
+                "Cloud": INFO,
             }
-            color = colors.get(self._ollama_state, "#9F9FAA")
+            color = colors.get(self._ollama_state, TEXT_SUB)
             self._ollama_badge_lbl.setText(
                 f"<span style='color:{color}'>●</span> Ollama: {self._ollama_state}"
             )
@@ -1300,6 +1300,12 @@ def launch_desktop_app(
         def _start_warmup_agent(self) -> None:
             if self._selected_mode != "local":
                 return
+            if self._warmup_agent_ref is not None:
+                _agent, thread = self._warmup_agent_ref
+                if thread is not None and thread.isRunning():
+                    self._handle_warmup_progress("Ollama ya se está verificando…")
+                    return
+                self._warmup_agent_ref = None
             try:
                 ref = start_warmup_agent(
                     base_url=config.llm.ollama_base_url,
@@ -1311,8 +1317,13 @@ def launch_desktop_app(
                     on_failed=self._handle_warmup_failed,
                 )
                 self._warmup_agent_ref = ref
+                _agent, thread = ref
+                thread.finished.connect(self._clear_warmup_agent_ref)
             except Exception:
                 pass  # warmup is optional; never block startup
+
+        def _clear_warmup_agent_ref(self) -> None:
+            self._warmup_agent_ref = None
 
         def _handle_warmup_progress(self, message: str) -> None:
             self._ollama_state = "Cargando…"
@@ -1327,13 +1338,11 @@ def launch_desktop_app(
             self._ollama_state = "Listo"
             self._refresh_status_bar()
             self.statusBar().showMessage(f"Modelo local listo en {elapsed:.1f}s", 4000)
-            self._warmup_agent_ref = None
 
         def _handle_warmup_failed(self, error: str) -> None:
             self._ollama_state = "Sin conexión"
             self._refresh_status_bar()
             self.statusBar().showMessage(f"Modelo no cargado: {error}", 6000)
-            self._warmup_agent_ref = None
 
         def _maybe_show_onboarding(self) -> None:
             if self._onboarding_done():
@@ -1405,7 +1414,7 @@ def launch_desktop_app(
                 render_step()
 
             skip_btn.clicked.connect(lambda: finish(open_expedientes=False))
-            verify_btn.clicked.connect(self._start_warmup_agent)
+            verify_btn.clicked.connect(lambda _checked=False: self._start_warmup_agent())
             next_btn.clicked.connect(advance)
             dlg.finished.connect(lambda _code: setattr(self, "_onboarding_dialog", None))
             self._onboarding_dialog = dlg

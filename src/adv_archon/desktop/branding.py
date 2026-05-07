@@ -1,38 +1,45 @@
 # mypy: ignore-errors
-"""Design tokens for the Archon Desktop — architect-grade premium dark UI."""
+"""Design tokens for the Archon Desktop — Archon Consultancies premium UI."""
 from __future__ import annotations
 
 from pathlib import Path
 
 from adv_archon.core.config import PACKAGE_ROOT
 
-# ── Color system ──────────────────────────────────────────────────────────────
-BG           = "#09090B"   # zinc-950 — absolute dark
-SURFACE      = "#111113"   # cards / panels
-SURFACE_UP   = "#18181C"   # elevated elements
-SURFACE_HIGH = "#1F1F24"   # tooltips, popovers
+# ── Archon Consultancies brand palette ────────────────────────────────────────
+BG           = "#050505"   # Negro Archon
+SURFACE      = "#111110"   # deep institutional panel
+SURFACE_UP   = "#181817"   # elevated stone-black
+SURFACE_HIGH = "#2E2E2C"   # Gris piedra oscuro
 
-BORDER       = "#242429"   # hairline border
-BORDER_MED   = "#2E2E36"   # medium weight
-BORDER_FOCUS = "#3B6FFF"   # input focus ring
+BORDER       = "#2E2E2C"   # Gris piedra oscuro hairline
+BORDER_MED   = "#3A3935"   # medium stone
+BORDER_FOCUS = "#C9A227"   # Dorado metalizado
 
-TEXT         = "#F4F4F6"   # primary text
-TEXT_SUB     = "#9F9FAA"   # secondary / muted
-TEXT_FAINT   = "#52525C"   # placeholder, disabled
+TEXT         = "#F7F7F4"   # Blanco mármol
+TEXT_SUB     = "#B8B6AE"   # Gris piedra claro
+TEXT_FAINT   = "#77746B"   # muted stone
 
-ACCENT       = "#3B6FFF"   # Blueprint Blue — architect's drawing colour
-ACCENT_HOVER = "#5585FF"
-ACCENT_DIM   = "rgba(59,111,255,0.10)"
-ACCENT_GLOW  = "rgba(59,111,255,0.22)"
+ACCENT       = "#C9A227"   # Dorado metalizado, used sparingly
+ACCENT_HOVER = "#D8B84A"
+ACCENT_DIM   = "rgba(201,162,39,0.10)"
+ACCENT_GLOW  = "rgba(201,162,39,0.24)"
 
-OK           = "#22C55E"
-OK_DIM       = "rgba(34,197,94,0.10)"
-WARN         = "#F59E0B"
-WARN_DIM     = "rgba(245,158,11,0.10)"
-ERR          = "#EF4444"
-ERR_DIM      = "rgba(239,68,68,0.10)"
-INFO         = "#8B5CF6"
-INFO_DIM     = "rgba(139,92,246,0.10)"
+OK           = "#5FA66D"
+OK_DIM       = "rgba(95,166,109,0.12)"
+WARN         = "#C9A227"
+WARN_DIM     = "rgba(201,162,39,0.10)"
+ERR          = "#B24A3C"
+ERR_DIM      = "rgba(178,74,60,0.12)"
+INFO         = "#B8B6AE"
+INFO_DIM     = "rgba(184,182,174,0.10)"
+
+FONT_UI      = (
+    '"Inter", "IBM Plex Sans", "Manrope", "SF Pro Text", '
+    '"Segoe UI", system-ui, sans-serif'
+)
+FONT_DISPLAY = '"Libre Baskerville", "Georgia", serif'
+FONT_SEAL    = '"Cinzel Decorative", "Libre Baskerville", "Georgia", serif'
 
 # ── Backwards compat aliases ──────────────────────────────────────────────────
 MATTE_BLACK  = BG
@@ -63,7 +70,7 @@ def report_logo_path() -> Path:
 def desktop_stylesheet() -> str:
     return f"""
 * {{
-    font-family: "Inter", "SF Pro Text", "Segoe UI", system-ui, sans-serif;
+    font-family: {FONT_UI};
     outline: none;
 }}
 QMainWindow, QDialog {{
@@ -162,18 +169,23 @@ QLabel#Accent  {{ color: {ACCENT};     font-size: 12px; font-weight: 600; }}
 QLabel#Ok      {{ color: {OK};         font-size: 12px; font-weight: 600; }}
 QLabel#Warn    {{ color: {WARN};       font-size: 12px; font-weight: 600; }}
 QLabel#Err     {{ color: {ERR};        font-size: 12px; font-weight: 600; }}
-QLabel#AppName {{ color: {TEXT}; font-size: 13px; font-weight: 700; letter-spacing: 0.02em; }}
+QLabel#AppName {{
+    color: {TEXT};
+    font-family: {FONT_DISPLAY};
+    font-size: 14px;
+    font-weight: 700;
+}}
 QLabel#Eyebrow {{
     color: {TEXT_FAINT};
+    font-family: {FONT_UI};
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.12em;
 }}
 QLabel#RoleTag {{
     color: {ACCENT};
+    font-family: {FONT_SEAL};
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.08em;
 }}
 QLabel#RoleTagUser {{
     color: {TEXT_FAINT};
@@ -214,7 +226,7 @@ QPushButton:pressed {{ background: {SURFACE}; }}
 QPushButton:disabled {{ color: {TEXT_FAINT}; background: {SURFACE}; border-color: {BORDER}; }}
 QPushButton#Primary {{
     background: {ACCENT};
-    color: #FFFFFF;
+    color: {BG};
     border: none;
     border-radius: 8px;
     padding: 7px 18px;
@@ -345,6 +357,7 @@ __all__ = [
     "ACCENT", "ACCENT_DIM", "ACCENT_GLOW", "ACCENT_HOVER",
     "BG", "BORDER", "BORDER_FOCUS", "BORDER_MED",
     "ERR", "ERR_DIM", "INFO", "INFO_DIM",
+    "FONT_DISPLAY", "FONT_SEAL", "FONT_UI",
     "OK", "OK_DIM", "SURFACE", "SURFACE_HIGH", "SURFACE_UP",
     "TEXT", "TEXT_FAINT", "TEXT_SUB", "WARN", "WARN_DIM",
     "GRAPHITE", "MATTE_BLACK", "MUTED_TEXT", "NEON_GREEN",

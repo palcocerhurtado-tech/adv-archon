@@ -15,10 +15,11 @@ class OllamaClient:
     model: str
     temperature: float
     timeout: float = 60.0
-    num_ctx: int = 2048       # 2048 is plenty for most queries; 4x faster than 8192
+    num_ctx: int = 4096        # 4096 balances context quality vs speed
     keep_alive: str = "-1"
-    num_predict: int = 768    # cap output tokens — avoids runaway generation
-    num_thread: int = 0       # 0 = Ollama auto-selects (all physical cores)
+    num_predict: int = 768     # cap output tokens — avoids runaway generation
+    num_thread: int = 0        # 0 = Ollama auto-selects (all physical cores)
+    num_batch: int = 512       # prompt-eval batch size — bigger = faster prefill
 
     def _keep_alive_value(self) -> int | str:
         return -1 if self.keep_alive.strip() == "-1" else self.keep_alive
@@ -28,6 +29,7 @@ class OllamaClient:
             "temperature": self.temperature,
             "num_ctx": self.num_ctx,
             "num_predict": self.num_predict,
+            "num_batch": self.num_batch,
             "top_k": 20,          # narrow sampling → faster + more focused
             "top_p": 0.85,
             "repeat_penalty": 1.1,
@@ -102,8 +104,11 @@ class OllamaClient:
         *,
         system_prompt: str,
     ) -> list[dict[str, str]]:
-        payload = [{"role": "system", "content": system_prompt}]
-        payload.extend({"role": message.role, "content": message.content} for message in messages)
+        payload: list[dict[str, str]] = [{"role": "system", "content": system_prompt}]
+        for msg in messages:
+            # Gemini uses "model" role; Ollama API requires "assistant"
+            role = "assistant" if msg.role == "model" else msg.role
+            payload.append({"role": role, "content": msg.content})
         return payload
 
     @staticmethod

@@ -2543,13 +2543,18 @@ class Agent:
             model="tool-error-handler",
         )
 
+    # Keep at most 10 session messages (≈5 turns) to bound context growth.
+    # Older turns increase TTFT without improving response quality for local models.
+    _HISTORY_WINDOW = 10
+
     def _build_messages(self) -> list[LLMMessage]:
+        recent = self._session.messages[-self._HISTORY_WINDOW:]
         return [
             LLMMessage(
                 role="model" if message.role == "assistant" else "user",
                 content=self._format_message(message),
             )
-            for message in self._session.messages
+            for message in recent
             if self._format_message(message).strip()
         ]
 

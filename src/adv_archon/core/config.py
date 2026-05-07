@@ -118,7 +118,7 @@ class LLMConfig:
     coding_cloud_model: str | None = None
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: int = 180
-    ollama_num_ctx: int = 2048       # 2048 fast; raise to 4096 for long docs
+    ollama_num_ctx: int = 4096       # 4096: balance quality/speed for llama 7-8B
     ollama_keep_alive: str = "-1"
     gemini_api_key: str | None = None
     gemini_timeout_seconds: int = 300
@@ -402,7 +402,7 @@ def load_app_config(
             os.getenv("ADV_ARCHON_OLLAMA_TIMEOUT_SECONDS")
             or _lookup(data, "llm", "ollama_timeout_seconds", default=180)
         ),
-        ollama_num_ctx=int(_lookup(data, "llm", "ollama_num_ctx", default=8192)),
+        ollama_num_ctx=int(_lookup(data, "llm", "ollama_num_ctx", default=4096)),
         ollama_keep_alive=str(_lookup(data, "llm", "ollama_keep_alive", default="-1")),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         gemini_timeout_seconds=int(

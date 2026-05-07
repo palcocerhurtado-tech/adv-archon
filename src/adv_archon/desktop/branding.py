@@ -1,5 +1,9 @@
 # mypy: ignore-errors
-"""Design tokens for the Archon Desktop — Archon Consultancies premium UI."""
+"""Design tokens for the Archon Desktop — Archon Consultancies premium UI.
+
+Aesthetic: Marble Temple — mármol blanco como campo, obsidiana como estructura,
+dorado como acento. Sidebar y TopBar en obsidiana; área principal en mármol.
+"""
 from __future__ import annotations
 
 from pathlib import Path
@@ -7,20 +11,20 @@ from pathlib import Path
 from adv_archon.core.config import PACKAGE_ROOT
 
 # ── Archon Consultancies brand palette ────────────────────────────────────────
-BG           = "#050505"   # Negro Archon
-SURFACE      = "#111110"   # deep institutional panel
-SURFACE_UP   = "#181817"   # elevated stone-black
+BG           = "#050505"   # Negro Archon / Obsidiana
+SURFACE      = "#111110"   # deep obsidian panel
+SURFACE_UP   = "#181817"   # elevated obsidian
 SURFACE_HIGH = "#2E2E2C"   # Gris piedra oscuro
 
 BORDER       = "#2E2E2C"   # Gris piedra oscuro hairline
 BORDER_MED   = "#3A3935"   # medium stone
 BORDER_FOCUS = "#C9A227"   # Dorado metalizado
 
-TEXT         = "#F7F7F4"   # Blanco mármol
+TEXT         = "#F7F7F4"   # Blanco mármol — text ON dark bg
 TEXT_SUB     = "#B8B6AE"   # Gris piedra claro
 TEXT_FAINT   = "#77746B"   # muted stone
 
-ACCENT       = "#C9A227"   # Dorado metalizado, used sparingly
+ACCENT       = "#C9A227"   # Dorado metalizado — used sparingly
 ACCENT_HOVER = "#D8B84A"
 ACCENT_DIM   = "rgba(201,162,39,0.10)"
 ACCENT_GLOW  = "rgba(201,162,39,0.24)"
@@ -33,6 +37,19 @@ ERR          = "#B24A3C"
 ERR_DIM      = "rgba(178,74,60,0.12)"
 INFO         = "#B8B6AE"
 INFO_DIM     = "rgba(184,182,174,0.10)"
+
+# ── Marble Temple field tokens (main area — light) ────────────────────────────
+MARBLE_BG     = "#F7F7F4"   # mármol blanco — main area background
+MARBLE_PANEL  = "#FFFFFF"   # polished marble — cards, panels
+MARBLE_WARM   = "#F0EDE6"   # warm marble — elevated card
+MARBLE_BORDER = "#D8D4C8"   # hairline border on marble
+
+OBSIDIAN      = "#050505"   # structural dark (= BG)
+OBSIDIAN_MED  = "#111110"   # medium obsidian (= SURFACE)
+OBSIDIAN_HIGH = "#1C1C1A"   # slightly lighter obsidian
+
+TEXT_DARK     = "#050505"   # text ON marble
+TEXT_SUB_DARK = "#3A3935"   # secondary text on marble
 
 FONT_UI      = (
     '"Inter", "IBM Plex Sans", "Manrope", "SF Pro Text", '
@@ -68,56 +85,97 @@ def report_logo_path() -> Path:
 
 
 def desktop_stylesheet() -> str:
+    """Marble Temple — obsidian structure, marble field, gold accent.
+
+    Zones:
+      Sidebar / TopBar / StatusBar  → obsidian (#050505)
+      Chat area / panels / dialogs  → marble white (#F7F7F4 / #FFFFFF)
+      Accent / focus                → gold (#C9A227)
+    """
     return f"""
 * {{
     font-family: {FONT_UI};
     outline: none;
 }}
+/* ── Global base: marble field ───────────────────────────── */
 QMainWindow, QDialog {{
-    background: {BG};
-    color: {TEXT};
+    background: {MARBLE_BG};
+    color: {TEXT_DARK};
 }}
 QWidget {{
-    background: {BG};
-    color: {TEXT};
+    background: {MARBLE_BG};
+    color: {TEXT_DARK};
     font-size: 13px;
 }}
-/* Panels */
+
+/* ── Obsidian structural zones ───────────────────────────── */
 QFrame#Sidebar {{
-    background: {SURFACE};
-    border-right: 1px solid {BORDER};
+    background: {OBSIDIAN};
+    border-right: 1px solid {OBSIDIAN_HIGH};
 }}
 QFrame#TopBar {{
-    background: {SURFACE};
-    border-bottom: 1px solid {BORDER};
+    background: {OBSIDIAN};
+    border-bottom: 1px solid {OBSIDIAN_HIGH};
 }}
-QFrame#BottomBar {{
-    background: {SURFACE};
-    border-top: 1px solid {BORDER};
+QFrame#BottomBar, QStatusBar {{
+    background: {OBSIDIAN};
+    color: {TEXT_SUB};
+    border-top: 1px solid {OBSIDIAN_HIGH};
 }}
+
+/* ── Children inside obsidian zones ─────────────────────── */
+QFrame#Sidebar QWidget   {{ background: transparent; color: {TEXT}; }}
+QFrame#Sidebar QLabel    {{ background: transparent; color: {TEXT}; font-size: 13px; }}
+QFrame#Sidebar QLabel#Eyebrow {{
+    color: {TEXT_FAINT}; font-size: 10px; font-weight: 700; letter-spacing: 0.12em;
+}}
+QFrame#Sidebar QLabel#AppName {{
+    color: {TEXT}; font-family: {FONT_DISPLAY}; font-size: 14px; font-weight: 700;
+}}
+QFrame#Sidebar QLabel#Faint  {{ color: {TEXT_FAINT}; font-size: 11px; }}
+QFrame#Sidebar QFrame#Divider {{
+    background: {OBSIDIAN_HIGH}; max-height: 1px; min-height: 1px; border: none;
+}}
+QFrame#Sidebar QComboBox {{
+    background: {OBSIDIAN_MED}; color: {TEXT}; border: 1px solid {SURFACE_HIGH};
+    border-radius: 8px; padding: 4px 10px; font-size: 12px; min-height: 26px;
+}}
+QFrame#Sidebar QComboBox:hover {{ border-color: {ACCENT}; }}
+QFrame#Sidebar QComboBox::drop-down {{ border: none; width: 18px; }}
+QFrame#Sidebar QComboBox QAbstractItemView {{
+    background: {SURFACE_HIGH}; border: 1px solid {BORDER_MED};
+    border-radius: 8px; color: {TEXT}; padding: 4px;
+    selection-background-color: {ACCENT_DIM};
+}}
+QFrame#TopBar QLabel {{ background: transparent; color: {TEXT_FAINT}; font-size: 12px; }}
+QStatusBar QLabel     {{ background: transparent; color: {TEXT_SUB}; }}
+
+/* ── Marble panels ───────────────────────────────────────── */
 QFrame#Panel {{
-    background: {SURFACE};
-    border: 1px solid {BORDER};
+    background: {MARBLE_PANEL};
+    border: 1px solid {MARBLE_BORDER};
     border-radius: 14px;
 }}
 QFrame#Card {{
-    background: {SURFACE_UP};
-    border: 1px solid {BORDER};
+    background: {MARBLE_WARM};
+    border: 1px solid {MARBLE_BORDER};
     border-radius: 10px;
 }}
 QFrame#Composer {{
-    background: {SURFACE_UP};
-    border: 1px solid {BORDER_MED};
+    background: {MARBLE_PANEL};
+    border: 1px solid {MARBLE_BORDER};
     border-radius: 16px;
 }}
 QFrame#ComposerFocused {{
-    background: {SURFACE_UP};
-    border: 1px solid {BORDER_FOCUS};
+    background: {MARBLE_PANEL};
+    border: 2px solid {ACCENT};
     border-radius: 16px;
 }}
+
+/* ── Message bubbles ─────────────────────────────────────── */
 QFrame#MsgUser {{
-    background: {SURFACE_UP};
-    border: 1px solid {BORDER};
+    background: {MARBLE_PANEL};
+    border: 1px solid {MARBLE_BORDER};
     border-radius: 12px;
     border-bottom-right-radius: 4px;
 }}
@@ -125,93 +183,76 @@ QFrame#MsgAssistant {{
     background: transparent;
     border: none;
 }}
+
+/* ── Tool / status badges ────────────────────────────────── */
 QFrame#ToolBadge {{
     background: {ACCENT_DIM};
     border: 1px solid {ACCENT_GLOW};
     border-radius: 6px;
 }}
-QFrame#OkBadge {{
-    background: {OK_DIM};
-    border: 1px solid rgba(34,197,94,0.25);
-    border-radius: 6px;
+QFrame#OkBadge  {{
+    background: {OK_DIM};  border: 1px solid rgba(95,166,109,0.25); border-radius: 6px;
 }}
 QFrame#WarnBadge {{
-    background: {WARN_DIM};
-    border: 1px solid rgba(245,158,11,0.25);
-    border-radius: 6px;
+    background: {WARN_DIM}; border: 1px solid rgba(201,162,39,0.25); border-radius: 6px;
 }}
 QFrame#ErrBadge {{
-    background: {ERR_DIM};
-    border: 1px solid rgba(239,68,68,0.25);
-    border-radius: 6px;
+    background: {ERR_DIM}; border: 1px solid rgba(178,74,60,0.25); border-radius: 6px;
 }}
 QFrame#InfoBadge {{
-    background: {INFO_DIM};
-    border: 1px solid rgba(139,92,246,0.25);
-    border-radius: 6px;
+    background: {INFO_DIM}; border: 1px solid rgba(184,182,174,0.20); border-radius: 6px;
 }}
-QFrame#Divider {{
-    background: {BORDER};
-    max-height: 1px;
-    min-height: 1px;
-    border: none;
-}}
-QFrame#DropZone   {{
-    background: {ACCENT_DIM};
-    border: 1px dashed {ACCENT};
-    border-radius: 12px;
-}}
-/* Labels */
-QLabel {{ color: {TEXT}; background: transparent; font-size: 13px; }}
-QLabel#Sub     {{ color: {TEXT_SUB};   font-size: 12px; }}
-QLabel#Faint   {{ color: {TEXT_FAINT}; font-size: 11px; }}
-QLabel#Accent  {{ color: {ACCENT};     font-size: 12px; font-weight: 600; }}
-QLabel#Ok      {{ color: {OK};         font-size: 12px; font-weight: 600; }}
-QLabel#Warn    {{ color: {WARN};       font-size: 12px; font-weight: 600; }}
-QLabel#Err     {{ color: {ERR};        font-size: 12px; font-weight: 600; }}
+QFrame#Divider  {{ background: {MARBLE_BORDER}; max-height: 1px; min-height: 1px; border: none; }}
+QFrame#DropZone {{ background: {ACCENT_DIM}; border: 1px dashed {ACCENT}; border-radius: 12px; }}
+
+/* ── Labels (marble context) ─────────────────────────────── */
+QLabel {{ color: {TEXT_DARK}; background: transparent; font-size: 13px; }}
+QLabel#Sub     {{ color: {TEXT_SUB_DARK}; font-size: 12px; }}
+QLabel#Faint   {{ color: {TEXT_FAINT};    font-size: 11px; }}
+QLabel#Accent  {{ color: {ACCENT};        font-size: 12px; font-weight: 600; }}
+QLabel#Ok      {{ color: {OK};            font-size: 12px; font-weight: 600; }}
+QLabel#Warn    {{ color: {WARN};          font-size: 12px; font-weight: 600; }}
+QLabel#Err     {{ color: {ERR};           font-size: 12px; font-weight: 600; }}
 QLabel#AppName {{
-    color: {TEXT};
-    font-family: {FONT_DISPLAY};
-    font-size: 14px;
-    font-weight: 700;
+    color: {TEXT_DARK}; font-family: {FONT_DISPLAY}; font-size: 14px; font-weight: 700;
 }}
 QLabel#Eyebrow {{
-    color: {TEXT_FAINT};
-    font-family: {FONT_UI};
-    font-size: 10px;
-    font-weight: 700;
+    color: {TEXT_FAINT}; font-family: {FONT_UI}; font-size: 10px; font-weight: 700;
+    letter-spacing: 0.12em; text-transform: uppercase;
 }}
 QLabel#RoleTag {{
-    color: {ACCENT};
-    font-family: {FONT_SEAL};
-    font-size: 10px;
-    font-weight: 700;
-}}
-QLabel#RoleTagUser {{
-    color: {TEXT_FAINT};
-    font-size: 10px;
-    font-weight: 600;
+    color: {ACCENT}; font-family: {FONT_SEAL}; font-size: 10px; font-weight: 700;
     letter-spacing: 0.08em;
 }}
-QLabel#Timestamp {{
-    color: {TEXT_FAINT};
-    font-size: 10px;
+QLabel#RoleTagUser {{
+    color: {TEXT_FAINT}; font-size: 10px; font-weight: 600; letter-spacing: 0.08em;
 }}
-/* Inputs */
+QLabel#Timestamp {{ color: {TEXT_FAINT}; font-size: 10px; }}
+
+/* ── Inputs (marble context) ─────────────────────────────── */
 QPlainTextEdit, QTextEdit {{
     background: transparent;
-    color: {TEXT};
+    color: {TEXT_DARK};
     border: none;
     font-size: 13px;
     line-height: 1.65;
     selection-background-color: {ACCENT_DIM};
-    selection-color: {TEXT};
+    selection-color: {TEXT_DARK};
 }}
-/* Buttons */
+QTextEdit[readOnly="true"] {{
+    background: transparent; border: none; color: {TEXT_DARK};
+    font-size: 13px; line-height: 1.65;
+    selection-background-color: {ACCENT_DIM};
+}}
+QPlainTextEdit {{
+    color: {TEXT_SUB_DARK}; font-size: 12px;
+}}
+
+/* ── Buttons ─────────────────────────────────────────────── */
 QPushButton {{
-    background: {SURFACE_UP};
-    color: {TEXT};
-    border: 1px solid {BORDER_MED};
+    background: {MARBLE_PANEL};
+    color: {TEXT_DARK};
+    border: 1px solid {MARBLE_BORDER};
     border-radius: 8px;
     padding: 6px 14px;
     font-size: 12px;
@@ -219,30 +260,34 @@ QPushButton {{
     min-height: 28px;
 }}
 QPushButton:hover {{
-    background: {SURFACE_HIGH};
-    border-color: {BORDER_FOCUS};
+    background: {MARBLE_WARM};
+    border-color: {ACCENT};
 }}
-QPushButton:pressed {{ background: {SURFACE}; }}
-QPushButton:disabled {{ color: {TEXT_FAINT}; background: {SURFACE}; border-color: {BORDER}; }}
+QPushButton:pressed {{ background: {MARBLE_BORDER}; }}
+QPushButton:disabled {{
+    color: {TEXT_FAINT}; background: {MARBLE_WARM}; border-color: {MARBLE_BORDER};
+}}
 QPushButton#Primary {{
     background: {ACCENT};
-    color: {BG};
+    color: {OBSIDIAN};
     border: none;
     border-radius: 8px;
     padding: 7px 18px;
     font-weight: 700;
     min-height: 32px;
 }}
-QPushButton#Primary:hover {{ background: {ACCENT_HOVER}; }}
-QPushButton#Primary:disabled {{ background: {SURFACE_UP}; color: {TEXT_FAINT}; }}
+QPushButton#Primary:hover {{ background: {ACCENT_HOVER}; color: {OBSIDIAN}; }}
+QPushButton#Primary:disabled {{ background: {MARBLE_WARM}; color: {TEXT_FAINT}; border: none; }}
 QPushButton#Ghost {{
     background: transparent;
     border: none;
-    color: {TEXT_SUB};
+    color: {TEXT_SUB_DARK};
     padding: 5px 10px;
     border-radius: 8px;
 }}
-QPushButton#Ghost:hover {{ color: {TEXT}; background: {SURFACE_UP}; }}
+QPushButton#Ghost:hover {{ color: {TEXT_DARK}; background: {MARBLE_WARM}; }}
+
+/* ── Nav buttons (live inside obsidian sidebar) ──────────── */
 QPushButton#NavBtn {{
     background: transparent;
     border: none;
@@ -254,7 +299,7 @@ QPushButton#NavBtn {{
     font-weight: 500;
     min-height: 34px;
 }}
-QPushButton#NavBtn:hover {{ color: {TEXT}; background: {SURFACE_UP}; }}
+QPushButton#NavBtn:hover {{ color: {TEXT}; background: {OBSIDIAN_HIGH}; }}
 QPushButton#NavBtnActive {{
     background: {ACCENT_DIM};
     border: 1px solid {ACCENT_GLOW};
@@ -269,84 +314,66 @@ QPushButton#NavBtnActive {{
 QPushButton#IconBtn {{
     background: transparent;
     border: none;
-    color: {TEXT_SUB};
+    color: {TEXT_SUB_DARK};
     padding: 6px;
     border-radius: 8px;
     min-width: 28px;
     min-height: 28px;
     font-size: 16px;
 }}
-QPushButton#IconBtn:hover {{ color: {TEXT}; background: {SURFACE_UP}; }}
-/* Scrollbars */
+QPushButton#IconBtn:hover {{ color: {TEXT_DARK}; background: {MARBLE_WARM}; }}
+
+/* ── Scrollbars ──────────────────────────────────────────── */
 QScrollArea {{ background: transparent; border: none; }}
-QScrollBar:vertical {{
-    background: transparent; width: 5px; margin: 2px;
-}}
+QScrollBar:vertical {{ background: transparent; width: 5px; margin: 2px; }}
 QScrollBar::handle:vertical {{
-    background: {BORDER_MED}; min-height: 24px; border-radius: 3px;
+    background: {MARBLE_BORDER}; min-height: 24px; border-radius: 3px;
 }}
 QScrollBar::handle:vertical:hover {{ background: {TEXT_FAINT}; }}
 QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
 QScrollBar:horizontal {{ height: 0px; }}
-/* Splitter */
-QSplitter::handle:horizontal {{ background: {BORDER}; width: 1px; }}
-QSplitter::handle:vertical   {{ background: {BORDER}; height: 1px; }}
-/* Progress (used as streaming indicator) */
+
+/* ── Splitter ────────────────────────────────────────────── */
+QSplitter::handle:horizontal {{ background: {MARBLE_BORDER}; width: 1px; }}
+QSplitter::handle:vertical   {{ background: {MARBLE_BORDER}; height: 1px; }}
+
+/* ── Progress bar (streaming indicator) ──────────────────── */
 QProgressBar {{
-    background: {BORDER}; border: none; border-radius: 1px; max-height: 2px;
+    background: {MARBLE_BORDER}; border: none; border-radius: 1px; max-height: 2px;
 }}
-QProgressBar::chunk {{
-    background: {ACCENT}; border-radius: 1px;
-}}
-/* ComboBox */
+QProgressBar::chunk {{ background: {ACCENT}; border-radius: 1px; }}
+
+/* ── ComboBox (marble context) ───────────────────────────── */
 QComboBox {{
-    background: {SURFACE_UP}; color: {TEXT}; border: 1px solid {BORDER_MED};
+    background: {MARBLE_PANEL}; color: {TEXT_DARK}; border: 1px solid {MARBLE_BORDER};
     border-radius: 8px; padding: 4px 10px; font-size: 12px; min-height: 26px;
 }}
-QComboBox:hover {{ border-color: {BORDER_FOCUS}; }}
+QComboBox:hover {{ border-color: {ACCENT}; }}
 QComboBox::drop-down {{ border: none; width: 18px; }}
 QComboBox QAbstractItemView {{
-    background: {SURFACE_HIGH}; border: 1px solid {BORDER_MED};
-    border-radius: 8px; color: {TEXT}; padding: 4px;
-    selection-background-color: {ACCENT_DIM};
+    background: {MARBLE_PANEL}; border: 1px solid {MARBLE_BORDER};
+    border-radius: 8px; color: {TEXT_DARK}; padding: 4px;
+    selection-background-color: {ACCENT_DIM}; selection-color: {TEXT_DARK};
 }}
-/* ListWidget — historial, adjuntos recientes */
+
+/* ── ListWidget ──────────────────────────────────────────── */
 QListWidget {{
-    background: transparent; border: none; color: {TEXT_SUB};
+    background: transparent; border: none; color: {TEXT_SUB_DARK};
     font-size: 12px; outline: none;
 }}
-QListWidget::item {{
-    padding: 4px 6px; border-radius: 6px;
-}}
-QListWidget::item:selected {{
-    background: {ACCENT_DIM}; color: {ACCENT};
-}}
-QListWidget::item:hover {{
-    background: {SURFACE_UP};
-}}
-/* PlainTextEdit inside panels — read-only context/sources views */
-QPlainTextEdit {{
-    background: transparent; color: {TEXT_SUB}; border: none;
-    font-size: 12px; line-height: 1.55;
-    selection-background-color: {ACCENT_DIM};
-    selection-color: {TEXT};
-}}
-/* AutoTextEdit inside message bubbles (read-only QTextEdit) */
-QTextEdit[readOnly="true"] {{
-    background: transparent; border: none; color: {TEXT};
-    font-size: 13px; line-height: 1.65;
-    selection-background-color: {ACCENT_DIM};
-    selection-color: {TEXT};
-}}
-/* Menu bar */
+QListWidget::item {{ padding: 4px 6px; border-radius: 6px; }}
+QListWidget::item:selected {{ background: {ACCENT_DIM}; color: {ACCENT}; }}
+QListWidget::item:hover     {{ background: {MARBLE_WARM}; }}
+
+/* ── Menu bar ────────────────────────────────────────────── */
 QMenuBar {{
-    background: {SURFACE}; color: {TEXT_SUB};
-    border-bottom: 1px solid {BORDER}; font-size: 12px;
+    background: {OBSIDIAN}; color: {TEXT_SUB};
+    border-bottom: 1px solid {OBSIDIAN_HIGH}; font-size: 12px;
 }}
-QMenuBar::item:selected {{ background: {SURFACE_UP}; color: {TEXT}; }}
+QMenuBar::item:selected {{ background: {OBSIDIAN_HIGH}; color: {TEXT}; }}
 QMenu {{
-    background: {SURFACE_HIGH}; border: 1px solid {BORDER_MED};
-    border-radius: 8px; color: {TEXT}; padding: 4px;
+    background: {MARBLE_PANEL}; border: 1px solid {MARBLE_BORDER};
+    border-radius: 8px; color: {TEXT_DARK}; padding: 4px;
 }}
 QMenu::item {{ padding: 6px 20px; border-radius: 6px; }}
 QMenu::item:selected {{ background: {ACCENT_DIM}; color: {ACCENT}; }}
@@ -358,8 +385,10 @@ __all__ = [
     "BG", "BORDER", "BORDER_FOCUS", "BORDER_MED",
     "ERR", "ERR_DIM", "INFO", "INFO_DIM",
     "FONT_DISPLAY", "FONT_SEAL", "FONT_UI",
+    "MARBLE_BG", "MARBLE_BORDER", "MARBLE_PANEL", "MARBLE_WARM",
+    "OBSIDIAN", "OBSIDIAN_HIGH", "OBSIDIAN_MED",
     "OK", "OK_DIM", "SURFACE", "SURFACE_HIGH", "SURFACE_UP",
-    "TEXT", "TEXT_FAINT", "TEXT_SUB", "WARN", "WARN_DIM",
+    "TEXT", "TEXT_DARK", "TEXT_FAINT", "TEXT_SUB", "TEXT_SUB_DARK", "WARN", "WARN_DIM",
     "GRAPHITE", "MATTE_BLACK", "MUTED_TEXT", "NEON_GREEN",
     "NEON_PINK", "SOFT_GRAPHITE", "WHITE",
     "desktop_stylesheet", "logo_full_path", "logo_outline_path", "logo_path",

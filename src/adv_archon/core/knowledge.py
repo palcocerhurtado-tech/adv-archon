@@ -1389,6 +1389,31 @@ class KnowledgeStore:
                 (str(path), title, excerpt, relative_path, root),
             )
 
+    def ingest_chunk(
+        self,
+        *,
+        path: Path,
+        title: str,
+        excerpt: str,
+        root: str = "",
+    ) -> None:
+        """Ingest a synthetic text chunk (e.g. from a PGOU PDF) into the index."""
+        now = _utc_now()
+        embedding = self._encoder.encode_texts([f"{title}\n\n{excerpt}"])[0]
+        self._upsert_entry(
+            path=path,
+            root=root or str(path.parent),
+            relative_path=path.name,
+            title=title,
+            excerpt=excerpt,
+            suffix=path.suffix,
+            mtime=0.0,
+            file_size=len(excerpt.encode()),
+            embedding=embedding,
+            indexed_at=now,
+        )
+        self._conn.commit()
+
     def _delete_entry(self, path: Path) -> None:
         self._conn.execute("DELETE FROM knowledge_entries WHERE path = ?", (str(path),))
         if self._fts_enabled:

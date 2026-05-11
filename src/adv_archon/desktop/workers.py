@@ -1,6 +1,7 @@
 # mypy: ignore-errors
 from __future__ import annotations
 
+import threading
 from contextlib import suppress
 from dataclasses import dataclass
 from importlib.util import find_spec
@@ -76,6 +77,7 @@ if PYSIDE6_AVAILABLE:
         failed = Signal(str)
         cancelled = Signal(str)
         shutdown_finished = Signal()
+        expediente_selected = Signal(object)
 
         def __init__(
             self,
@@ -98,7 +100,7 @@ if PYSIDE6_AVAILABLE:
             self._profile = initial_profile
             self._runtime: ArchonRuntime | None = None
             self._backend_ready = False
-            self._cancel_requested = False
+            self._cancel_event = threading.Event()  # set from UI thread via DirectConnection
             self._emit_state(
                 DesktopBusyState(
                     backend_ready=False,
@@ -115,8 +117,21 @@ if PYSIDE6_AVAILABLE:
                     busy=True,
                     task="initializing",
                     detail="Preparando motor…",
+                    progress=0,
                 )
             )
+
+            def _on_progress(pct: int, detail: str) -> None:
+                self._emit_state(
+                    DesktopBusyState(
+                        backend_ready=False,
+                        busy=True,
+                        task="initializing",
+                        detail=detail,
+                        progress=pct,
+                    )
+                )
+
             try:
                 runtime = ArchonRuntime(
                     config=self._config,
@@ -125,7 +140,9 @@ if PYSIDE6_AVAILABLE:
                     system_prompt=self._system_prompt,
                     confirm=self._confirm,
                     incognito=self._incognito,
+                    progress_callback=_on_progress,
                 )
+                _on_progress(99, "Aplicando perfil…")
                 runtime.llm.set_mode(self._mode)
                 active_profile = runtime.profile_manager.set_active_profile(self._profile)
                 runtime.apply_profile(active_profile)
@@ -166,12 +183,16 @@ if PYSIDE6_AVAILABLE:
                 self._runtime.llm.set_ollama_model(model)
             self._emit_state(DesktopBusyState(backend_ready=self._backend_ready))
 
+        def on_expediente_selected(self, expediente: Any) -> None:
+            if self._runtime is not None:
+                self._runtime.agent.set_expediente(expediente)
+
         def run_prompt(self, prompt: str, attachments: list[str]) -> None:
             runtime = self._runtime
             if runtime is None or not self._backend_ready:
                 self.failed.emit("El backend desktop todavía no está listo.")
                 return
-            self._cancel_requested = False
+            self._cancel_event.clear()
             attachment_paths = [Path(raw_path) for raw_path in attachments]
             prompt = _enrich_prompt_for_desktop(prompt, attachments)
             has_pdf = any(str(p).lower().endswith(".pdf") for p in attachment_paths)
@@ -279,6 +300,7 @@ if PYSIDE6_AVAILABLE:
             self._emit_state(DesktopBusyState(backend_ready=True))
 
         def shutdown(self) -> None:
+            self._cancel_event.set()        # abort any in-progress prompt immediately
             self._emit_state(
                 DesktopBusyState(
                     backend_ready=self._backend_ready,
@@ -295,7 +317,7 @@ if PYSIDE6_AVAILABLE:
             QThread.currentThread().quit()
 
         def cancel_prompt(self) -> None:
-            self._cancel_requested = True
+            self._cancel_event.set()
             self._emit_state(
                 DesktopBusyState(
                     backend_ready=self._backend_ready,
@@ -310,7 +332,7 @@ if PYSIDE6_AVAILABLE:
             self.busy_state_changed.emit(state)
 
         def _check_cancelled(self) -> None:
-            if self._cancel_requested:
+            if self._cancel_event.is_set():
                 raise DesktopOperationCancelled
 
         def _last_progress_hint(self) -> int | None:

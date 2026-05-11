@@ -11,6 +11,7 @@ from adv_archon.core.attachments import format_prompt_with_attachments
 from adv_archon.core.config import AppConfig
 from adv_archon.core.context import RuntimeContext, capture_runtime_context
 from adv_archon.core.costs import UsageLedger
+from adv_archon.core.informe_proyecto import InformeProyectoTools
 from adv_archon.core.intent import (
     _normalize,
     extract_municipality,
@@ -20,12 +21,19 @@ from adv_archon.core.knowledge import KnowledgeIndexResult, KnowledgeStore
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMResponse
 from adv_archon.core.logging import AppLogger
+from adv_archon.core.memoria_descriptiva import MemoriaDescriptivaTools
+from adv_archon.core.memoria_pdf import MemoriaPDFTools
 from adv_archon.core.memory import MemoryStore, SentenceTransformerEncoder
+from adv_archon.core.pem_pdf import PEMPDFTools
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.core.session import SessionStore
 from adv_archon.core.tasks import TaskStore
+from adv_archon.core.team_sync import TeamTools
 from adv_archon.core.web_library import WebLibraryStore
+from adv_archon.integrations.boe import tool_boe_fetch, tool_boe_search
 from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
+from adv_archon.tools.comparador import tool_comparar_parcelas
+from adv_archon.tools.edificabilidad import tool_calcular_edificabilidad
 from adv_archon.tools.google_workspace import (
     GoogleWorkspaceTools,
     build_google_workspace_tool_specs,
@@ -33,6 +41,7 @@ from adv_archon.tools.google_workspace import (
 from adv_archon.tools.guarded_files import FileAccessPolicy, GuardedFileTools
 from adv_archon.tools.knowledge_tools import KnowledgeTools, build_knowledge_tool_specs
 from adv_archon.tools.mac import MacTools, build_mac_tool_specs
+from adv_archon.tools.pem import tool_calcular_pem
 from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
@@ -49,6 +58,7 @@ from adv_archon.voice.stt import WhisperSpeechToText
 from adv_archon.voice.tts import MacTextToSpeech
 
 ConfirmCallback = Callable[[str], bool]
+ProgressCallback = Callable[[int, str], None]
 
 
 class ArchonRuntime:
@@ -61,7 +71,12 @@ class ArchonRuntime:
         system_prompt: str,
         confirm: ConfirmCallback,
         incognito: bool = False,
+        progress_callback: ProgressCallback | None = None,
     ) -> None:
+        def _progress(pct: int, detail: str) -> None:
+            if progress_callback is not None:
+                progress_callback(pct, detail)
+
         self.config = config
         self.llm = llm
         self.project_root = project_root
@@ -69,6 +84,7 @@ class ArchonRuntime:
         self.incognito = incognito
         self.confirm = confirm
 
+        _progress(5, "Iniciando sesión y registro…")
         self.session_store = SessionStore(config.paths.sessions_dir, persist=not incognito)
         self.logger = AppLogger(
             config.paths.logs_dir,
@@ -101,6 +117,7 @@ class ArchonRuntime:
             default_cwd=project_root,
         )
 
+        _progress(18, "Configurando motor de lenguaje…")
         encoder = SentenceTransformerEncoder(config.memory.embedding_model)
         self.profile_manager = ProfileManager(
             config.paths.profile_state_file,
@@ -128,6 +145,7 @@ class ArchonRuntime:
             porcupine_access_key=config.voice.porcupine_access_key,
             logger=self.logger,
         )
+        _progress(32, "Abriendo bases de datos de memoria y conocimiento…")
         self.memory_store = MemoryStore(
             config.paths.memory_db,
             persist=not incognito,
@@ -148,6 +166,8 @@ class ArchonRuntime:
             self.knowledge_store,
             profile_manager=self.profile_manager,
         )
+        from adv_archon.core.personal_kb import PersonalKB
+        self.personal_kb = PersonalKB(config.paths.memory_db.parent / "personal_kb.db")
         file_policy = FileAccessPolicy(
             allowed_roots=tuple(
                 Path(item).expanduser().resolve() for item in config.files.allowed_roots
@@ -171,6 +191,7 @@ class ArchonRuntime:
             logger=self.logger,
         )
         self.web_library_tools = WebLibraryTools(self.web_library_store)
+        _progress(50, "Cargando módulos urbanísticos y geográficos…")
         from adv_archon.core.geo_store import GeoStore
         from adv_archon.core.pgou_store import PGOUStore
         from adv_archon.core.scraper_daemon import ScraperDaemon
@@ -194,6 +215,7 @@ class ArchonRuntime:
         )
         if not incognito:
             self.scraper_daemon.start()
+        _progress(65, "Preparando tareas y herramientas personales…")
         self.task_store = TaskStore(
             config.paths.tasks_db,
             timezone_name=config.tasks.default_timezone,
@@ -210,6 +232,7 @@ class ArchonRuntime:
             timezone_name=config.tasks.default_timezone,
             logger=self.logger,
         )
+        _progress(75, "Iniciando navegador e integraciones…")
         self.browser_tools = BrowserTools(
             profile_dir=config.paths.browser_profile_dir,
             enabled=config.browser.enabled,
@@ -238,6 +261,15 @@ class ArchonRuntime:
             max_concurrency=config.google.max_concurrency,
             logger=self.logger,
         )
+        # Nuevos tools: memoria descriptiva, PDF, PEM, informe integrado, equipo
+        self.memoria_tools = MemoriaDescriptivaTools(llm, knowledge_store=self.knowledge_store)
+        self.memoria_pdf_tools = MemoriaPDFTools(llm, knowledge_store=self.knowledge_store)
+        self.informe_tools = InformeProyectoTools(llm, knowledge_store=self.knowledge_store)
+        self.pem_pdf_tools = PEMPDFTools()
+        self.team_tools = TeamTools(config)
+        # ExpedienteStore se inyecta externamente (opcional — desktop lo hace)
+
+        _progress(88, "Creando agente de IA…")
         self.agent = Agent(
             llm=llm,
             system_prompt=system_prompt,
@@ -254,6 +286,7 @@ class ArchonRuntime:
             force_local_private_context=config.llm.force_local_private_context,
             extra_tools=self.build_agent_tools(),
         )
+        _progress(97, "Finalizando configuración…")
         self.logger.log(
             "session_started",
             cwd=project_root,
@@ -285,6 +318,13 @@ class ArchonRuntime:
         enriched_prompt = _maybe_build_compliance_prompt(
             prompt, resolved_attachments, self.urban_compliance_tools
         )
+        # Self-RAG: inject personal KB context when relevant
+        try:
+            kb_context = self.personal_kb.build_context_injection(prompt)
+            if kb_context:
+                enriched_prompt = kb_context + "\n\n" + enriched_prompt
+        except Exception:
+            pass  # KB errors must never break the main loop
         final_prompt = format_prompt_with_attachments(enriched_prompt, resolved_attachments)
         return self.agent.stream_final_response(
             final_prompt,
@@ -331,6 +371,7 @@ class ArchonRuntime:
             stt=self.stt,
             urban_compliance_tools=self.urban_compliance_tools,
             geo_tools=self.geo_tools,
+            personal_kb=self.personal_kb,
         )
 
     def apply_profile(self, profile_name: str) -> None:
@@ -504,15 +545,16 @@ class ArchonRuntime:
                     fn=definition["fn"],
                 )
             )
-        for definition in build_google_workspace_tool_specs(self.google_workspace_tools):
-            specs.append(
-                ToolSpec(
-                    name=definition["name"],
-                    description=definition["description"],
-                    schema=definition["schema"],
-                    fn=definition["fn"],
+        if self.google_workspace_tools.is_configured():
+            for definition in build_google_workspace_tool_specs(self.google_workspace_tools):
+                specs.append(
+                    ToolSpec(
+                        name=definition["name"],
+                        description=definition["description"],
+                        schema=definition["schema"],
+                        fn=definition["fn"],
+                    )
                 )
-            )
         for definition in build_knowledge_tool_specs(self.knowledge_tools):
             specs.append(
                 ToolSpec(
@@ -549,7 +591,138 @@ class ArchonRuntime:
                     fn=definition["fn"],
                 )
             )
+        for definition in _build_boe_tool_specs():
+            specs.append(ToolSpec(**definition))
+        for definition in _build_edificabilidad_tool_specs():
+            specs.append(ToolSpec(**definition))
+        for definition in _build_comparador_tool_specs():
+            specs.append(ToolSpec(**definition))
+        for definition in _build_memoria_tool_specs(self.memoria_tools):
+            specs.append(ToolSpec(**definition))
+        for definition in _build_memoria_pdf_tool_specs(self.memoria_pdf_tools):
+            specs.append(ToolSpec(**definition))
+        for definition in _build_pem_tool_specs():
+            specs.append(ToolSpec(**definition))
+        for definition in _build_pem_pdf_tool_specs(self.pem_pdf_tools):
+            specs.append(ToolSpec(**definition))
+        for definition in _build_informe_tool_specs(self.informe_tools):
+            specs.append(ToolSpec(**definition))
+        for definition in _build_team_tool_specs(self.team_tools):
+            specs.append(ToolSpec(**definition))
+        # Skills (Fase 2)
+        import adv_archon.skills.code_patcher  # noqa: F401
+        import adv_archon.skills.email_responder  # noqa: F401
+        import adv_archon.skills.finance_briefing  # noqa: F401
+        import adv_archon.skills.interview_prep  # noqa: F401
+        import adv_archon.skills.readme_generator  # noqa: F401
+        import adv_archon.skills.research  # noqa: F401
+        from adv_archon.skills.registry import registry as _skill_registry
+
+        for skill in _skill_registry.all():
+            # Inject llm into skills that accept it
+            if hasattr(skill, "_llm") and skill._llm is None:
+                skill._llm = self.llm
+        specs.extend(_skill_registry.to_tool_specs())
         return specs
+
+
+def _build_memoria_pdf_tool_specs(tools: MemoriaPDFTools) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "exportar_memoria_pdf",
+            "description": (
+                "Generate a complete Memoria Descriptiva and export it as a professional PDF "
+                "with cover page, despacho branding, section headings, and legal disclaimer. "
+                "Saves to the Desktop by default. Use this when the user asks for a PDF "
+                "of the memoria or a document ready to deliver to the client."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "expediente_id": {
+                        "type": "string",
+                        "description": "UUID of the expediente.",
+                    },
+                    "despacho": {
+                        "type": "string",
+                        "description": "Name of the architecture firm to show in the header.",
+                    },
+                    "logo_path": {
+                        "type": "string",
+                        "description": "Optional path to a PNG/JPG logo file.",
+                    },
+                    "guardar_en": {
+                        "type": "string",
+                        "description": "Optional custom output path for the PDF.",
+                    },
+                },
+                "required": ["expediente_id"],
+            },
+            "fn": tools.exportar_memoria_pdf,
+        },
+    ]
+
+
+def _build_pem_tool_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "calcular_pem",
+            "description": (
+                "Calculate the Presupuesto de Ejecución Material (PEM) for a building project "
+                "using COA 2024 reference modules. Returns PEM, PEC (with overheads and fees), "
+                "IVA, technical fees, and building permit cost (ICIO). "
+                "Pure math — no LLM. Can export to CSV."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "superficie_construida_m2": {
+                        "type": "number",
+                        "description": "Total built area above ground in m².",
+                    },
+                    "tipologia": {
+                        "type": "string",
+                        "description": (
+                            "Building type. Options: residencial_unifamiliar, "
+                            "residencial_plurifamiliar, comercial, oficinas, industrial, "
+                            "equipamiento, hotelero, rehabilitacion."
+                        ),
+                    },
+                    "calidad": {
+                        "type": "string",
+                        "description": "Build quality: basica, media, alta, lujo.",
+                    },
+                    "zona": {
+                        "type": "string",
+                        "description": (
+                            "Geographic zone affecting cost. Options: madrid, barcelona, "
+                            "pais_vasco, navarra, baleares, canarias, cataluna, andalucia, "
+                            "comunidad_valenciana, castilla_leon, castilla_mancha, galicia, "
+                            "aragon, murcia, extremadura, asturias, cantabria, rioja, nacional."
+                        ),
+                    },
+                    "num_plantas": {
+                        "type": "integer",
+                        "description": "Number of floors above ground.",
+                    },
+                    "superficie_sótano_m2": {
+                        "type": "number",
+                        "description": "Underground/basement area in m² (30% surcharge applied).",
+                    },
+                    "exportar_csv": {
+                        "type": "boolean",
+                        "description": "If true, saves a CSV breakdown to the Desktop.",
+                    },
+                    "csv_output_path": {
+                        "type": "string",
+                        "description": "Optional custom path for the CSV file.",
+                    },
+                },
+                "required": ["superficie_construida_m2"],
+            },
+            "fn": tool_calcular_pem,
+        },
+    ]
 
 
 def _extract_coordinate_pair_from_text(text: str) -> tuple[float, float] | None:
@@ -881,5 +1054,351 @@ def _build_geo_tool_specs(tools: Any) -> list[dict[str, Any]]:
                 "required": ["latitude", "longitude"],
             },
             "fn": tools.site_compliance_context,
+        },
+    ]
+
+
+def _build_boe_tool_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "boe_search",
+            "description": (
+                "Search the BOE (Boletín Oficial del Estado) for legislation, regulations, "
+                "or official announcements in real time. Returns titles, dates, and identifiers."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Search query, e.g. 'Ley del Suelo urbanismo'.",
+                    },
+                    "max_results": {
+                        "type": "integer",
+                        "description": "Maximum number of results to return (default 5).",
+                    },
+                },
+                "required": ["query"],
+            },
+            "fn": tool_boe_search,
+        },
+        {
+            "name": "boe_fetch",
+            "description": (
+                "Fetch the full text of a BOE document by its identifier "
+                "(e.g. 'BOE-A-2015-7164'). Returns the complete article text."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "identificador": {
+                        "type": "string",
+                        "description": "BOE document identifier, e.g. 'BOE-A-2015-7164'.",
+                    },
+                },
+                "required": ["identificador"],
+            },
+            "fn": tool_boe_fetch,
+        },
+    ]
+
+
+def _build_comparador_tool_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "comparar_parcelas",
+            "description": (
+                "Compare 2 or 3 building plots side by side. For each plot, calculates "
+                "maximum buildable area (techo edificable), plot coverage, PEM budget estimate, "
+                "and CTE climate zone. Returns a comparative table and a recommendation. "
+                "Use when the user wants to compare plots, choose between locations, or "
+                "evaluate which site offers better development potential."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "parcelas": {
+                        "type": "array",
+                        "description": "List of 2-3 plots to compare.",
+                        "minItems": 2,
+                        "maxItems": 3,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "nombre": {"type": "string"},
+                                "superficie_parcela_m2": {"type": "number"},
+                                "coeficiente_edificabilidad": {"type": "number"},
+                                "ocupacion_maxima_pct": {"type": "number"},
+                                "num_plantas": {"type": "integer"},
+                                "altura_maxima_m": {"type": "number"},
+                                "tipologia": {"type": "string"},
+                                "calidad": {"type": "string"},
+                                "zona": {"type": "string"},
+                                "municipio": {"type": "string"},
+                                "provincia": {"type": "string"},
+                            },
+                            "required": [
+                                "nombre",
+                                "superficie_parcela_m2",
+                                "coeficiente_edificabilidad",
+                                "ocupacion_maxima_pct",
+                                "num_plantas",
+                                "altura_maxima_m",
+                            ],
+                        },
+                    }
+                },
+                "required": ["parcelas"],
+            },
+            "fn": tool_comparar_parcelas,
+        }
+    ]
+
+
+def _build_edificabilidad_tool_specs() -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "calcular_edificabilidad",
+            "description": (
+                "Calculate buildable area parameters for a plot: maximum floor area (techo "
+                "edificable), plot occupancy, floor-by-floor surface, maximum volume, free "
+                "area, and setbacks. Pure math — no LLM involved. Can export results as CSV."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "superficie_parcela": {
+                        "type": "number",
+                        "description": "Plot area in m².",
+                    },
+                    "coef_edificabilidad": {
+                        "type": "number",
+                        "description": "Floor area ratio (e.g. 0.8 means 0.8 m²t/m²s).",
+                    },
+                    "ocupacion_max_pct": {
+                        "type": "number",
+                        "description": "Maximum plot coverage percentage (0–100).",
+                    },
+                    "altura_max_m": {
+                        "type": "number",
+                        "description": "Maximum building height in metres.",
+                    },
+                    "num_plantas": {
+                        "type": "integer",
+                        "description": "Number of floors above grade.",
+                    },
+                    "retranqueo_frontal_m": {
+                        "type": "number",
+                        "description": "Front setback in metres (default 0).",
+                    },
+                    "retranqueo_lateral_m": {
+                        "type": "number",
+                        "description": "Side setback in metres (default 0).",
+                    },
+                    "retranqueo_fondo_m": {
+                        "type": "number",
+                        "description": "Rear setback in metres (default 0).",
+                    },
+                    "exportar_csv": {
+                        "type": "boolean",
+                        "description": "If true, saves a CSV file to the Desktop.",
+                    },
+                    "csv_output_path": {
+                        "type": "string",
+                        "description": "Optional custom path for the CSV output file.",
+                    },
+                },
+                "required": [
+                    "superficie_parcela",
+                    "coef_edificabilidad",
+                    "ocupacion_max_pct",
+                    "altura_max_m",
+                    "num_plantas",
+                ],
+            },
+            "fn": tool_calcular_edificabilidad,
+        },
+    ]
+
+
+def _build_memoria_tool_specs(tools: MemoriaDescriptivaTools) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "redactar_memoria",
+            "description": (
+                "Generate a complete professional Memoria Descriptiva for an expediente. "
+                "Searches indexed PGOU normativa for the municipality, cites literal articles, "
+                "and marks each requirement as CUMPLE / NO CUMPLE / PENDIENTE DE VERIFICAR. "
+                "Saves the document to the Desktop by default."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "expediente_id": {
+                        "type": "string",
+                        "description": "UUID of the expediente to generate the memoria for.",
+                    },
+                    "guardar_en": {
+                        "type": "string",
+                        "description": "Optional custom output path (default: Desktop).",
+                    },
+                },
+                "required": ["expediente_id"],
+            },
+            "fn": tools.redactar_memoria,
+        },
+    ]
+
+
+def _build_pem_pdf_tool_specs(tools: PEMPDFTools) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "exportar_pem_pdf",
+            "description": (
+                "Calculate PEM (Presupuesto de Ejecución Material) for a building project "
+                "and export the full breakdown as a professional PDF with cover, data table, "
+                "results table, and legal disclaimer. Saves to the Desktop by default. "
+                "Use when the user asks for a PEM PDF, budget report, or presupuesto en PDF."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "superficie_construida_m2": {
+                        "type": "number", "description": "Built area in m².",
+                    },
+                    "tipologia": {"type": "string", "description": "Building type."},
+                    "calidad": {
+                        "type": "string", "description": "Quality: basica, media, alta, lujo.",
+                    },
+                    "zona": {"type": "string", "description": "Geographic zone."},
+                    "num_plantas": {"type": "integer"},
+                    "superficie_sotano_m2": {"type": "number"},
+                    "despacho": {"type": "string", "description": "Firm name for header."},
+                    "guardar_en": {"type": "string", "description": "Optional output path."},
+                },
+                "required": ["superficie_construida_m2"],
+            },
+            "fn": tools.exportar_pem_pdf,
+        }
+    ]
+
+
+def _build_informe_tool_specs(tools: InformeProyectoTools) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "generar_informe_proyecto",
+            "description": (
+                "Generate a complete integrated project report as a single professional PDF. "
+                "Combines edificabilidad analysis, PEM budget estimate, CTE energy pre-analysis, "
+                "and the full memoria descriptiva in one document with cover page, "
+                "Archon branding, and legal disclaimer. "
+                "Use this when the user asks for a full project dossier or informe completo."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "expediente_id": {
+                        "type": "string",
+                        "description": "UUID of the expediente.",
+                    },
+                    "despacho": {
+                        "type": "string",
+                        "description": "Architecture firm name for the header.",
+                    },
+                    "logo_path": {
+                        "type": "string",
+                        "description": "Optional path to a PNG/JPG logo.",
+                    },
+                    "guardar_en": {
+                        "type": "string",
+                        "description": "Optional output path (default: Desktop).",
+                    },
+                    "incluir_pem": {
+                        "type": "boolean",
+                        "description": "Include PEM budget section (default: true).",
+                    },
+                    "incluir_energia": {
+                        "type": "boolean",
+                        "description": "Include CTE energy pre-analysis section (default: true).",
+                    },
+                    "incluir_memoria": {
+                        "type": "boolean",
+                        "description": "Include full memoria descriptiva section (default: true).",
+                    },
+                    "superficie_construida_m2": {
+                        "type": "number",
+                        "description": "Built area in m² for PEM calculation.",
+                    },
+                    "tipologia": {
+                        "type": "string",
+                        "description": "Building type for PEM (e.g. residencial_unifamiliar).",
+                    },
+                    "calidad": {
+                        "type": "string",
+                        "description": "Quality level for PEM: basica, media, alta, lujo.",
+                    },
+                },
+                "required": ["expediente_id"],
+            },
+            "fn": tools.generar_informe_proyecto,
+        },
+    ]
+
+
+def _build_team_tool_specs(tools: TeamTools) -> list[dict[str, Any]]:
+    return [
+        {
+            "name": "exportar_expediente",
+            "description": (
+                "Export an expediente as a portable .archon file that can be shared with "
+                "teammates and imported on any ADV ARCHON installation."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "expediente_id": {
+                        "type": "string",
+                        "description": "UUID of the expediente to export.",
+                    },
+                    "ruta_salida": {
+                        "type": "string",
+                        "description": "Optional output path (default: Desktop).",
+                    },
+                },
+                "required": ["expediente_id"],
+            },
+            "fn": tools.exportar_expediente,
+        },
+        {
+            "name": "importar_expediente",
+            "description": (
+                "Import a .archon file into the local expediente store. "
+                "Use overwrite=true to replace an existing expediente with the same id."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "ruta_archivo": {
+                        "type": "string",
+                        "description": "Path to the .archon file to import.",
+                    },
+                    "sobreescribir": {
+                        "type": "boolean",
+                        "description": "If true, overwrite an existing expediente with the same id.",  # noqa: E501
+                    },
+                },
+                "required": ["ruta_archivo"],
+            },
+            "fn": tools.importar_expediente,
+        },
+        {
+            "name": "sincronizar_conocimiento",
+            "description": (
+                "Sync the local knowledge index with the team's shared folder "
+                "(NAS, iCloud, Dropbox…). Pushes this user's knowledge.db and pulls "
+                "knowledge chunks from all other team members."
+            ),
+            "schema": {"type": "object", "properties": {}, "required": []},
+            "fn": tools.sincronizar_conocimiento,
         },
     ]

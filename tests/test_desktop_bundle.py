@@ -46,10 +46,13 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path, monke
     assert "uv" in launcher                         # uses uv run, not hardcoded Python
     assert f"PROJECT_ROOT='{project_root}'" in launcher
     assert 'cd "$PROJECT_ROOT"' in launcher
+    assert 'chflags -R nohidden "$PROJECT_ROOT/.venv"' in launcher
     assert 'export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"' in launcher
-    # Let PySide6 discover Qt plugins itself; forcing platforms can break cocoa.
+    # Reset stale Finder env vars, then set the path from PySide6's own metadata.
     assert "unset QT_PLUGIN_PATH" in launcher
     assert "unset QT_QPA_PLATFORM_PLUGIN_PATH" in launcher
+    assert 'export QT_PLUGIN_PATH="$QT_PLUGIN_DIR"' in launcher
+    assert 'export QT_QPA_PLATFORM_PLUGIN_PATH="$QT_PLUGIN_DIR/platforms"' in launcher
     assert "import dotenv.main" in launcher
     assert "--reinstall-package python-dotenv" in launcher
     assert "--reinstall-package PySide6" in launcher

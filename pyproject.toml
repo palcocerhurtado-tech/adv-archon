@@ -43,6 +43,7 @@ dependencies = [
   "sentence-transformers>=4.1.0",
   "structlog>=25.3.0",
   "trafilatura>=2.0.0",
+  "yfinance>=0.2.55",
 ]
 
 [project.optional-dependencies]

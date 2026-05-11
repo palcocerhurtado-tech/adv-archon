@@ -10,7 +10,16 @@ from adv_archon.core.attachments import normalize_attachment_paths
 from adv_archon.core.config import AppConfig, save_ollama_model_preference
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
-from adv_archon.desktop.branding import ERR, INFO, OK, TEXT_SUB, WARN, desktop_stylesheet, logo_path
+from adv_archon.desktop.branding import (
+    ACCENT,
+    ERR,
+    INFO,
+    OK,
+    TEXT_SUB,
+    WARN,
+    desktop_stylesheet,
+    logo_path,
+)
 from adv_archon.desktop.compliance_session import (
     ComplianceSession,
     build_compliance_prompt,
@@ -170,6 +179,7 @@ def launch_desktop_app(
         ollama_model_requested = Signal(str)
         cancel_requested  = Signal()
         shutdown_requested = Signal()
+        expediente_selected = Signal(object)
 
         def __init__(self) -> None:
             super().__init__()
@@ -195,10 +205,11 @@ def launch_desktop_app(
             self._compliance = ComplianceSession()
             self._active_exp_store: Any = None   # set when expediente analysis starts
             self._active_exp_id: str = ""
+            self._active_exp_context: str = ""   # injected once into next user message
             self._warmup_agent_ref: tuple[Any, Any] | None = None
             self._onboarding_dialog: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
-            self._ollama_state = "Cargando…" if llm.mode == "local" else "Cloud"
+            self._ollama_state = "Pendiente" if llm.mode == "local" else "Cloud"
             self._ollama_model = config.llm.ollama_model
             self._last_exp_label = "Sin expediente"
 
@@ -248,8 +259,12 @@ def launch_desktop_app(
             self.mode_requested.connect(self._backend_worker.set_mode)
             self.profile_requested.connect(self._backend_worker.set_profile)
             self.ollama_model_requested.connect(self._backend_worker.set_ollama_model)
-            self.cancel_requested.connect(self._backend_worker.cancel_prompt)
+            self.cancel_requested.connect(
+                self._backend_worker.cancel_prompt,
+                Qt.ConnectionType.DirectConnection,  # noqa: E501 — fires in UI thread even when worker is blocked
+            )
             self.shutdown_requested.connect(self._backend_worker.shutdown)
+            self.expediente_selected.connect(self._backend_worker.on_expediente_selected)
             self._backend_thread.started.connect(self._backend_worker.initialize)
             self._backend_worker.ready.connect(self._handle_backend_ready)
             self._backend_worker.busy_state_changed.connect(self._handle_busy_state_changed)
@@ -272,7 +287,11 @@ def launch_desktop_app(
             self._fit_to_screen()
             self._append_system("Preparando motor…")
             self._backend_thread.start()
-            self._start_warmup_agent()
+            # Do not start the Ollama warmup thread in the window constructor:
+            # on macOS/Finder it can abort startup with
+            # "QThread: Destroyed while thread is still running" before the
+            # first window is visible. Verification remains available from
+            # onboarding/settings and when switching back to local mode.
             QTimer.singleShot(600, self._maybe_show_onboarding)
 
         # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -281,11 +300,16 @@ def launch_desktop_app(
                 ev.accept()
                 return
             if self._close_requested:
-                ev.ignore()
+                # Second close attempt while thread is still blocked — force quit.
+                QApplication.quit()
+                ev.accept()
                 return
             self._close_requested = True
+            self.cancel_requested.emit()      # interrupt any running prompt
             self.shutdown_requested.emit()
             ev.ignore()
+            # Safety net: if the worker thread doesn't stop in 4 s, force quit.
+            QTimer.singleShot(4000, QApplication.quit)
 
         def showEvent(self, ev) -> None:
             super().showEvent(ev)
@@ -308,6 +332,10 @@ def launch_desktop_app(
             daily_action.triggered.connect(self._send_daily_prompt)
             self._daily_action = daily_action
             self.menuBar().addAction(daily_action)
+
+            pgou_action = QAction("Importar normativa PGOU…", self)
+            pgou_action.triggered.connect(self._open_pgou_import)
+            self.menuBar().addAction(pgou_action)
 
         def _build_sidebar(self) -> QFrame:
             sidebar = QFrame()
@@ -355,6 +383,10 @@ def launch_desktop_app(
             self._nav_exp_btn = self._make_nav_btn("  Expedientes")
             self._nav_exp_btn.clicked.connect(self._open_expedientes)
             sl.addWidget(self._nav_exp_btn)
+
+            self._nav_dashboard_btn = self._make_nav_btn("  Dashboard")
+            self._nav_dashboard_btn.clicked.connect(self._open_dashboard)
+            sl.addWidget(self._nav_dashboard_btn)
 
             sl.addStretch(1)
             sl.addWidget(self._make_divider())
@@ -480,6 +512,34 @@ def launch_desktop_app(
             self._drop_zone.files_dropped.connect(self._add_attachments)
             cl.addWidget(self._drop_zone)
 
+            # Context bar — shows active expediente above the composer
+            self._exp_context_bar = QFrame()
+            self._exp_context_bar.setFixedHeight(32)
+            self._exp_context_bar.setStyleSheet(
+                "background:rgba(201,162,39,0.08);"
+                "border-bottom:1px solid rgba(201,162,39,0.25);"
+                "border-top:none;border-left:none;border-right:none;"
+            )
+            _ctx_row = QHBoxLayout(self._exp_context_bar)
+            _ctx_row.setContentsMargins(12, 0, 8, 0)
+            _ctx_row.setSpacing(6)
+            self._exp_context_label = QLabel()
+            self._exp_context_label.setStyleSheet(
+                f"color:{ACCENT};font-size:12px;font-weight:600;background:transparent;"
+            )
+            _ctx_row.addWidget(self._exp_context_label, 1)
+            _ctx_dismiss = QPushButton("×")
+            _ctx_dismiss.setObjectName("Ghost")
+            _ctx_dismiss.setFixedSize(22, 22)
+            _ctx_dismiss.setStyleSheet(
+                "background:transparent;border:none;color:#77746B;"
+                "font-size:16px;padding:0;"
+            )
+            _ctx_dismiss.clicked.connect(self._dismiss_exp_context)
+            _ctx_row.addWidget(_ctx_dismiss)
+            self._exp_context_bar.setVisible(False)
+            cl.addWidget(self._exp_context_bar)
+
             # Composer
             cl.addWidget(self._build_composer())
             return col
@@ -550,6 +610,25 @@ def launch_desktop_app(
             frame.dropEvent      = self._drop_zone.dropEvent
 
             return frame
+
+        # ── Expediente context bar ────────────────────────────────────────────
+        def _set_active_expediente(self, exp: Any) -> None:
+            self._active_exp_context = (
+                f"[Contexto del expediente activo — incluir en tu respuesta si es relevante]\n"
+                f"Expediente: {exp.title}\n"
+                f"Dirección: {exp.address or 'No indicada'}\n"
+                f"Municipio: {exp.municipality or 'No indicado'} / {exp.province or ''}\n"
+                f"Ref. catastral: {exp.cadastral_ref or 'No disponible'}\n"
+                f"Estado: {exp.status or 'borrador'}\n"
+                f"[Fin contexto expediente]\n\n"
+            )
+            label = f"  \U0001f4c1 {exp.title[:45]}  ·  {exp.municipality or ''}"
+            self._exp_context_label.setText(label)
+            self._exp_context_bar.setVisible(True)
+
+        def _dismiss_exp_context(self) -> None:
+            self._active_exp_context = ""
+            self._exp_context_bar.setVisible(False)
 
         def _build_right_panel(self) -> QFrame:
             panel = QFrame()
@@ -969,7 +1048,14 @@ def launch_desktop_app(
             # Capture municipality hint from user text before sending
             self._try_extract_municipality_from_input(prompt)
             self._set_busy(True, task="prompt")
-            self.prompt_requested.emit(prompt, [str(p) for p in attachments])
+            # Inject expediente context once into the next outgoing message
+            if self._active_exp_context:
+                full_prompt = self._active_exp_context + prompt
+                self._active_exp_context = ""  # consume once
+                self._exp_context_bar.setVisible(False)
+            else:
+                full_prompt = prompt
+            self.prompt_requested.emit(full_prompt, [str(p) for p in attachments])
 
         def _send_nav_prompt(self, prompt: str) -> None:
             self._input.setPlainText(prompt)
@@ -1033,6 +1119,7 @@ def launch_desktop_app(
             colors = {
                 "Listo": OK,
                 "Cargando…": WARN,
+                "Pendiente": WARN,
                 "Sin conexión": ERR,
                 "Cloud": INFO,
             }
@@ -1562,6 +1649,65 @@ def launch_desktop_app(
             self._input.setPlainText(prompt)
             self._submit_prompt()
 
+        # ── PGOU import ───────────────────────────────────────────────────────
+        def _open_pgou_import(self) -> None:
+            if not self._busy_state.backend_ready:
+                from PySide6.QtWidgets import QMessageBox
+                QMessageBox.information(
+                    self,
+                    "ADV ARCHON",
+                    "El motor de IA todavía no está listo. Espera unos segundos.",
+                )
+                return
+            from adv_archon.desktop.pgou_import_dialog import open_pgou_import_dialog
+            runtime = self._backend_worker._runtime  # noqa: SLF001
+            if runtime is None:
+                return
+            open_pgou_import_dialog(runtime.knowledge_store, parent=self)
+
+        # ── Dashboard ────────────────────────────────────────────────────────
+        def _open_dashboard(self) -> None:
+            import os
+
+            from PySide6.QtWidgets import QDialog
+            from PySide6.QtWidgets import QVBoxLayout as _QVBoxLayout
+
+            from adv_archon.core.expediente import ExpedienteStore
+            from adv_archon.desktop.dashboard import ExpedientesDashboard
+
+            data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
+            data_dir.mkdir(parents=True, exist_ok=True)
+            store = ExpedienteStore(data_dir / "expedientes.db")
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Dashboard — ADV ARCHON")
+            dlg.resize(980, 680)
+            from PySide6.QtCore import Qt as _Qt
+            dlg.setWindowModality(_Qt.WindowModality.WindowModal)
+
+            lay = _QVBoxLayout(dlg)
+            lay.setContentsMargins(0, 0, 0, 0)
+
+            board = ExpedientesDashboard()
+            board.refresh(store)
+
+            def _on_selected(eid: str) -> None:
+                exp = store.get(eid)
+                if exp:
+                    self._set_active_expediente(exp)
+                dlg.accept()
+                # Open the full expediente dialog pre-selected
+                QTimer.singleShot(80, self._open_expedientes)
+
+            board.expediente_selected.connect(_on_selected)
+            board.new_requested.connect(dlg.accept)
+            board.new_requested.connect(
+                lambda: QTimer.singleShot(80, self._open_expedientes)
+            )
+
+            lay.addWidget(board)
+            dlg.exec()
+
         # ── Expedientes panel ─────────────────────────────────────────────────
         def _open_expedientes(self) -> None:
             import dataclasses
@@ -1597,6 +1743,10 @@ def launch_desktop_app(
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
             store = ExpedienteStore(data_dir / "expedientes.db")
+            runtime.memoria_tools.set_expediente_store(store)  # noqa: F821
+            runtime.memoria_pdf_tools.set_expediente_store(store)  # noqa: F821
+            runtime.informe_tools.set_expediente_store(store)  # noqa: F821
+            runtime.team_tools.set_expediente_store(store)  # noqa: F821
 
             def _parse_coordinate_text(text: str) -> tuple[float, float] | None:
                 match = re.search(
@@ -1860,6 +2010,8 @@ def launch_desktop_app(
                         prompt = "\n".join(parts)
                     self._active_exp_store = store
                     self._active_exp_id = eid
+                    self.expediente_selected.emit(exp)
+                    self._set_active_expediente(exp)
                     dlg.accept()
                     QTimer.singleShot(50, lambda: self._send_nav_prompt(prompt))
                 else:
@@ -1969,6 +2121,7 @@ def launch_desktop_app(
                 exp = store.get(eid)
                 if exp:
                     detail_panel.load_expediente(exp)
+                    self._set_active_expediente(exp)
 
             def _new() -> None:
                 d = NewExpedienteDialog(dlg)

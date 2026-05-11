@@ -65,6 +65,7 @@ class CommandServices:
     stt: WhisperSpeechToText
     urban_compliance_tools: UrbanComplianceTools
     geo_tools: Any  # GeoTools — imported lazily to avoid circular
+    personal_kb: Any = None  # PersonalKB — imported lazily to avoid heavy deps at startup
 
 
 def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
@@ -357,6 +358,27 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.renderer.show_info(_format_log_entries(entries))
         return CommandResult(handled=True)
 
+    if command == "/plan":
+        if not argument:
+            services.renderer.show_error("Uso: /plan <objetivo>")
+            return CommandResult(handled=True)
+        return _handle_plan_command(argument, services=services)
+
+    if command == "/skills":
+        from adv_archon.skills.registry import registry as _skill_registry
+        skills = _skill_registry.all()
+        if not skills:
+            services.renderer.show_info("No hay skills registradas.")
+        else:
+            lines = ["Skills disponibles:"]
+            for s in skills:
+                lines.append(f"  • {s.name}: {s.description[:80]}")
+            services.renderer.show_info("\n".join(lines))
+        return CommandResult(handled=True)
+
+    if command == "/kb":
+        return _handle_kb_command(argument, services=services)
+
     services.renderer.show_error(f"Comando no reconocido: {command}")
     return CommandResult(handled=True)
 
@@ -373,6 +395,133 @@ def _format_memory_records(records: list[MemoryRecord]) -> str:
         )
         lines.append(f"- [#{record.id}] ({descriptor}) {record.content}{tags}{score}")
     return "\n".join(lines)
+
+
+def _handle_plan_command(objective: str, *, services: CommandServices) -> CommandResult:
+    """Generate a structured plan and ask the user for approval before executing."""
+    from adv_archon.core.plan_schema import RiskLevel
+    from adv_archon.core.planner import generate_plan
+
+    services.renderer.show_info(f"Generando plan para: {objective} …")
+    try:
+        plan = generate_plan(objective, llm=services.llm)
+    except Exception as exc:
+        services.renderer.show_error(f"Error al generar el plan: {exc}")
+        return CommandResult(handled=True)
+
+    services.renderer.show_info(plan.summary())
+
+    has_high = any(s.risk in (RiskLevel.HIGH, RiskLevel.CRITICAL) for s in plan.steps)
+    if has_high:
+        services.renderer.show_info(
+            "\n⚠️  El plan contiene pasos de alto riesgo. Revisa antes de aprobar."
+        )
+
+    if not services.confirm("¿Apruebas este plan y quieres ejecutarlo?"):
+        services.renderer.show_info("Plan cancelado.")
+        return CommandResult(handled=True)
+
+    plan.approved = True
+    # Inject plan as a structured prompt so the agent executes it step by step
+    steps_text = "\n".join(
+        f"{s.index}. [{s.risk.value.upper()}] {s.intent} → {s.tool}({s.arguments})"
+        for s in plan.steps
+    )
+    injected = (
+        f"Ejecuta el siguiente plan aprobado paso a paso:\n\n"
+        f"Objetivo: {plan.objective}\n\n"
+        f"{steps_text}\n\n"
+        "Confirma cada paso de alto riesgo antes de ejecutarlo."
+    )
+    return CommandResult(handled=True, injected_prompt=injected)
+
+
+def _handle_kb_command(argument: str, *, services: CommandServices) -> CommandResult:
+    """Handle /kb <subcommand> for the personal knowledge base."""
+    kb = services.personal_kb
+    subcommand, _, rest = argument.partition(" ")
+    subcommand = subcommand.strip().lower()
+    rest = rest.strip()
+
+    if not subcommand or subcommand == "status":
+        count = kb.count()
+        services.renderer.show_info(
+            f"Personal KB: {count} fragmento(s) indexado(s). "
+            "Usa /kb index <ruta|url|texto> para añadir contenido."
+        )
+        return CommandResult(handled=True)
+
+    if subcommand == "index":
+        if not rest:
+            services.renderer.show_error("Uso: /kb index <ruta|url|texto>")
+            return CommandResult(handled=True)
+        if rest.startswith("http://") or rest.startswith("https://"):
+            services.renderer.show_info(f"Descargando e indexando: {rest} …")
+            try:
+                n = kb.add_url(rest)
+                services.renderer.show_info(f"✓ {n} fragmento(s) añadido(s) desde URL.")
+            except Exception as exc:
+                services.renderer.show_error(f"Error indexando URL: {exc}")
+        else:
+            from pathlib import Path as _Path
+            p = _Path(rest).expanduser()
+            if p.is_file():
+                services.renderer.show_info(f"Indexando archivo: {p} …")
+                try:
+                    n = kb.add_file(p)
+                    services.renderer.show_info(f"✓ {n} fragmento(s) añadido(s).")
+                except Exception as exc:
+                    services.renderer.show_error(f"Error indexando archivo: {exc}")
+            else:
+                # Treat as raw text
+                try:
+                    kb.add(rest, source="texto_manual")
+                    services.renderer.show_info("✓ Texto añadido a la KB.")
+                except Exception as exc:
+                    services.renderer.show_error(f"Error añadiendo texto: {exc}")
+        return CommandResult(handled=True)
+
+    if subcommand == "ask":
+        if not rest:
+            services.renderer.show_error("Uso: /kb ask <consulta>")
+            return CommandResult(handled=True)
+        results = kb.search(rest, limit=5)
+        if not results:
+            services.renderer.show_info("No he encontrado nada relevante en la KB.")
+            return CommandResult(handled=True)
+        lines = [f"Resultados en KB para: {rest}\n"]
+        for i, rec in enumerate(results, 1):
+            lines.append(
+                f"[{i}] similitud={rec.score:.2f} | fuente={rec.source}\n"
+                f"    {rec.preview(160)}\n"
+            )
+        services.renderer.show_info("\n".join(lines))
+        return CommandResult(handled=True)
+
+    if subcommand == "list":
+        limit = int(rest) if rest.isdigit() else 10
+        records = kb.list_all(limit=limit)
+        if not records:
+            services.renderer.show_info("La KB está vacía.")
+            return CommandResult(handled=True)
+        lines = [f"Últimos {len(records)} fragmento(s) en KB:"]
+        for rec in records:
+            lines.append(f"  [{rec.id[:8]}] {rec.source} — {rec.preview(100)}")
+        services.renderer.show_info("\n".join(lines))
+        return CommandResult(handled=True)
+
+    if subcommand == "clear":
+        if not services.confirm("¿Borrar toda la Personal KB?"):
+            services.renderer.show_info("Cancelado.")
+            return CommandResult(handled=True)
+        n = kb.clear()
+        services.renderer.show_info(f"✓ {n} fragmento(s) eliminado(s).")
+        return CommandResult(handled=True)
+
+    services.renderer.show_error(
+        "Uso: /kb [status|index <ruta|url|texto>|ask <consulta>|list [n]|clear]"
+    )
+    return CommandResult(handled=True)
 
 
 def _handle_memory_command(argument: str, *, services: CommandServices) -> CommandResult:

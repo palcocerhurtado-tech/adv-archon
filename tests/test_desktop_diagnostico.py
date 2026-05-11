@@ -1,9 +1,7 @@
 """Tests for the diagnostic checker module."""
 from __future__ import annotations
 
-import sys
-from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 
 def test_diagnostico_item_fields() -> None:
@@ -111,8 +109,9 @@ def test_check_db_ok(monkeypatch, tmp_path) -> None:
 
 
 def test_run_checks_returns_six_items() -> None:
-    from adv_archon.desktop.diagnostico import DiagnosticoItem, run_checks
     from unittest.mock import patch
+
+    from adv_archon.desktop.diagnostico import DiagnosticoItem, run_checks
 
     fake = DiagnosticoItem(clave="x", nombre="X", descripcion="", ok=True)
     with (

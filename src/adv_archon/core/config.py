@@ -262,6 +262,14 @@ class ProfilesConfig:
 
 
 @dataclass(slots=True)
+class TeamConfig:
+    """Modo equipo: apunta a una carpeta de red o disco compartido."""
+    enabled: bool = False
+    shared_data_path: str = ""  # Ruta absoluta a carpeta compartida (NAS, iCloud, Dropbox…)
+    user_name: str = ""         # Nombre del usuario para identificar aportaciones
+
+
+@dataclass(slots=True)
 class AppConfig:
     paths: PathsConfig
     llm: LLMConfig
@@ -278,6 +286,7 @@ class AppConfig:
     research: ResearchConfig
     benchmark: BenchmarkConfig
     profiles: ProfilesConfig
+    team: TeamConfig
     system_prompt_path: Path
 
 
@@ -648,6 +657,15 @@ def load_app_config(
 
     system_prompt_path = system_prompt_override or DEFAULT_SYSTEM_PROMPT
 
+    team_data = _lookup(data, "team", default={})
+    if not isinstance(team_data, dict):
+        team_data = {}
+    team = TeamConfig(
+        enabled=bool(team_data.get("enabled", False)),
+        shared_data_path=str(team_data.get("shared_data_path", "")),
+        user_name=str(team_data.get("user_name", "")),
+    )
+
     return AppConfig(
         paths=paths,
         llm=llm,
@@ -664,5 +682,6 @@ def load_app_config(
         research=research,
         benchmark=benchmark,
         profiles=profiles,
+        team=team,
         system_prompt_path=system_prompt_path,
     )

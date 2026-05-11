@@ -199,7 +199,7 @@ if not exist "%PROJECT_ROOT%\src\adv_archon" (
 set "PATH=%USERPROFILE%\.local\bin;%USERPROFILE%\.cargo\bin;%LOCALAPPDATA%\Programs\Ollama;%PATH%"
 cd /d "%PROJECT_ROOT%"
 set "PYTHONPATH=%PROJECT_ROOT%\src;%PYTHONPATH%"
-uv run python -c "import dotenv.main; from PySide6.QtWidgets import QApplication; app = QApplication([])" >nul 2>&1
+uv run python -c "import dotenv.main; from PySide6.QtCore import QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))" >nul 2>&1
 if errorlevel 1 (
   uv sync --extra desktop --reinstall-package python-dotenv --reinstall-package PySide6 --reinstall-package PySide6-Addons --reinstall-package PySide6-Essentials --reinstall-package shiboken6
 )

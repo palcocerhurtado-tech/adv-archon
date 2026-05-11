@@ -91,4 +91,7 @@ class Renderer:
         text.append("/forget <query|id>\n")
         text.append("/cost\n")
         text.append("/log [n]\n")
+        text.append("/plan <objetivo>\n")
+        text.append("/skills\n")
+        text.append("/kb [status|index <ruta|url|texto>|ask <consulta>|list [n]|clear]\n")
         self.console.print(Panel.fit(text, border_style="green"))

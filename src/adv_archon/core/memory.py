@@ -1,6 +1,9 @@
 from __future__ import annotations
 
+import contextlib
+import io
 import json
+import os
 import sqlite3
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -61,10 +64,47 @@ class SentenceTransformerEncoder:
 
     def _load_model(self) -> Any:
         if self._model is None:
+            os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
+            os.environ.setdefault("TRANSFORMERS_NO_ADVISORY_WARNINGS", "1")
             from sentence_transformers import SentenceTransformer
 
-            self._model = SentenceTransformer(self._model_name)
+            hf_token = _load_hf_token()
+            if hf_token:
+                self._model = SentenceTransformer(self._model_name, token=hf_token)
+            else:
+                # sentence-transformers can emit noisy unauthenticated HF Hub
+                # warnings on every cold start. Local-first usage is expected,
+                # so keep the REPL clean when no optional HF token is present.
+                with (
+                    contextlib.redirect_stdout(io.StringIO()),
+                    contextlib.redirect_stderr(io.StringIO()),
+                ):
+                    self._model = SentenceTransformer(self._model_name)
         return self._model
+
+
+def _load_hf_token() -> str | None:
+    token = os.environ.get("HF_TOKEN", "").strip()
+    if _looks_like_hf_token(token):
+        return token
+    for base in (Path.cwd(), *Path(__file__).resolve().parents):
+        env_path = base / ".env"
+        if not env_path.is_file():
+            continue
+        try:
+            for line in env_path.read_text(encoding="utf-8").splitlines():
+                key, sep, value = line.partition("=")
+                if sep and key.strip() == "HF_TOKEN":
+                    token = value.strip().strip('"').strip("'")
+                    if _looks_like_hf_token(token):
+                        return token
+        except OSError:
+            continue
+    return None
+
+
+def _looks_like_hf_token(token: str) -> bool:
+    return token.startswith("hf_") and len(token) > 12
 
 
 class MemoryStore:
@@ -500,8 +540,14 @@ class MemoryStore:
         ).fetchall()
         return [self._row_to_record(row) for row in rows]
 
-    def context_matches(self, query: str, *, limit: int = 8) -> list[MemoryRecord]:
-        return self.recall(query, limit=limit)
+    def context_matches(
+        self,
+        query: str,
+        *,
+        limit: int = 8,
+        namespace: str | None = None,
+    ) -> list[MemoryRecord]:
+        return self.recall(query, limit=limit, namespace=namespace)
 
     def _connect(self) -> sqlite3.Connection:
         readonly = not self._persist and self._db_path.exists()

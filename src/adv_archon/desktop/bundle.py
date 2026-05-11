@@ -76,22 +76,33 @@ def create_macos_app_bundle(
         "    exit 1",
         "fi",
         'cd "$PROJECT_ROOT"',
+        '/usr/bin/chflags -R nohidden "$PROJECT_ROOT/.venv" 2>/dev/null || true',
         'export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"',
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
         "unset QT_PLUGIN_PATH",
         "unset QT_QPA_PLATFORM_PLUGIN_PATH",
-        "# Repair generated uv environments when Finder launches a stale/corrupt .venv.",
         (
-            'if ! "$UV" run python -c "import dotenv.main; '
-            'from PySide6.QtWidgets import QApplication; '
-            'app = QApplication([])" >/dev/null 2>&1; then'
+            'QT_PLUGIN_DIR=$("$UV" run python -c "import dotenv.main; '
+            'from PySide6.QtCore import '
+            'QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))" '
+            "2>/dev/null)"
         ),
+        "# Repair generated uv environments when Finder launches a stale/corrupt .venv.",
+        'if [ ! -d "$QT_PLUGIN_DIR/platforms" ]; then',
         (
             '    "$UV" sync --extra desktop --reinstall-package python-dotenv '
             "--reinstall-package PySide6 --reinstall-package PySide6-Addons "
             "--reinstall-package PySide6-Essentials --reinstall-package shiboken6"
         ),
+        (
+            '    QT_PLUGIN_DIR=$("$UV" run python -c "import dotenv.main; '
+            'from PySide6.QtCore import '
+            'QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))" '
+            "2>/dev/null)"
+        ),
         "fi",
+        'export QT_PLUGIN_PATH="$QT_PLUGIN_DIR"',
+        'export QT_QPA_PLATFORM_PLUGIN_PATH="$QT_PLUGIN_DIR/platforms"',
         'exec "$UV" run python -m adv_archon.main desktop "$@"',
         "",
     ]

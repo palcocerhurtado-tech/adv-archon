@@ -432,6 +432,7 @@ class Agent:
         auto_knowledge_limit: int = 5,
         force_local_private_context: bool = True,
         extra_tools: Sequence[ToolSpec] | None = None,
+        expediente_id: str | None = None,
     ) -> None:
         self._llm = llm
         self._system_prompt = system_prompt
@@ -442,6 +443,7 @@ class Agent:
         self._context_provider = context_provider
         self._memory_store = memory_store
         self._knowledge_store = knowledge_store
+        self._expediente_id: str | None = expediente_id
         self._usage_callback = usage_callback
         self._auto_recall_limit = auto_recall_limit
         self._auto_knowledge_limit = auto_knowledge_limit
@@ -799,6 +801,46 @@ class Agent:
             self._session.append(SessionMessage(role="assistant", content=response.text))
             return response
 
+    def set_expediente(self, expediente: Any) -> None:
+        """Switch active expediente context and auto-snapshot it into memory."""
+        if expediente is None:
+            self._expediente_id = None
+            return
+        self._expediente_id = str(getattr(expediente, "id", "") or "")
+        if self._expediente_id and self._memory_store is not None:
+            self._auto_remember_expediente(expediente)
+
+    def _auto_remember_expediente(self, expediente: Any) -> None:
+        if self._memory_store is None or not self._expediente_id:
+            return
+        title = getattr(expediente, "title", "") or ""
+        address = getattr(expediente, "address", "") or ""
+        municipality = getattr(expediente, "municipality", "") or ""
+        province = getattr(expediente, "province", "") or ""
+        cadastral_ref = getattr(expediente, "cadastral_ref", "") or ""
+        status = getattr(expediente, "status", "") or ""
+        notes = getattr(expediente, "notes", "") or ""
+        content = (
+            f"Expediente: {title}. "
+            f"Dirección: {address}, {municipality} ({province}). "
+            f"Ref. catastral: {cadastral_ref}. "
+            f"Estado: {status}."
+            + (f" Notas: {notes}" if notes else "")
+        ).strip()
+        tags: list[str] = ["expediente"]
+        if municipality:
+            tags.append(municipality)
+        from contextlib import suppress
+        with suppress(Exception):
+            self._memory_store.remember(
+                content,
+                tags=tags,
+                source="expediente",
+                memory_type="context",
+                namespace=self._expediente_id,
+                importance=8,
+            )
+
     def _prepare_turn_state(self, user_input: str) -> _TurnState:
         runtime_context = self._context_provider() if self._context_provider is not None else None
         intent = self._intent_router.analyze(user_input, runtime_context)
@@ -815,6 +857,7 @@ class Agent:
                 memories = self._memory_store.context_matches(
                     user_input,
                     limit=self._auto_recall_limit,
+                    namespace=self._expediente_id or "general",
                 )
             except Exception:
                 memories = []
@@ -1701,12 +1744,35 @@ class Agent:
             tool_observations=tool_observations,
         )
         is_local = self._llm.mode == "local"
+        has_knowledge = bool(state.knowledge_hits)
+        has_tool_results = bool(tool_observations)
+        has_grounded_context = has_knowledge or has_tool_results
         if is_local:
-            # Compact prompt for local model: fewer tokens → faster inference.
+            grounding_block = (
+                "## NORMATIVA DISPONIBLE EN CONTEXTO\n"
+                "Tienes fragmentos de normativa indexada en el contexto. "
+                "Cita SIEMPRE el artículo exacto con su texto literal entre comillas. "
+                "Formato obligatorio: «Artículo X.Y — [título si lo hay]: "
+                '"[texto literal exacto]"»\n'
+                "NUNCA parafrasees ni resumas el texto normativo: copia la redacción exacta.\n\n"
+                if has_grounded_context else
+                "## AVISO DE CONTEXTO\n"
+                "NO tienes normativa indexada para esta consulta concreta. "
+                "DEBES responder exactamente: "
+                "«No tengo indexada la normativa específica para esta pregunta. "
+                "Para obtener una respuesta precisa, importa el PDF del PGOU correspondiente "
+                "desde el menú Importar normativa PGOU, o consulta directamente el BOE.» "
+                "No inventes artículos, cifras ni parámetros urbanísticos.\n\n"
+            )
             final_prompt = (
-                "Eres ADV ARCHON, asistente de arquitectura. "
-                "Responde en español, breve y directo. "
-                "Usa solo los datos del contexto.\n\n"
+                "Eres ADV ARCHON, asistente especializado en arquitectura y urbanismo español.\n"
+                "REGLAS ABSOLUTAS:\n"
+                "1. Responde SIEMPRE en español.\n"
+                "2. Usa SOLO los datos que aparecen literalmente en el contexto.\n"
+                "3. Si citas normativa, copia el texto exacto entre comillas. "
+                "Nunca lo parafrasees.\n"
+                "4. Si no tienes el dato, dilo explícitamente. Prohibido inventar.\n\n"
+                f"{grounding_block}"
                 f"{packet.render_compact()}"
             )
         else:
@@ -1729,6 +1795,21 @@ class Agent:
             on_chunk=on_chunk,
             task=_task_kind_for_intent(state.intent.category),
         )
+        if not response.text.strip():
+            _FALLBACK = (
+                "Soy ADV ARCHON, tu asistente de arquitectura y urbanismo. "
+                "Puedo ayudarte con consultas normativas, análisis de expedientes, "
+                "búsqueda de información PGOU, gestión de documentos y más. "
+                "¿En qué te puedo ayudar?"
+            )
+            if on_chunk is not None:
+                on_chunk(_FALLBACK)
+            response = LLMResponse(
+                text=_FALLBACK,
+                usage=response.usage,
+                provider=response.provider,
+                model=response.model,
+            )
         response = self._append_confidence_block(
             response,
             state=state,

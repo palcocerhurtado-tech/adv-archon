@@ -394,9 +394,21 @@ class GoogleWorkspaceTools:
             _status, done = downloader.next_chunk()
         return handle.getvalue().decode("utf-8", errors="replace")
 
+    def is_configured(self) -> bool:
+        """Return True only when Google credentials are actually available."""
+        return (
+            self._enabled
+            and (self._token_file.exists() or self._client_secret_file.exists())
+        )
+
     def _service(self, api_name: str, version: str) -> Any:
         if not self._enabled:
             raise RuntimeError("Los conectores Google están desactivados en config.")
+        if not self.is_configured():
+            raise RuntimeError(
+                "Google no está configurado en este equipo. "
+                "Para el briefing diario usaré solo las tareas y notas locales."
+            )
         cache_key = (api_name, version)
         if cache_key in self._service_cache:
             return self._service_cache[cache_key]
@@ -437,7 +449,19 @@ class GoogleWorkspaceTools:
             str(self._client_secret_file),
             GOOGLE_WORKSPACE_SCOPES,
         )
-        credentials = flow.run_local_server(port=0)
+        # run_local_server blocks until the user authorises in the browser.
+        # Run it in a thread with a hard 120-second timeout so a stalled OAuth
+        # flow never freezes the worker thread.
+        import concurrent.futures
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(flow.run_local_server, port=0)
+            try:
+                credentials = future.result(timeout=120)
+            except concurrent.futures.TimeoutError as exc:
+                raise RuntimeError(
+                    "La autorización de Google no se completó en 2 minutos. "
+                    "Vuelve a intentarlo y acepta el permiso en el navegador."
+                ) from exc
         self._write_token(credentials)
         return credentials
 

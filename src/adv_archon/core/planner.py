@@ -64,7 +64,7 @@ def _parse_plan(raw: str, objective: str) -> Plan:
             ],
         )
 
-    steps = []
+    steps: list[Step] = []
     for raw_step in data.get("steps", []):
         risk_str = raw_step.get("risk", "low")
         try:

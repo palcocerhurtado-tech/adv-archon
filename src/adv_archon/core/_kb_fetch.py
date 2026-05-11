@@ -20,7 +20,7 @@ class _Strip(HTMLParser):
         self._parts: list[str] = []
         self._d = 0
 
-    def handle_starttag(self, tag: str, attrs: list) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _SKIP:
             self._d += 1
 

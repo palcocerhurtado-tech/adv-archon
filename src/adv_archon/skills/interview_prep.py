@@ -47,7 +47,7 @@ class InterviewPrepSkill(Skill):
     def __init__(self, llm: Any | None = None) -> None:
         self._llm = llm
 
-    def run(
+    def run(  # type: ignore[override]
         self,
         *,
         role: str,

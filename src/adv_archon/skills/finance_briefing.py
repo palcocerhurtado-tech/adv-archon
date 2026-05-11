@@ -32,9 +32,15 @@ class FinanceBriefingSkill(Skill):
     def __init__(self, llm: Any | None = None) -> None:
         self._llm = llm
 
-    def run(self, *, tickers: str, currency: str = "USD", **_: Any) -> SkillResult:
+    def run(  # type: ignore[override]
+        self,
+        *,
+        tickers: str,
+        currency: str = "USD",
+        **_: Any,
+    ) -> SkillResult:
         try:
-            import yfinance as yf  # type: ignore[import]
+            import yfinance as yf  # type: ignore[import-untyped]
         except ImportError:
             return SkillResult(
                 success=False,

@@ -102,7 +102,7 @@ def generar_memoria_descriptiva(
     response = llm.complete(
         [],
         system_prompt=prompt,
-        task="document",
+        task="documents",
     )
     return response.text
 

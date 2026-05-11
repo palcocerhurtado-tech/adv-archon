@@ -29,7 +29,7 @@ class _StripHTML(HTMLParser):
         self._parts: list[str] = []
         self._skip = 0
 
-    def handle_starttag(self, tag: str, attrs: list) -> None:
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in _SKIP_TAGS:
             self._skip += 1
 
@@ -84,7 +84,7 @@ class ResearchSkill(Skill):
     def __init__(self, llm: Any | None = None) -> None:
         self._llm = llm
 
-    def run(self, *, topic: str, urls: str = "", **_: Any) -> SkillResult:
+    def run(self, *, topic: str, urls: str = "", **_: Any) -> SkillResult:  # type: ignore[override]
         url_list = [u.strip() for u in urls.split(",") if u.strip()]
 
         fetched: list[str] = []

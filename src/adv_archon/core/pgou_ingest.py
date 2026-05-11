@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 if TYPE_CHECKING:
     from adv_archon.core.knowledge import KnowledgeStore
@@ -52,7 +52,7 @@ def extract_pdf_text(path: Path) -> str:
 
 def _ocr_page(page: object) -> str:
     try:
-        import pytesseract
+        import pytesseract  # type: ignore[import-untyped]
         from pdf2image import convert_from_bytes
     except ImportError:
         return ""
@@ -61,7 +61,7 @@ def _ocr_page(page: object) -> str:
         pnum = page.page_number           # type: ignore[attr-defined]
         images = convert_from_bytes(raw, first_page=pnum, last_page=pnum)
         if images:
-            return pytesseract.image_to_string(images[0], lang="spa")
+            return cast(str, pytesseract.image_to_string(images[0], lang="spa"))
     except Exception as exc:
         log.debug("OCR falló en página: %s", exc)
     return ""
@@ -171,7 +171,7 @@ def ingest_pgou_pdf(
                 state = knowledge_store._file_state(str(chunk_path))  # noqa: SLF001
                 if (
                     state is not None
-                    and str(state.get("last_index_status", "")) == INDEXED_STATUS
+                    and str(state["last_index_status"]) == INDEXED_STATUS
                 ):
                     log.debug("Chunk ya indexado, saltando: %s", chunk_path.name)
                     continue

@@ -50,7 +50,13 @@ class ReadmeGeneratorSkill(Skill):
                 lines.append(f"{indent}  {f}")
         return "\n".join(lines[:100])
 
-    def run(self, *, project_path: str, language: str = "es", **_: Any) -> SkillResult:
+    def run(  # type: ignore[override]
+        self,
+        *,
+        project_path: str,
+        language: str = "es",
+        **_: Any,
+    ) -> SkillResult:
         path = Path(project_path).expanduser().resolve()
         if not path.is_dir():
             return SkillResult(success=False, output=f"Directorio no encontrado: {path}")

@@ -43,7 +43,7 @@ class CodePatcherSkill(Skill):
     def __init__(self, llm: Any | None = None) -> None:
         self._llm = llm
 
-    def run(
+    def run(  # type: ignore[override]
         self,
         *,
         file_path: str,

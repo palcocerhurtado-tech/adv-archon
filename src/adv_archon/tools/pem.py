@@ -165,7 +165,7 @@ def calcular_pem(
     pec_sin_iva = round(pem_con_bi + honorarios + licencia, 2)
     pec_con_iva = round(pec_sin_iva * 1.21, 2)
 
-    desglose = [
+    desglose: list[dict[str, Any]] = [
         {"concepto": "Superficie construida", "valor": superficie_construida_m2, "unidad": "m²"},
         {"concepto": "Superficie sótano", "valor": superficie_sótano_m2, "unidad": "m²"},
         {"concepto": "Tipología",                  "valor": tipologia,                "unidad": ""},

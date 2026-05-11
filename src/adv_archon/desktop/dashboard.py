@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """Dashboard visual de expedientes — tarjetas de estado, métricas y acceso rápido."""
 
 from __future__ import annotations

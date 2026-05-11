@@ -100,7 +100,6 @@ def query_road_zone(lat: float, lon: float) -> dict[str, Any]:
         result["in_servitude_zone"] = None
         result["in_affection_zone"] = None
         result["error"] = "; ".join(errors[:2])
-        _CACHE.set(key, result)
         return result
 
     if not road_axis_success and not service_area_hit:
@@ -108,7 +107,6 @@ def query_road_zone(lat: float, lon: float) -> dict[str, Any]:
         result["in_servitude_zone"] = None
         result["in_affection_zone"] = None
         result["error"] = "; ".join(errors[:2])
-        _CACHE.set(key, result)
         return result
 
     if nearest_distance_m is not None:

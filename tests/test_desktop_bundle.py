@@ -62,6 +62,7 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path, monke
     with result.info_plist_path.open("rb") as handle:
         plist = plistlib.load(handle)
     assert plist["CFBundleName"] == "ADV ARCHON"
+    assert "Beta" in plist["CFBundleShortVersionString"]
     assert plist["CFBundleExecutable"] == "adv-archon-desktop"
     assert plist["CFBundleIconFile"] == result.icon_path.name
 
@@ -76,6 +77,20 @@ def test_create_macos_app_bundle_can_embed_project_source(
     (project_root / "src" / "adv_archon" / "__init__.py").write_text("", encoding="utf-8")
     (project_root / ".venv").mkdir()
     (project_root / ".git").mkdir()
+    (project_root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
+    (project_root / ".env.local").write_text("TOKEN=secret\n", encoding="utf-8")
+    (project_root / ".env.example").write_text("TOKEN=\n", encoding="utf-8")
+    (project_root / ".DS_Store").write_text("", encoding="utf-8")
+    (project_root / "tests").mkdir()
+    (project_root / "tests" / "test_secret.py").write_text("", encoding="utf-8")
+    (project_root / "docs" / "archive").mkdir(parents=True)
+    (project_root / "docs" / "archive" / "old.md").write_text("", encoding="utf-8")
+    (project_root / "normativa_arquitectura_es" / "src").mkdir(parents=True)
+    (project_root / "normativa_arquitectura_es" / "src" / "rag.py").write_text(
+        "",
+        encoding="utf-8",
+    )
+    (project_root / "src" / "adv_archon.egg-info").mkdir()
     (project_root / "pyproject.toml").write_text("[project]\nname='x'\n", encoding="utf-8")
 
     result = bundle_module.create_macos_app_bundle(
@@ -88,6 +103,14 @@ def test_create_macos_app_bundle_can_embed_project_source(
     assert (result.embedded_project_path / "src" / "adv_archon").exists()
     assert not (result.embedded_project_path / ".venv").exists()
     assert not (result.embedded_project_path / ".git").exists()
+    assert not (result.embedded_project_path / ".env").exists()
+    assert not (result.embedded_project_path / ".env.local").exists()
+    assert (result.embedded_project_path / ".env.example").exists()
+    assert not (result.embedded_project_path / ".DS_Store").exists()
+    assert not (result.embedded_project_path / "tests").exists()
+    assert not (result.embedded_project_path / "docs" / "archive").exists()
+    assert not (result.embedded_project_path / "normativa_arquitectura_es").exists()
+    assert not (result.embedded_project_path / "src" / "adv_archon.egg-info").exists()
     launcher = (
         result.app_path / "Contents" / "Resources" / "launch-adv-archon.sh"
     ).read_text(encoding="utf-8")

@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from adv_archon import __beta_label__
 from adv_archon.core.attachments import normalize_attachment_paths
 from adv_archon.core.config import AppConfig, save_ollama_model_preference
 from adv_archon.core.llm import LLMRouter
@@ -187,7 +188,7 @@ def launch_desktop_app(
             self._logo_pixmap = (
                 QPixmap(str(self._logo_path)) if self._logo_path.exists() else None
             )
-            self.setWindowTitle("ADV ARCHON")
+            self.setWindowTitle(f"ADV ARCHON — {__beta_label__}")
             self.setMinimumSize(1080, 720)
             if self._logo_pixmap is not None:
                 self.setWindowIcon(QIcon(str(self._logo_path)))
@@ -354,7 +355,7 @@ def launch_desktop_app(
             brand.addWidget(name_lbl, 1)
             sl.addLayout(brand)
 
-            tagline = QLabel("ARQUITECTURA · IA")
+            tagline = QLabel(f"ARQUITECTURA · IA · {__beta_label__.upper()}")
             tagline.setObjectName("Eyebrow")
             sl.addWidget(tagline)
             sl.addSpacing(14)
@@ -387,6 +388,10 @@ def launch_desktop_app(
             self._nav_dashboard_btn = self._make_nav_btn("  Dashboard")
             self._nav_dashboard_btn.clicked.connect(self._open_dashboard)
             sl.addWidget(self._nav_dashboard_btn)
+
+            self._nav_beta_btn = self._make_nav_btn("  Guía beta")
+            self._nav_beta_btn.clicked.connect(self._show_beta_guide)
+            sl.addWidget(self._nav_beta_btn)
 
             sl.addStretch(1)
             sl.addWidget(self._make_divider())
@@ -475,12 +480,15 @@ def launch_desktop_app(
             bar = QStatusBar(self)
             bar.setObjectName("BottomBar")
             self.setStatusBar(bar)
+            self._beta_badge_lbl = QLabel(__beta_label__)
+            self._beta_badge_lbl.setObjectName("Accent")
             self._ollama_badge_lbl = QLabel("")
             self._ollama_badge_lbl.setObjectName("Sub")
             self._model_badge_lbl = QLabel("")
             self._model_badge_lbl.setObjectName("Sub")
             self._last_exp_badge_lbl = QLabel("")
             self._last_exp_badge_lbl.setObjectName("Faint")
+            bar.addPermanentWidget(self._beta_badge_lbl)
             bar.addPermanentWidget(self._ollama_badge_lbl)
             bar.addPermanentWidget(self._model_badge_lbl)
             bar.addPermanentWidget(self._last_exp_badge_lbl, 1)
@@ -1465,7 +1473,9 @@ def launch_desktop_app(
                 (
                     "Bienvenido a ADV ARCHON",
                     "Gestiona expedientes urbanísticos con contexto catastral, PGOU, "
-                    "afecciones sectoriales e informe PDF profesional.",
+                    "afecciones sectoriales e informe PDF profesional.\n\n"
+                    f"{__beta_label__}: prueba recomendada en 10 minutos: crea un "
+                    "expediente, adjunta un plano, analiza y exporta el PDF.",
                 ),
                 (
                     "Comprueba Ollama",
@@ -1507,6 +1517,27 @@ def launch_desktop_app(
             self._onboarding_dialog = dlg
             render_step()
             dlg.open()
+
+        def _show_beta_guide(self) -> None:
+            from PySide6.QtWidgets import QMessageBox
+
+            QMessageBox.information(
+                self,
+                f"Guía de prueba — ADV ARCHON {__beta_label__}",
+                "Prueba recomendada para un despacho:\n\n"
+                "1. Abre Expedientes y crea un expediente nuevo.\n"
+                "2. Introduce dirección, coordenadas o referencia catastral.\n"
+                "3. Adjunta un plano PDF si tienes uno de prueba.\n"
+                "4. Pulsa Analizar y revisa el veredicto preliminar.\n"
+                "5. Exporta el informe PDF.\n\n"
+                "Feedback útil:\n"
+                "- ¿Entiendes el flujo sin explicación?\n"
+                "- ¿El informe parece presentable ante un cliente interno?\n"
+                "- ¿Qué dato falta para confiar en la revisión?\n"
+                "- ¿Qué parte te hizo dudar o se sintió demasiado técnica?\n\n"
+                "Aviso: esta beta es preliminar y no sustituye comprobación oficial "
+                "ni criterio profesional.",
+            )
 
         def _onboarding_done(self) -> bool:
             try:

@@ -9,6 +9,8 @@ from typing import Any
 
 from fpdf import FPDF, XPos, YPos
 
+from adv_archon import __beta_label__
+
 # ── Font paths ────────────────────────────────────────────────────────────────
 _FONT_REGULAR_CANDIDATES = [
     Path("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"),
@@ -83,8 +85,12 @@ class ArchonPDF(FPDF):
         self.set_y(2)
         self.set_font(self._fn, "B", 9)
         self.set_text_color(*_C_WHITE)
-        self.cell(0, 10, "ADV ARCHON  ·  INFORME DE CUMPLIMIENTO NORMATIVO URBANÍSTICO",
-                  align="C")
+        self.cell(
+            0,
+            10,
+            f"ADV ARCHON {__beta_label__}  ·  INFORME PRELIMINAR URBANÍSTICO",
+            align="C",
+        )
         self.set_text_color(*_C_BLACK)
         self.ln(6)
 
@@ -96,7 +102,8 @@ class ArchonPDF(FPDF):
         self.set_text_color(130, 130, 130)
         self.cell(
             0, 8,
-            f"Generado por ADV ARCHON  ·  Análisis preliminar, no vinculante jurídicamente  ·  "
+            f"Generado por ADV ARCHON {__beta_label__}  ·  "
+            f"Análisis preliminar, no vinculante jurídicamente  ·  "
             f"Página {self.page_no()}",
             align="C",
         )

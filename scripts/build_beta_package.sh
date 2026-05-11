@@ -59,6 +59,10 @@ create_macos_app_bundle(
 echo "→ Preparando versión Windows portable…"
 mkdir -p "${WINDOWS_DIR}"
 rsync -a \
+  --include ".env.example" \
+  --exclude ".env" \
+  --exclude ".env.*" \
+  --exclude ".DS_Store" \
   --exclude ".git" \
   --exclude ".mypy_cache" \
   --exclude ".pytest_cache" \
@@ -66,27 +70,39 @@ rsync -a \
   --exclude ".venv" \
   --exclude "__pycache__" \
   --exclude "dist" \
+  --exclude "docs/archive" \
+  --exclude "normativa_arquitectura_es" \
+  --exclude "src/adv_archon.egg-info" \
+  --exclude "tests" \
+  --exclude "*.pyc" \
+  --exclude "*.pyo" \
   "${ROOT}/" "${WINDOWS_SOURCE_DIR}/"
 
 cat > "${INSTALLER}" <<'INSTALLER_EOF'
 #!/bin/zsh
 set -e
 
-clear
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo " ADV ARCHON — instalador beta"
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo ""
-
 PACKAGE_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SRC="${PACKAGE_DIR}/ADV ARCHON.app"
 INSTALL_DIR="${HOME}/Applications"
 APP_DST="${INSTALL_DIR}/ADV ARCHON.app"
 MODEL="qwen2.5:7b"
+LOG_FILE="${HOME}/.adv-archon/install.log"
+
+mkdir -p "${HOME}/.adv-archon"
+exec > >(tee -a "$LOG_FILE") 2>&1
+
+clear
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo " ADV ARCHON — instalador beta"
+echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+echo "Log de instalación: $LOG_FILE"
+echo ""
 
 fail_dialog() {
   osascript -e "display alert \"ADV ARCHON\" message \"$1\" as critical" >/dev/null 2>&1 || true
   echo "ERROR: $1"
+  echo "Log de instalación: $LOG_FILE"
   echo ""
   echo "Pulsa Enter para cerrar."
   read -r _
@@ -217,15 +233,22 @@ set "SOURCE_DIR=%PACKAGE_DIR%adv-archon-source"
 set "INSTALL_DIR=%USERPROFILE%\ADV ARCHON Beta"
 set "PROJECT_ROOT=%INSTALL_DIR%\adv-archon-source"
 set "DESKTOP=%USERPROFILE%\Desktop"
+set "LOG_DIR=%USERPROFILE%\.adv-archon"
+set "LOG_FILE=%LOG_DIR%\install-windows.log"
 
 echo ==================================================
 echo  ADV ARCHON - instalador beta Windows
 echo ==================================================
 echo.
+mkdir "%LOG_DIR%" >nul 2>&1
+echo ADV ARCHON install %DATE% %TIME% > "%LOG_FILE%"
+echo Log de instalacion: %LOG_FILE%
+echo.
 
 if not exist "%SOURCE_DIR%\src\adv_archon" (
   echo ERROR: No encuentro adv-archon-source junto al instalador.
   echo Descomprime el ZIP completo y vuelve a intentarlo.
+  echo Revisa el log: %LOG_FILE%
   pause
   exit /b 1
 )
@@ -241,21 +264,23 @@ set "PATH=%USERPROFILE%\.local\bin;%USERPROFILE%\.cargo\bin;%PATH%"
 where uv >nul 2>&1
 if errorlevel 1 (
   echo uv no esta instalado. Instalando uv...
-  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex"
+  powershell -NoProfile -ExecutionPolicy Bypass -Command "irm https://astral.sh/uv/install.ps1 | iex" >> "%LOG_FILE%" 2>&1
   set "PATH=%USERPROFILE%\.local\bin;%USERPROFILE%\.cargo\bin;%PATH%"
 )
 where uv >nul 2>&1
 if errorlevel 1 (
   echo ERROR: No se pudo instalar uv. Revisa tu conexion y vuelve a ejecutar este instalador.
+  echo Revisa el log: %LOG_FILE%
   pause
   exit /b 1
 )
 
 echo 3/5 Instalando dependencias locales...
 cd /d "%PROJECT_ROOT%"
-uv sync --extra desktop --reinstall-package python-dotenv --reinstall-package PySide6 --reinstall-package PySide6-Addons --reinstall-package PySide6-Essentials --reinstall-package shiboken6
+uv sync --extra desktop --reinstall-package python-dotenv --reinstall-package PySide6 --reinstall-package PySide6-Addons --reinstall-package PySide6-Essentials --reinstall-package shiboken6 >> "%LOG_FILE%" 2>&1
 if errorlevel 1 (
   echo ERROR: No se pudieron instalar las dependencias.
+  echo Revisa el log: %LOG_FILE%
   pause
   exit /b 1
 )
@@ -267,6 +292,7 @@ if errorlevel 1 (
   start "" "https://ollama.com/download/windows"
   echo ERROR: Ollama no esta instalado. Se ha abierto la pagina de descarga.
   echo Instala Ollama para Windows y vuelve a ejecutar este instalador.
+  echo Revisa el log: %LOG_FILE%
   pause
   exit /b 1
 )
@@ -281,6 +307,7 @@ powershell -NoProfile -Command "try { Invoke-RestMethod http://127.0.0.1:11434/a
 if errorlevel 1 (
   echo ERROR: Ollama esta instalado, pero no responde.
   echo Abre Ollama manualmente y vuelve a ejecutar este instalador.
+  echo Revisa el log: %LOG_FILE%
   pause
   exit /b 1
 )
@@ -288,7 +315,7 @@ if errorlevel 1 (
 ollama list | findstr /B /C:"%MODEL% " >nul 2>&1
 if errorlevel 1 (
   echo Descargando modelo %MODEL%. Puede tardar varios minutos...
-  ollama pull "%MODEL%"
+  ollama pull "%MODEL%" >> "%LOG_FILE%" 2>&1
 )
 
 echo 5/5 Guardando configuracion y acceso directo...
@@ -324,16 +351,36 @@ Requisitos:
 - Windows 10/11.
 - Internet durante la primera instalación.
 - Ollama para Windows instalado desde https://ollama.com/download/windows.
+- 8 GB de RAM recomendados.
+- 8-12 GB libres para dependencias y modelo local.
+
+Si falla:
+- Repite el instalador una vez.
+- Si vuelve a fallar, envía una captura y este log:
+  %USERPROFILE%\.adv-archon\install-windows.log
 
 Aviso:
 Esta beta es local-first y preliminar. No sustituye criterio profesional ni comprobación oficial del planeamiento.
 WIN_README_EOF
 
 cat > "${README_TXT}" <<'README_EOF'
-ADV ARCHON — beta interna para probadores
+ADV ARCHON Beta 0.1 — guía para probadores
 
 Qué es
 ADV ARCHON es una app local-first para revisar expedientes urbanísticos de arquitectura en España: parcela, Catastro, PGOU, afecciones sectoriales, análisis preliminar e informe PDF.
+
+Objetivo de esta beta
+Queremos saber si un arquitecto no técnico puede probar ADV ARCHON sin ayuda y decir si lo compraría para una primera revisión de despacho.
+
+Tiempo recomendado
+Reserva 10-15 minutos. La primera instalación puede tardar más si hay que descargar el modelo local qwen2.5:7b.
+
+Requisitos
+- Internet durante la primera instalación.
+- Ollama instalado o permiso para instalarlo desde la web oficial.
+- macOS 13+ o Windows 10/11.
+- 8 GB de RAM recomendados.
+- 8-12 GB libres para dependencias y modelo local.
 
 Cómo instalar
 macOS:
@@ -359,12 +406,23 @@ Qué probar
 - Pulsar Analizar.
 - Exportar el informe PDF.
 
+Prueba de compra
+Al terminar, responde con sinceridad:
+- ¿Entenderías esta app sin que Pablo te la explique?
+- ¿La usarías en un expediente real como cribado preliminar?
+- ¿Qué tendría que mejorar para que el precio fuera defendible?
+- ¿Qué dato o pantalla falta para que parezca una herramienta de despacho?
+
 Qué feedback necesitamos
 - Qué partes se entienden sin explicación.
 - Qué partes suenan demasiado técnicas.
 - Si el informe sirve para una primera revisión de despacho.
 - Si falta algún dato que un arquitecto esperaría ver.
 - Dónde se siente lento o poco fiable.
+
+Si falla
+- macOS: envía una captura y el archivo ~/.adv-archon/install.log.
+- Windows: envía una captura y el archivo %USERPROFILE%\.adv-archon\install-windows.log.
 
 Aviso importante
 Esta beta genera un análisis preliminar no vinculante. No sustituye el criterio profesional ni la comprobación oficial del planeamiento aplicable.
@@ -380,14 +438,18 @@ pdf = FPDF()
 pdf.set_auto_page_break(auto=True, margin=16)
 pdf.add_page()
 pdf.set_font('Helvetica', 'B', 18)
-pdf.cell(0, 10, 'ADV ARCHON - beta interna')
+pdf.cell(0, 10, 'ADV ARCHON Beta 0.1')
 pdf.ln(12)
 pdf.set_font('Helvetica', '', 11)
 sections = [
     ('Qué es', 'ADV ARCHON es una app local-first para revisar expedientes urbanísticos de arquitectura en España: parcela, Catastro, PGOU, afecciones sectoriales, análisis preliminar e informe PDF.'),
+    ('Objetivo', 'Queremos saber si un arquitecto no técnico puede probar ADV ARCHON sin ayuda y decir si lo compraría para una primera revisión de despacho. Reserva 10-15 minutos; la primera instalación puede tardar más si descarga qwen2.5:7b.'),
+    ('Requisitos', '- Internet durante la primera instalación.\\n- macOS 13+ o Windows 10/11.\\n- Ollama instalado o permiso para instalarlo.\\n- 8 GB de RAM recomendados.\\n- 8-12 GB libres.'),
     ('Cómo instalar', 'macOS:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Haz doble clic en Instalar ADV ARCHON.command.\\n3. El instalador comprobará uv, Ollama y el modelo qwen2.5:7b.\\n\\nWindows:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Abre la carpeta Windows.\\n3. Haz doble clic en Instalar_ADV_ARCHON.bat.\\n4. El instalador comprobará uv, dependencias, Ollama y el modelo qwen2.5:7b.'),
     ('Qué probar', '- Crear un expediente nuevo.\\n- Introducir dirección, coordenadas o referencia catastral.\\n- Adjuntar un plano PDF si tenéis uno de prueba.\\n- Pulsar Analizar.\\n- Exportar el informe PDF.'),
+    ('Prueba de compra', '- ¿Entenderías esta app sin explicación?\\n- ¿La usarías en un expediente real como cribado preliminar?\\n- ¿Qué tendría que mejorar para que el precio fuera defendible?\\n- ¿Qué dato o pantalla falta para que parezca herramienta de despacho?'),
     ('Feedback que necesitamos', '- Qué partes se entienden sin explicación.\\n- Qué partes suenan demasiado técnicas.\\n- Si el informe sirve para una primera revisión de despacho.\\n- Si falta algún dato que un arquitecto esperaría ver.\\n- Dónde se siente lento o poco fiable.'),
+    ('Si falla', 'macOS: envía una captura y ~/.adv-archon/install.log.\\nWindows: envía una captura y %USERPROFILE%\\\\.adv-archon\\\\install-windows.log.'),
     ('Aviso', 'Esta beta genera un análisis preliminar no vinculante. No sustituye el criterio profesional ni la comprobación oficial del planeamiento aplicable.'),
 ]
 for title, body in sections:
@@ -409,6 +471,27 @@ echo "→ Creando ZIP…"
   cd "${WORK_DIR}"
   COPYFILE_DISABLE=1 ditto -c -k --norsrc --keepParent "${BETA_NAME}" "${ZIP_PATH}"
 )
+
+echo "→ Verificando que el ZIP no contiene secretos ni caches…"
+ZIP_LIST="$(mktemp)"
+if command -v zipinfo >/dev/null 2>&1; then
+  zipinfo -1 "${ZIP_PATH}" > "${ZIP_LIST}"
+else
+  unzip -Z1 "${ZIP_PATH}" > "${ZIP_LIST}"
+fi
+if grep -E '(^|/)\.env($|\.)' "${ZIP_LIST}" | grep -v '/\.env\.example$'; then
+  echo "ERROR: El ZIP contiene archivos .env. No se puede distribuir esta beta."
+  exit 1
+fi
+if grep -E '(^|/)(\.git|\.venv|__pycache__|\.pytest_cache|\.ruff_cache|\.mypy_cache)(/|$)' "${ZIP_LIST}"; then
+  echo "ERROR: El ZIP contiene carpetas internas o caches. No se puede distribuir esta beta."
+  exit 1
+fi
+if grep -F '/normativa_arquitectura_es/' "${ZIP_LIST}"; then
+  echo "ERROR: El ZIP contiene el subproyecto de normativa. No se puede distribuir esta beta."
+  exit 1
+fi
+rm -f "${ZIP_LIST}"
 
 ZIP_SIZE=$(du -sh "${ZIP_PATH}" | cut -f1)
 echo ""

@@ -14,7 +14,7 @@ rtk uv sync --extra dev --extra desktop
 
 echo
 echo "== Lint =="
-rtk uv run ruff check .
+rtk uv run ruff check src tests
 
 echo
 echo "== Unit + integration tests =="
@@ -93,6 +93,25 @@ echo
 echo "== Beta package smoke =="
 rtk bash -n scripts/build_beta_package.sh
 rtk bash scripts/build_beta_package.sh >/dev/null
+zip_list="/private/tmp/adv-archon-beta-zip-list.txt"
+if command -v zipinfo >/dev/null 2>&1; then
+    zipinfo -1 dist/ADV_ARCHON_BETA.zip > "${zip_list}"
+else
+    unzip -Z1 dist/ADV_ARCHON_BETA.zip > "${zip_list}"
+fi
+if grep -E '(^|/)\.env($|\.)' "${zip_list}" | grep -v '/\.env\.example$'; then
+    echo "ERROR: beta zip contains .env files"
+    exit 1
+fi
+if grep -E '(^|/)(\.git|\.venv|__pycache__|\.pytest_cache|\.ruff_cache|\.mypy_cache)(/|$)' "${zip_list}"; then
+    echo "ERROR: beta zip contains internal cache directories"
+    exit 1
+fi
+if grep -F '/normativa_arquitectura_es/' "${zip_list}"; then
+    echo "ERROR: beta zip contains normativa_arquitectura_es"
+    exit 1
+fi
+rm -f "${zip_list}"
 
 echo
 echo "QA full OK"

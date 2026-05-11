@@ -7,6 +7,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from adv_archon import __beta_label__, __version__
 from adv_archon.desktop.branding import logo_path
 
 
@@ -127,8 +128,8 @@ def create_macos_app_bundle(
         "CFBundleName": app_name,
         "CFBundleDisplayName": app_name,
         "CFBundleIdentifier": bundle_identifier,
-        "CFBundleVersion": "1.0",
-        "CFBundleShortVersionString": "1.0",
+        "CFBundleVersion": __version__,
+        "CFBundleShortVersionString": f"{__version__} {__beta_label__}",
         "CFBundleExecutable": launcher_path.name,
         "CFBundlePackageType": "APPL",
         "LSMinimumSystemVersion": "13.0",
@@ -163,6 +164,7 @@ def create_macos_app_bundle(
 
 def _project_copy_ignore(directory: str, names: list[str]) -> set[str]:
     ignored = {
+        ".DS_Store",
         ".git",
         ".mypy_cache",
         ".pytest_cache",
@@ -170,7 +172,18 @@ def _project_copy_ignore(directory: str, names: list[str]) -> set[str]:
         ".venv",
         "__pycache__",
         "dist",
+        "normativa_arquitectura_es",
+        "tests",
     }
+    if Path(directory).name == "docs":
+        ignored.add("archive")
+    if Path(directory).name == "src":
+        ignored.add("adv_archon.egg-info")
+    ignored.update(
+        name
+        for name in names
+        if name == ".env" or (name.startswith(".env.") and name != ".env.example")
+    )
     ignored.update(name for name in names if name.endswith((".pyc", ".pyo")))
     return ignored.intersection(names)
 

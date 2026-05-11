@@ -13,3 +13,6 @@ __pycache__/
 .env
 .env.local
 *.egg-info/
+
+# Research workspace kept beside the app repo, not part of ADV ARCHON.
+normativa_arquitectura_es/

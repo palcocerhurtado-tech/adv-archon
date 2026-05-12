@@ -9,8 +9,6 @@ from typing import Literal, Protocol
 from adv_archon.core.config import LLMConfig
 from adv_archon.core.llm_types import LLMMessage, LLMResponse, LLMUsage
 from adv_archon.core.privacy import PIIRedactionSession, PIIRedactor
-from adv_archon.integrations.gemini import GeminiClient
-from adv_archon.integrations.ollama import OllamaClient
 
 ProviderMode = Literal["cloud", "local"]
 TaskKind = Literal[
@@ -151,12 +149,16 @@ class LLMRouter:
                     "No Gemini API key found. "
                     "Set GEMINI_API_KEY in ~/.adv-archon/.env or switch to /mode local."
                 )
+            from adv_archon.integrations.gemini import GeminiClient
+
             return GeminiClient(
                 api_key=self._config.gemini_api_key,
                 model=model,
                 temperature=self._config.temperature,
                 timeout=float(self._config.gemini_timeout_seconds),
             )
+        from adv_archon.integrations.ollama import OllamaClient
+
         return OllamaClient(
             base_url=self._config.ollama_base_url,
             model=model,

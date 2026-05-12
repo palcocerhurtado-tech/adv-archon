@@ -93,12 +93,11 @@ def load_system_prompt(path: Path) -> str:
 
 def desktop_main() -> int:
     config = load_app_config()
-    llm = LLMRouter(config.llm)
     project_root = Path.cwd()
     system_prompt = load_system_prompt(config.system_prompt_path)
     return launch_desktop_app(
         config=config,
-        llm=llm,
+        llm=None,
         project_root=project_root,
         system_prompt=system_prompt,
         incognito=False,

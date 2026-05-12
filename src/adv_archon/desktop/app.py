@@ -5,12 +5,10 @@ import json
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from adv_archon import __beta_label__
 from adv_archon.core.attachments import normalize_attachment_paths
-from adv_archon.core.config import AppConfig, save_ollama_model_preference
-from adv_archon.core.llm import LLMRouter
 from adv_archon.core.profiles import ProfileManager
 from adv_archon.desktop.branding import (
     ACCENT,
@@ -36,13 +34,16 @@ from adv_archon.desktop.presenters import (
     merge_recent_items,
     recommended_window_size,
 )
-from adv_archon.desktop.warmup_agent import start_warmup_agent
+
+if TYPE_CHECKING:
+    from adv_archon.core.config import AppConfig
+    from adv_archon.core.llm import LLMRouter
 
 
 def launch_desktop_app(
     *,
     config: AppConfig,
-    llm: LLMRouter,
+    llm: LLMRouter | None,
     project_root: Path,
     system_prompt: str,
     incognito: bool = False,
@@ -211,7 +212,8 @@ def launch_desktop_app(
             self._warmup_agent_ref: tuple[Any, Any] | None = None
             self._onboarding_dialog: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
-            self._ollama_state = "Pendiente" if llm.mode == "local" else "Cloud"
+            initial_mode = config.llm.mode
+            self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
             self._ollama_model = config.llm.ollama_model
             self._last_exp_label = "Sin expediente"
 
@@ -222,7 +224,7 @@ def launch_desktop_app(
                 default_profile=config.profiles.default_profile,
                 definitions=config.profiles.definitions,
             )
-            self._selected_mode    = llm.mode
+            self._selected_mode    = initial_mode
             self._selected_profile = self._profile_manager.active_profile
             self._attachments: list[Path] = []
             self._recent_history_entries: list[str] = []
@@ -1421,12 +1423,13 @@ def launch_desktop_app(
                     status_lbl.setText("Selecciona un modelo válido.")
                     return
                 try:
+                    from adv_archon.core.config import save_ollama_model_preference
+
                     save_ollama_model_preference(config.paths.config_file, selected)
                 except Exception as exc:
                     status_lbl.setText(f"No se pudo guardar la preferencia: {exc}")
                     return
                 config.llm.ollama_model = selected
-                llm.set_ollama_model(selected)
                 self._ollama_model = selected
                 self.ollama_model_requested.emit(selected)
                 self._refresh_status_bar()
@@ -1452,6 +1455,8 @@ def launch_desktop_app(
                     return
                 self._warmup_agent_ref = None
             try:
+                from adv_archon.desktop.warmup_agent import start_warmup_agent
+
                 ref = start_warmup_agent(
                     base_url=config.llm.ollama_base_url,
                     model=config.llm.ollama_model,
@@ -1521,21 +1526,34 @@ def launch_desktop_app(
 
             steps = [
                 (
-                    "Bienvenido a ADV ARCHON",
-                    "Gestiona expedientes urbanísticos con contexto catastral, PGOU, "
-                    "afecciones sectoriales e informe PDF profesional.\n\n"
-                    f"{__beta_label__}: prueba recomendada en 10 minutos: crea un "
-                    "expediente, adjunta un plano, analiza y exporta el PDF.",
+                    "ADV ARCHON para expedientes urbanísticos",
+                    "Piensa en ADV ARCHON como una mesa de revisión preliminar para "
+                    "despacho: abres un expediente, indicas la parcela, adjuntas el "
+                    "plano y recibes un informe PDF con fuentes y advertencias.\n\n"
+                    "No necesitas usar terminal ni escribir prompts para empezar.",
                 ),
                 (
-                    "Comprueba Ollama",
-                    "ADV ARCHON funciona local-first. Verifica que Ollama está activo "
-                    "para que el análisis del plano esté listo cuando lo necesites.",
+                    "Motor local y privacidad",
+                    "El análisis se ejecuta local-first con Ollama. Si el modelo no está "
+                    "cargado, la app sigue siendo usable: puedes crear expedientes, ver "
+                    "Catastro, afecciones y exportar contexto preliminar.\n\n"
+                    "Pulsa “Verificar ahora” solo si quieres comprobar Ollama en este momento.",
                 ),
                 (
-                    "Crea tu primer expediente",
-                    "Empieza con dirección, coordenadas o referencia catastral; después "
-                    "adjunta el plano y exporta el informe.",
+                    "Flujo recomendado para probarla",
+                    "1. Crea un expediente.\n"
+                    "2. Introduce dirección, coordenadas o referencia catastral.\n"
+                    "3. Adjunta un PDF de plano.\n"
+                    "4. Pulsa “Analizar con PGOU”.\n"
+                    "5. Exporta el informe PDF.\n\n"
+                    "Esto es lo que debería poder hacer un arquitecto sin ayuda.",
+                ),
+                (
+                    "Qué significa el resultado",
+                    "ADV ARCHON no emite una licencia ni sustituye criterio técnico. "
+                    "Te da un cribado preliminar: viable, condicionado o revisar, con "
+                    "fuentes oficiales, notas jurídicas y próximos pasos.\n\n"
+                    f"{__beta_label__}: prueba recomendada en 10-15 minutos.",
                 ),
             ]
             state = {"idx": 0}
@@ -1545,7 +1563,8 @@ def launch_desktop_app(
                 title.setText(heading)
                 body.setText(copy)
                 verify_btn.setVisible(state["idx"] == 1)
-                next_btn.setText("Crear expediente" if state["idx"] == 2 else "Siguiente")
+                is_last = state["idx"] == len(steps) - 1
+                next_btn.setText("Crear expediente" if is_last else "Siguiente")
 
             def finish(*, open_expedientes: bool = False) -> None:
                 self._mark_onboarding_done()
@@ -1554,7 +1573,7 @@ def launch_desktop_app(
                     QTimer.singleShot(150, self._open_expedientes)
 
             def advance() -> None:
-                if state["idx"] >= 2:
+                if state["idx"] >= len(steps) - 1:
                     finish(open_expedientes=True)
                     return
                 state["idx"] += 1

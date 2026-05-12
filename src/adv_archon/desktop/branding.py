@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from adv_archon.core.config import PACKAGE_ROOT
+PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 
 # ── Archon Consultancies brand palette ────────────────────────────────────────
 BG           = "#050505"   # Negro Archon / Obsidiana

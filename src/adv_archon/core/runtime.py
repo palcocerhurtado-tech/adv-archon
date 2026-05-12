@@ -204,6 +204,7 @@ class ArchonRuntime:
             llm,
             geo_tools=self.geo_tools,
         )
+        self.compliance_tools = self.urban_compliance_tools
         # Background scraper daemon — keeps PGOU data fresh automatically
         self.scraper_daemon = ScraperDaemon(
             pgou_store=self.pgou_store,

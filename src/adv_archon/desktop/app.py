@@ -1096,16 +1096,28 @@ def launch_desktop_app(
 
         def _show_pgou_status(self) -> None:
             runtime = getattr(self._backend_worker, "_runtime", None)
-            if runtime is None:
-                self._add_notice(
-                    "PGOU: el motor sigue arrancando. Puedes abrir Expedientes "
-                    "mientras tanto; el catálogo PGOU estará disponible en unos segundos.",
-                    object_name="Warn",
-                )
-                return
             try:
-                result = runtime.compliance_tools.pgou_status()
-                payload = result.payload if hasattr(result, "payload") else {}
+                tools = getattr(runtime, "urban_compliance_tools", None)
+                if tools is not None:
+                    result = tools.pgou_status()
+                    payload = result.payload if hasattr(result, "payload") else {}
+                else:
+                    from adv_archon.core.pgou_store import PGOUStore
+
+                    store = PGOUStore(config.paths.pgou_db)
+                    munis = store.list_municipalities()
+                    payload = {
+                        "municipalities": [
+                            {
+                                "name": muni.name,
+                                "chunks": muni.chunk_count,
+                                "source": muni.source,
+                                "indexed_at": muni.indexed_at,
+                            }
+                            for muni in munis
+                        ],
+                        "total": len(munis),
+                    }
                 municipalities = payload.get("municipalities", [])
                 if not isinstance(municipalities, list):
                     municipalities = []
@@ -1139,11 +1151,24 @@ def launch_desktop_app(
                 )
 
         def _send_geo_prompt(self) -> None:
-            self._input.setPlainText(
-                "¿cómo resuelvo la normativa urbanística de una parcela por "
-                "coordenadas GPS usando geolocalización?"
+            self._add_message_bubble(
+                "assistant",
+                "Geolocalización lista para expedientes.\n\n"
+                "Uso recomendado:\n"
+                "1. Abre Expedientes.\n"
+                "2. Crea un expediente nuevo.\n"
+                "3. En Dirección puedes pegar coordenadas GPS, dirección postal "
+                "o referencia catastral.\n"
+                "4. ADV ARCHON resuelve municipio, Catastro, afecciones sectoriales "
+                "y contexto PGOU preliminar.\n\n"
+                "Ejemplos válidos:\n"
+                "- 40.415363, -3.707398\n"
+                "- Calle Mayor 24, Madrid\n"
+                "- 2807901VK4720G0001ZX\n\n"
+                "Este panel ya no espera al motor local: para consultar fuentes reales, "
+                "entra por Expedientes o Modo demo.",
             )
-            self._submit_prompt()
+            self.statusBar().showMessage("Geolocalización: guía rápida mostrada.", 3000)
 
         # ── Mode / profile ────────────────────────────────────────────────────
         def _load_controls_state(self) -> None:
@@ -1225,8 +1250,8 @@ def launch_desktop_app(
             self._profile_combo.setEnabled(allows_cfg)
             self._daily_action.setEnabled(can_send)
             self._nav_daily_btn.setEnabled(can_send)
-            self._nav_pgou_btn.setEnabled(can_send)
-            self._nav_geo_btn.setEnabled(can_send)
+            self._nav_pgou_btn.setEnabled(True)
+            self._nav_geo_btn.setEnabled(True)
             self._nav_demo_btn.setEnabled(accepts)
             self._settings_button.setEnabled(allows_cfg)
             self._cancel_button.setVisible(state.cancellable)

@@ -212,6 +212,7 @@ def launch_desktop_app(
             self._active_exp_context: str = ""   # injected once into next user message
             self._warmup_agent_ref: tuple[Any, Any] | None = None
             self._onboarding_dialog: Any = None
+            self._expedientes_dialog: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
             self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
@@ -369,9 +370,7 @@ def launch_desktop_app(
 
             # Navigation
             self._nav_chat_btn = self._make_nav_btn("  Chat", active=True)
-            self._nav_chat_btn.clicked.connect(lambda: self._send_nav_prompt(
-                "resume nuestra sesión de trabajo"
-            ))
+            self._nav_chat_btn.clicked.connect(self._show_chat_home)
             sl.addWidget(self._nav_chat_btn)
 
             self._nav_pgou_btn = self._make_nav_btn("  Análisis PGOU")
@@ -387,7 +386,7 @@ def launch_desktop_app(
             sl.addWidget(self._nav_daily_btn)
 
             self._nav_exp_btn = self._make_nav_btn("  Expedientes")
-            self._nav_exp_btn.clicked.connect(self._open_expedientes)
+            self._nav_exp_btn.clicked.connect(lambda: self._open_expedientes())
             sl.addWidget(self._nav_exp_btn)
 
             self._nav_demo_btn = self._make_nav_btn("  Modo demo")
@@ -1623,6 +1622,18 @@ def launch_desktop_app(
                 "ni criterio profesional.",
             )
 
+        def _close_workspace_panels(self) -> None:
+            dlg = getattr(self, "_expedientes_dialog", None)
+            if dlg is not None:
+                with suppress(RuntimeError):
+                    dlg.close()
+                self._expedientes_dialog = None
+
+        def _show_chat_home(self) -> None:
+            self._close_workspace_panels()
+            self._input.setFocus()
+            self.statusBar().showMessage("Chat principal listo.", 2500)
+
         def _open_demo_expediente(self) -> None:
             import os
 
@@ -1868,6 +1879,8 @@ def launch_desktop_app(
                 ExpedienteListPanel,
                 NewExpedienteDialog,
             )
+
+            self._close_workspace_panels()
 
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
@@ -2126,12 +2139,34 @@ def launch_desktop_app(
             dlg = QDialog(self)
             dlg.setWindowTitle("Expedientes — ADV ARCHON")
             dlg.resize(1100, 680)
-            # WindowModal lets child file dialogs appear on top (macOS native sheets)
             from PySide6.QtCore import Qt as _Qt
-            dlg.setWindowModality(_Qt.WindowModality.WindowModal)
-            dlg_layout = _QHBoxLayout(dlg)
+            dlg.setWindowModality(_Qt.WindowModality.NonModal)
+            root_layout = QVBoxLayout(dlg)
+            root_layout.setContentsMargins(0, 0, 0, 0)
+            root_layout.setSpacing(0)
+
+            topbar = _QHBoxLayout()
+            topbar.setContentsMargins(12, 10, 12, 10)
+            topbar_title = QLabel("Expedientes")
+            topbar_title.setObjectName("AppName")
+            back_btn = QPushButton("Volver al chat")
+            back_btn.setObjectName("Ghost")
+            close_btn = QPushButton("Cerrar")
+            close_btn.setObjectName("Ghost")
+            topbar.addWidget(topbar_title)
+            topbar.addStretch(1)
+            topbar.addWidget(back_btn)
+            topbar.addWidget(close_btn)
+            root_layout.addLayout(topbar)
+
+            dlg_layout = _QHBoxLayout()
             dlg_layout.setContentsMargins(0, 0, 0, 0)
             dlg_layout.setSpacing(0)
+            root_layout.addLayout(dlg_layout, 1)
+            back_btn.clicked.connect(self._show_chat_home)
+            close_btn.clicked.connect(dlg.close)
+            dlg.finished.connect(lambda _code: setattr(self, "_expedientes_dialog", None))
+            self._expedientes_dialog = dlg
 
             def _on_analyze(eid: str) -> None:
                 exp = store.get(eid)
@@ -2344,7 +2379,9 @@ def launch_desktop_app(
                             break
                 detail_panel.load_expediente(exps[selected_row])
                 list_panel._list.setCurrentRow(selected_row)
-            dlg.exec()
+            dlg.show()
+            dlg.raise_()
+            dlg.activateWindow()
 
         # ── Municipality extraction from chat ────────────────────────────────
         def _try_extract_municipality_from_input(self, text: str) -> None:

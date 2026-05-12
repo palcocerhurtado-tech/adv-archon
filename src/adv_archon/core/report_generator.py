@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
 from datetime import datetime
@@ -92,7 +93,7 @@ class ArchonPDF(FPDF):
             align="C",
         )
         self.set_text_color(*_C_BLACK)
-        self.ln(6)
+        self.set_y(20)
 
     def footer(self) -> None:
         self.set_y(-14)
@@ -352,6 +353,7 @@ def _legacy_legal_checks_table(pdf: ArchonPDF, checks: list[Any]) -> None:
                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
 def _section_title(pdf: ArchonPDF, title: str) -> None:
+    _ensure_space(pdf, 12)
     pdf.set_fill_color(*_C_LIGHT_BG)
     pdf.set_draw_color(*_C_ACCENT)
     pdf.set_line_width(0.5)
@@ -362,6 +364,29 @@ def _section_title(pdf: ArchonPDF, title: str) -> None:
     pdf.set_line_width(0.2)
     pdf.set_text_color(*_C_BLACK)
     pdf.ln(2)
+
+
+def _ensure_space(pdf: ArchonPDF, height: float) -> None:
+    if pdf.get_y() + height <= pdf.h - pdf.b_margin:
+        return
+    pdf.add_page()
+    if pdf.get_y() < 20:
+        pdf.set_y(20)
+
+
+def _draw_table_header(
+    pdf: ArchonPDF,
+    headers: Sequence[str],
+    col_w: Sequence[float],
+) -> None:
+    _ensure_space(pdf, 10)
+    pdf.set_fill_color(*_C_HEADER_BG)
+    pdf.set_text_color(*_C_WHITE)
+    pdf.set_font(pdf._fn, "B", 8)
+    for header, w in zip(headers, col_w, strict=True):
+        pdf.cell(w, 7, f"  {header}", border=1, fill=True)
+    pdf.ln()
+    pdf.set_text_color(*_C_BLACK)
 
 
 def _meta_table(pdf: ArchonPDF, plan_name: str, municipality: str, generated_at: str) -> None:
@@ -450,6 +475,7 @@ def _sources_table(pdf: ArchonPDF, site_ctx: dict[str, Any]) -> None:
     ]
     pdf.set_font(pdf._fn, "", 8)
     for idx, (source, role, available) in enumerate(sources):
+        _ensure_space(pdf, 8)
         fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
         pdf.set_fill_color(*fill)
         pdf.set_font(pdf._fn, "B", 8)
@@ -475,13 +501,7 @@ def _annotations_table(pdf: ArchonPDF, annotations: list[dict[str, Any]]) -> Non
     headers = ["Observación normativa", "Estado"]
     col_w = [148, 26]
 
-    pdf.set_fill_color(*_C_HEADER_BG)
-    pdf.set_text_color(*_C_WHITE)
-    pdf.set_font(pdf._fn, "B", 8)
-    for header, w in zip(headers, col_w, strict=True):
-        pdf.cell(w, 7, f"  {header}", border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(*_C_BLACK)
+    _draw_table_header(pdf, headers, col_w)
 
     for idx, ann in enumerate(annotations):
         status = ann.get("status", "info")
@@ -503,8 +523,9 @@ def _annotations_table(pdf: ArchonPDF, annotations: list[dict[str, Any]]) -> Non
         x0 = pdf.get_x()
         y0 = pdf.get_y()
 
-        if y0 + row_h > pdf.h - pdf.b_margin - 5:
+        if y0 + row_h > pdf.h - pdf.b_margin:
             pdf.add_page()
+            _draw_table_header(pdf, headers, col_w)
             y0 = pdf.get_y()
 
         pdf.multi_cell(col_w[0], line_height, f"  {description}",
@@ -662,16 +683,33 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     # ── Cover: expediente metadata ────────────────────────────────────────
     report_logo = _default_report_logo_path()
     if report_logo is not None:
-        pdf.image(str(report_logo), x=18, y=18, w=18)
-        pdf.set_xy(40, 18)
+        logo_w = 18
+        pdf.image(str(report_logo), x=(210 - logo_w) / 2, y=20, w=logo_w)
+        pdf.set_y(48)
+    else:
+        pdf.set_y(24)
 
     pdf.set_font(pdf._fn, "B", 20)
     pdf.set_text_color(*_C_ACCENT)
-    pdf.cell(0, 12, "INFORME DE CUMPLIMIENTO NORMATIVO", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.multi_cell(
+        0,
+        10,
+        "INFORME DE CUMPLIMIENTO NORMATIVO",
+        align="C",
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
     pdf.set_font(pdf._fn, "B", 13)
     pdf.set_text_color(*_C_DARK)
-    pdf.cell(0, 8, _clean_text(expediente.title), new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-    pdf.ln(2)
+    pdf.multi_cell(
+        0,
+        7,
+        _clean_text(expediente.title),
+        align="C",
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
+    pdf.ln(4)
 
     from datetime import datetime as _dt2
     try:
@@ -825,13 +863,7 @@ def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:
     headers = ["Verificación", "Estado", "Detalle"]
     col_w = [58, 18, 98]
 
-    pdf.set_fill_color(*_C_HEADER_BG)
-    pdf.set_text_color(*_C_WHITE)
-    pdf.set_font(pdf._fn, "B", 8)
-    for header, w in zip(headers, col_w, strict=True):
-        pdf.cell(w, 7, f"  {header}", border=1, fill=True)
-    pdf.ln()
-    pdf.set_text_color(*_C_BLACK)
+    _draw_table_header(pdf, headers, col_w)
 
     for idx, check in enumerate(checks):
         name = _clean_text(
@@ -854,9 +886,9 @@ def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:
         pdf.set_font(pdf._fn, "", 8)
 
         y0 = pdf.get_y()
-        if y0 + 7 > pdf.h - pdf.b_margin - 5:
+        if y0 + 7 > pdf.h - pdf.b_margin:
             pdf.add_page()
-            y0 = pdf.get_y()
+            _draw_table_header(pdf, headers, col_w)
 
         pdf.cell(col_w[0], 7, f"  {name}", border=1, fill=True)
 

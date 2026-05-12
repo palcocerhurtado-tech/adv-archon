@@ -2959,14 +2959,51 @@ class Agent:
         return _extract_focus_query(_normalize_text(user_input))
 
     def _infer_executive_query(self, user_input: str, state: _TurnState) -> str:
-        explicit = _extract_focus_query(_normalize_text(user_input))
+        normalized = _normalize_text(user_input)
+        generic_terms = {
+            "agenda",
+            "brief",
+            "briefing",
+            "calendar",
+            "calendario",
+            "conocimiento",
+            "datos",
+            "dia",
+            "día",
+            "disponibles",
+            "drive",
+            "dame",
+            "ejecutivo",
+            "fuentes",
+            "gmail",
+            "google",
+            "inbox",
+            "local",
+            "notes",
+            "notas",
+            "personales",
+            "prioridades",
+            "reales",
+            "recordatorios",
+            "responder",
+            "tareas",
+            "usa",
+        }
+        focus_words = [
+            match.group(0)
+            for match in WORD_RE.finditer(normalized)
+            if len(match.group(0)) > 2
+            and match.group(0).casefold() not in STOPWORDS
+            and match.group(0).casefold() not in generic_terms
+        ]
+        explicit = " ".join(focus_words[:6])
         if explicit:
             return explicit
         if state.runtime_context is not None:
             project_name = str(state.runtime_context.working_set.project_name or "").strip()
             if project_name and project_name not in {"home", "pabloalcocer"}:
                 return project_name
-        return "prioridades"
+        return "Pablo Archon prioridades clientes tareas"
 
     def _build_gmail_draft_arguments_from_latest_thread(self) -> dict[str, Any] | None:
         payload = self._latest_tool_payload("gmail_read_thread")

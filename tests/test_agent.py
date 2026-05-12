@@ -1729,6 +1729,24 @@ def test_specialized_executive_brief_response_combines_calendar_and_inbox(
     assert "Contrato urgente" in response.text
 
 
+def test_executive_brief_query_uses_personal_focus_not_connector_names(
+    tmp_path: Path,
+) -> None:
+    agent = _build_agent(tmp_path)
+    state = _build_state(tmp_path)
+
+    query = agent._infer_executive_query(  # type: ignore[attr-defined]
+        "Dame un briefing ejecutivo del día. Usa calendario, Gmail, Drive, Notes, "
+        "recordatorios, tareas y conocimiento local.",
+        state,
+    )
+
+    assert query == "Pablo Archon prioridades clientes tareas"
+    assert "gmail" not in query.casefold()
+    assert "drive" not in query.casefold()
+    assert "notes" not in query.casefold()
+
+
 def test_parse_plan_repairs_argument_types_from_model_text(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
 

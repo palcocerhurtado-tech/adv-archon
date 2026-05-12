@@ -10,7 +10,6 @@ from typing import Any
 
 from adv_archon.core.config import AppConfig
 from adv_archon.core.llm import LLMRouter
-from adv_archon.core.runtime import ArchonRuntime
 
 PYSIDE6_AVAILABLE = find_spec("PySide6") is not None
 
@@ -98,7 +97,7 @@ if PYSIDE6_AVAILABLE:
             self._incognito = incognito
             self._mode = initial_mode
             self._profile = initial_profile
-            self._runtime: ArchonRuntime | None = None
+            self._runtime: Any | None = None
             self._backend_ready = False
             self._cancel_event = threading.Event()  # set from UI thread via DirectConnection
             self._emit_state(
@@ -133,6 +132,8 @@ if PYSIDE6_AVAILABLE:
                 )
 
             try:
+                from adv_archon.core.runtime import ArchonRuntime
+
                 runtime = ArchonRuntime(
                     config=self._config,
                     llm=LLMRouter(self._config.llm),

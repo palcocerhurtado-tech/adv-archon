@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -235,6 +236,7 @@ def launch_desktop_app(
             self._stream_buffer = ""
             self._progress_animation  = None
             self._model_loader_ref: tuple[Any, Any] | None = None
+            self._active_file_picker: Any = None
             self._busy_state = DesktopBusyState(
                 backend_ready=False, busy=True, task="initializing"
             )
@@ -370,7 +372,7 @@ def launch_desktop_app(
             sl.addWidget(self._nav_chat_btn)
 
             self._nav_pgou_btn = self._make_nav_btn("  Análisis PGOU")
-            self._nav_pgou_btn.clicked.connect(self._send_pgou_prompt)
+            self._nav_pgou_btn.clicked.connect(self._show_pgou_status)
             sl.addWidget(self._nav_pgou_btn)
 
             self._nav_geo_btn = self._make_nav_btn("  Geolocalización")
@@ -1071,7 +1073,11 @@ def launch_desktop_app(
 
         def _send_daily_prompt(self) -> None:
             self._input.setPlainText(
-                "prepara mi daily brief con agenda, tareas, gmail, drive y notas"
+                "Dame un briefing ejecutivo del día. Antes de responder usa mis "
+                "fuentes personales disponibles: calendario local, Google Calendar, "
+                "recordatorios, tareas, Gmail, Drive, Notes y conocimiento local. "
+                "No hagas un briefing genérico: si una fuente falla, indícalo en "
+                "el briefing y usa el resto."
             )
             self._submit_prompt()
 
@@ -1081,6 +1087,50 @@ def launch_desktop_app(
                 "cuáles están indexados y disponibles para análisis"
             )
             self._submit_prompt()
+
+        def _show_pgou_status(self) -> None:
+            runtime = getattr(self._backend_worker, "_runtime", None)
+            if runtime is None:
+                self._add_notice(
+                    "PGOU: el motor sigue arrancando. Puedes abrir Expedientes "
+                    "mientras tanto; el catálogo PGOU estará disponible en unos segundos.",
+                    object_name="Warn",
+                )
+                return
+            try:
+                result = runtime.compliance_tools.pgou_status()
+                payload = result.payload if hasattr(result, "payload") else {}
+                municipalities = payload.get("municipalities", [])
+                if not isinstance(municipalities, list):
+                    municipalities = []
+                indexed = [
+                    str(item.get("name") or "")
+                    for item in municipalities
+                    if isinstance(item, dict) and item.get("name")
+                ]
+                total = payload.get("total", len(indexed))
+                if indexed:
+                    preview = ", ".join(indexed[:12])
+                    if len(indexed) > 12:
+                        preview += f"… (+{len(indexed) - 12})"
+                    text = (
+                        f"PGOU operativo: {total} municipio(s) indexado(s).\n\n"
+                        f"Disponibles ahora: {preview}\n\n"
+                        "Para analizar un plano, crea o abre un expediente, adjunta el "
+                        "PDF y pulsa “Analizar con PGOU”."
+                    )
+                else:
+                    text = (
+                        "PGOU operativo, pero todavía no hay municipios indexados.\n\n"
+                        "Usa el menú “Importar normativa PGOU…” para añadir una normativa "
+                        "municipal antes de analizar planos."
+                    )
+                self._add_message_bubble("assistant", text)
+            except Exception as exc:
+                self._add_notice(
+                    f"No se pudo consultar el catálogo PGOU: {exc}",
+                    object_name="Err",
+                )
 
         def _send_geo_prompt(self) -> None:
             self._input.setPlainText(
@@ -1759,25 +1809,27 @@ def launch_desktop_app(
             )
 
             from adv_archon.core.expediente import Expediente, ExpedienteStore
-            from adv_archon.core.geo_store import GeoStore
-            from adv_archon.core.pgou_store import PGOUStore
-            from adv_archon.core.report_generator import generate_expediente_pdf
             from adv_archon.desktop.expediente_panel import (
                 ExpedienteDetailPanel,
                 ExpedienteListPanel,
                 NewExpedienteDialog,
             )
-            from adv_archon.integrations import catastro as _catastro
-            from adv_archon.integrations import nominatim as _nominatim
-            from adv_archon.tools.geo_tools import GeoTools
 
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
             store = ExpedienteStore(data_dir / "expedientes.db")
-            runtime.memoria_tools.set_expediente_store(store)  # noqa: F821
-            runtime.memoria_pdf_tools.set_expediente_store(store)  # noqa: F821
-            runtime.informe_tools.set_expediente_store(store)  # noqa: F821
-            runtime.team_tools.set_expediente_store(store)  # noqa: F821
+            runtime = getattr(self._backend_worker, "_runtime", None)
+            if runtime is not None:
+                for attr in (
+                    "memoria_tools",
+                    "memoria_pdf_tools",
+                    "informe_tools",
+                    "team_tools",
+                ):
+                    tool = getattr(runtime, attr, None)
+                    if tool is not None and hasattr(tool, "set_expediente_store"):
+                        with suppress(Exception):
+                            tool.set_expediente_store(store)
 
             def _parse_coordinate_text(text: str) -> tuple[float, float] | None:
                 match = re.search(
@@ -1886,6 +1938,12 @@ def launch_desktop_app(
 
                 def run(self) -> None:
                     try:
+                        from adv_archon.core.geo_store import GeoStore
+                        from adv_archon.core.pgou_store import PGOUStore
+                        from adv_archon.integrations import catastro as _catastro
+                        from adv_archon.integrations import nominatim as _nominatim
+                        from adv_archon.tools.geo_tools import GeoTools
+
                         coords = _parse_coordinate_text(self._exp.address)
                         if coords is None:
                             ref = _parse_cadastral_ref_text(self._exp.address)
@@ -1954,6 +2012,8 @@ def launch_desktop_app(
 
                 def run(self) -> None:
                     try:
+                        from adv_archon.core.report_generator import generate_expediente_pdf
+
                         generate_expediente_pdf(
                             expediente=self._exp,
                             output_path=self._output_path,
@@ -2124,6 +2184,7 @@ def launch_desktop_app(
             def _attach_plan(eid: str) -> None:
                 from PySide6.QtWidgets import QFileDialog as _QFD
                 picker = _QFD(dlg)
+                self._active_file_picker = picker
                 picker.setWindowTitle("Adjuntar plano arquitectónico")
                 picker.setDirectory(str(Path.home()))
                 picker.setNameFilter(
@@ -2144,8 +2205,10 @@ def launch_desktop_app(
                     detail_panel.load_expediente(updated)
                     self._last_exp_label = updated.title
                     self._refresh_status_bar()
+                    self._active_file_picker = None
 
                 picker.accepted.connect(_on_accepted)
+                picker.rejected.connect(lambda: setattr(self, "_active_file_picker", None))
                 picker.open()   # non-blocking — avoids nested exec() crash on macOS
 
             def _select(eid: str) -> None:

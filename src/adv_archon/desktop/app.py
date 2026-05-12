@@ -57,9 +57,10 @@ def launch_desktop_app(
             Qt,
             QThread,
             QTimer,
+            QUrl,
             Signal,
         )
-        from PySide6.QtGui import QAction, QIcon, QPixmap
+        from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
         from PySide6.QtWidgets import (
             QApplication,
             QComboBox,
@@ -1310,6 +1311,7 @@ def launch_desktop_app(
             class _ModelListWorker(_QObject):
                 loaded = _Signal(object)
                 failed = _Signal(str)
+                finished = _Signal()
 
                 def run(self) -> None:
                     try:
@@ -1324,7 +1326,11 @@ def launch_desktop_app(
                     except Exception as exc:
                         self.failed.emit(str(exc))
                     finally:
-                        QThread.currentThread().quit()
+                        self.finished.emit()
+
+            class _ModelListBridge(_QObject):
+                loaded = _Signal(object)
+                failed = _Signal(str)
 
             dlg = QDialog(self)
             dlg.setWindowTitle("Ajustes — ADV ARCHON")
@@ -1378,6 +1384,7 @@ def launch_desktop_app(
                 refresh_btn.setEnabled(False)
                 thread = QThread(dlg)
                 worker = _ModelListWorker()
+                bridge = _ModelListBridge(dlg)
                 worker.moveToThread(thread)
 
                 def on_loaded(models: object) -> None:
@@ -1415,11 +1422,14 @@ def launch_desktop_app(
                     self._model_loader_ref = None
 
                 thread.started.connect(worker.run)
-                worker.loaded.connect(on_loaded)
-                worker.failed.connect(on_failed)
-                thread.finished.connect(worker.deleteLater)
+                worker.loaded.connect(bridge.loaded)
+                worker.failed.connect(bridge.failed)
+                worker.finished.connect(worker.deleteLater)
+                worker.finished.connect(thread.quit)
+                bridge.loaded.connect(on_loaded)
+                bridge.failed.connect(on_failed)
                 thread.finished.connect(thread.deleteLater)
-                self._model_loader_ref = (thread, worker)
+                self._model_loader_ref = (thread, worker, bridge)
                 thread.start()
 
             def save() -> None:
@@ -1840,7 +1850,6 @@ def launch_desktop_app(
             import json
             import os
             import re
-            import subprocess
             from datetime import datetime
 
             from PySide6.QtCore import QObject, QThread
@@ -2049,6 +2058,7 @@ def launch_desktop_app(
             class _ExportWorker(QObject):
                 exported = _Signal(str)
                 failed = _Signal(str)
+                finished = _Signal()
 
                 def __init__(self, exp: Expediente, output_path: Path) -> None:
                     super().__init__()
@@ -2068,7 +2078,13 @@ def launch_desktop_app(
                     else:
                         self.exported.emit(str(self._output_path))
                     finally:
-                        QThread.currentThread().quit()
+                        self.finished.emit()
+
+            class _ExpedienteThreadBridge(QObject):
+                geo_resolved = _Signal(object)
+                geo_failed = _Signal(str)
+                exported = _Signal(str)
+                export_failed = _Signal(str)
 
             _active_geo_threads: list[tuple[Any, Any]] = []
             _active_export_threads: list[tuple[Any, Any]] = []
@@ -2080,6 +2096,7 @@ def launch_desktop_app(
                 )
                 t = QThread(dlg)
                 w = _GeoWorker(exp, data_dir)
+                bridge = _ExpedienteThreadBridge(dlg)
                 w.moveToThread(t)
                 t.started.connect(w.run)
 
@@ -2097,10 +2114,12 @@ def launch_desktop_app(
                     detail_panel.set_operation_busy(False)
                     t.quit()
 
-                w.resolved.connect(_on_resolved)
-                w.failed.connect(_on_failed)
+                w.resolved.connect(bridge.geo_resolved)
+                w.failed.connect(bridge.geo_failed)
+                bridge.geo_resolved.connect(_on_resolved)
+                bridge.geo_failed.connect(_on_failed)
                 t.finished.connect(t.deleteLater)
-                _active_geo_threads.append((t, w))
+                _active_geo_threads.append((t, w, bridge))
                 t.start()
 
             # -- Dialog ----------------------------------------------------------
@@ -2189,6 +2208,7 @@ def launch_desktop_app(
                 self.statusBar().showMessage("Generando informe PDF…")
                 t = QThread(dlg)
                 w = _ExportWorker(exp, output_path)
+                bridge = _ExpedienteThreadBridge(dlg)
                 w.moveToThread(t)
                 t.started.connect(w.run)
 
@@ -2205,7 +2225,7 @@ def launch_desktop_app(
                     detail_panel.set_operation_busy(False)
                     self._last_exp_label = updated.title
                     self._refresh_status_bar()
-                    subprocess.Popen(["open", str(path)])
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
                     self.statusBar().showMessage(f"Informe exportado: {path.name}")
 
                 def _on_export_failed(message: str) -> None:
@@ -2214,10 +2234,19 @@ def launch_desktop_app(
                         f"No se pudo exportar el informe: {message}"
                     )
 
-                w.exported.connect(_on_exported)
-                w.failed.connect(_on_export_failed)
+                def _cleanup_export_thread() -> None:
+                    with suppress(ValueError):
+                        _active_export_threads.remove((t, w, bridge))
+
+                w.exported.connect(bridge.exported)
+                w.failed.connect(bridge.export_failed)
+                w.finished.connect(w.deleteLater)
+                w.finished.connect(t.quit)
+                bridge.exported.connect(_on_exported)
+                bridge.export_failed.connect(_on_export_failed)
+                t.finished.connect(_cleanup_export_thread)
                 t.finished.connect(t.deleteLater)
-                _active_export_threads.append((t, w))
+                _active_export_threads.append((t, w, bridge))
                 t.start()
 
             detail_panel = ExpedienteDetailPanel(

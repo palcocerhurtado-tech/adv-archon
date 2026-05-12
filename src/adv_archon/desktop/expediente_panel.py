@@ -21,6 +21,7 @@ PYSIDE6_AVAILABLE = find_spec("PySide6") is not None
 Qt: Any = None
 QDialog: Any = None
 QDialogButtonBox: Any = None
+QDesktopServices: Any = None
 QFileDialog: Any = None
 QFormLayout: Any = None
 QFrame: Any = None
@@ -33,6 +34,7 @@ QListWidgetItem: Any = None
 QMessageBox: Any = None
 QPushButton: Any = None
 QProgressBar: Any = None
+QUrl: Any = None
 QScrollArea: Any = None
 QSizePolicy: Any = None
 QTextBrowser: Any = None
@@ -45,6 +47,8 @@ if PYSIDE6_AVAILABLE:
     _g = import_module("PySide6.QtGui")
     _w = import_module("PySide6.QtWidgets")
     Qt = _c.Qt
+    QUrl = _c.QUrl
+    QDesktopServices = _g.QDesktopServices
     QIcon = _g.QIcon
     QDialog = _w.QDialog
     QDialogButtonBox = _w.QDialogButtonBox
@@ -574,9 +578,10 @@ if PYSIDE6_AVAILABLE:
                 self._on_export(self._expediente_id)
 
         def _on_open_report_clicked(self) -> None:
-            import subprocess
             if self._expediente and self._expediente.report_path:
-                subprocess.Popen(["open", str(self._expediente.report_path)])
+                QDesktopServices.openUrl(
+                    QUrl.fromLocalFile(str(self._expediente.report_path))
+                )
 
 
 else:

@@ -23,18 +23,18 @@ _FONT_BOLD_CANDIDATES = [
 ]
 
 # ── Palette ──────────────────────────────────────────────────────────────────
-_C_BLACK = (30, 30, 30)
-_C_DARK = (50, 50, 80)
-_C_ACCENT = (40, 80, 160)
-_C_LIGHT_BG = (245, 247, 252)
-_C_OK = (34, 139, 34)
-_C_WARN = (200, 120, 0)
-_C_ERR = (190, 30, 30)
-_C_INFO = (80, 80, 160)
-_C_BORDER = (200, 205, 220)
+_C_BLACK = (5, 5, 5)
+_C_DARK = (46, 46, 44)
+_C_ACCENT = (201, 162, 39)
+_C_LIGHT_BG = (247, 247, 244)
+_C_OK = (75, 145, 91)
+_C_WARN = (201, 162, 39)
+_C_ERR = (178, 74, 60)
+_C_INFO = (92, 92, 88)
+_C_BORDER = (216, 212, 200)
 _C_WHITE = (255, 255, 255)
-_C_HEADER_BG = (40, 80, 160)
-_C_ROW_ALT = (238, 242, 252)
+_C_HEADER_BG = (5, 5, 5)
+_C_ROW_ALT = (240, 237, 230)
 
 _STATUS_COLOR = {
     "ok": _C_OK,
@@ -405,6 +405,72 @@ def _summary_box(pdf: ArchonPDF, summary: str) -> None:
     pdf.set_text_color(*_C_BLACK)
 
 
+def _verdict_box(pdf: ArchonPDF, verdict: str) -> None:
+    normalized = verdict.strip().casefold()
+    if normalized in {"viable", "ready", "ok"}:
+        label = "VIABLE"
+        color = _C_OK
+        copy = "No se detectan bloqueos principales en el cribado preliminar."
+    elif normalized in {"condicionado", "conditional"}:
+        label = "CONDICIONADO"
+        color = _C_WARN
+        copy = "Existen condiciones o comprobaciones que deben cerrarse antes de avanzar."
+    else:
+        label = "REVISAR"
+        color = _C_ERR
+        copy = "Faltan datos o hay alertas que requieren revisión técnica específica."
+
+    pdf.set_fill_color(*color)
+    pdf.set_text_color(*_C_WHITE)
+    pdf.set_font(pdf._fn, "B", 18)
+    pdf.cell(58, 18, label, border=0, fill=True, align="C")
+    x = pdf.get_x()
+    y = pdf.get_y()
+    pdf.set_fill_color(*_C_LIGHT_BG)
+    pdf.rect(x, y, 114, 18, style="F")
+    pdf.set_xy(x + 4, y + 3)
+    pdf.set_font(pdf._fn, "B", 9)
+    pdf.set_text_color(*_C_DARK)
+    pdf.cell(0, 5, "Dictamen preliminar")
+    pdf.set_xy(x + 4, y + 9)
+    pdf.set_font(pdf._fn, "", 8)
+    pdf.multi_cell(106, 4, _clean_text(copy))
+    pdf.set_y(y + 22)
+    pdf.set_text_color(*_C_BLACK)
+
+
+def _sources_table(pdf: ArchonPDF, site_ctx: dict[str, Any]) -> None:
+    sources = [
+        ("Catastro OVC", "Parcela y referencia catastral", bool(site_ctx.get("cadastral_ref"))),
+        ("PGOU municipal", "Normativa urbanística indexada", bool(site_ctx.get("pgou_indexed"))),
+        ("SNCZI/CNIG", "Inundabilidad", bool(site_ctx.get("flood_zone"))),
+        ("Red Natura 2000/CNIG", "Protección ambiental", bool(site_ctx.get("natura2000"))),
+        ("SIGCOSTAS/MITECO", "Dominio público marítimo-terrestre", bool(site_ctx.get("costas"))),
+        ("Transportes INSPIRE/CNIG", "Cribado viario", bool(site_ctx.get("carreteras"))),
+    ]
+    pdf.set_font(pdf._fn, "", 8)
+    for idx, (source, role, available) in enumerate(sources):
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "B", 8)
+        pdf.cell(56, 6, f"  {source}", border=1, fill=True)
+        pdf.set_font(pdf._fn, "", 8)
+        pdf.cell(88, 6, f"  {role}", border=1, fill=True)
+        pdf.set_text_color(*(_C_OK if available else _C_INFO))
+        pdf.set_font(pdf._fn, "B", 8)
+        pdf.cell(
+            28,
+            6,
+            "ACTIVA" if available else "NO CARGADA",
+            border=1,
+            fill=True,
+            align="C",
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
+        pdf.set_text_color(*_C_BLACK)
+
+
 def _annotations_table(pdf: ArchonPDF, annotations: list[dict[str, Any]]) -> None:
     headers = ["Observación normativa", "Estado"]
     col_w = [148, 26]
@@ -646,6 +712,34 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
         )
     pdf.ln(6)
 
+    if site_ctx.get("demo"):
+        pdf.set_fill_color(255, 248, 224)
+        pdf.set_draw_color(*_C_ACCENT)
+        pdf.set_font(pdf._fn, "B", 8.5)
+        pdf.set_text_color(*_C_DARK)
+        pdf.multi_cell(
+            0,
+            5.2,
+            _clean_text(
+                "EXPEDIENTE DEMO - Datos de demostracion generados para probar el flujo "
+                "comercial. No usar como criterio profesional ni juridico."
+            ),
+            border=1,
+            fill=True,
+            padding=(2, 3, 2, 3),
+        )
+        pdf.set_text_color(*_C_BLACK)
+        pdf.ln(4)
+
+    # ── Executive verdict first: what a despacho wants to see ─────────────
+    _section_title(pdf, "DICTAMEN PRELIMINAR")
+    _verdict_box(pdf, verdict or "revisar")
+    pdf.ln(3)
+
+    _section_title(pdf, "FUENTES CONSULTADAS")
+    _sources_table(pdf, site_ctx)
+    pdf.ln(5)
+
     # ── Parcel data from site_context ─────────────────────────────────────
     parcel = site_ctx.get("parcel_detail") or {}
     if isinstance(parcel, dict) and not parcel.get("error") and any(parcel.values()):
@@ -683,7 +777,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
 
     # ── Summary ───────────────────────────────────────────────────────────
     _section_title(pdf, "RESUMEN EJECUTIVO")
-    _summary_box(pdf, summary if summary else "Análisis pendiente — ejecuta 'Analizar' primero.")
+    _summary_box(pdf, summary if summary else "Análisis pendiente - ejecuta 'Analizar' primero.")
     pdf.ln(4)
 
     # ── Annotations table ─────────────────────────────────────────────────

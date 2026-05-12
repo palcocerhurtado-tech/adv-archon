@@ -389,6 +389,10 @@ def launch_desktop_app(
             self._nav_exp_btn.clicked.connect(self._open_expedientes)
             sl.addWidget(self._nav_exp_btn)
 
+            self._nav_demo_btn = self._make_nav_btn("  Modo demo")
+            self._nav_demo_btn.clicked.connect(self._open_demo_expediente)
+            sl.addWidget(self._nav_demo_btn)
+
             self._nav_dashboard_btn = self._make_nav_btn("  Dashboard")
             self._nav_dashboard_btn.clicked.connect(self._open_dashboard)
             sl.addWidget(self._nav_dashboard_btn)
@@ -1223,6 +1227,7 @@ def launch_desktop_app(
             self._nav_daily_btn.setEnabled(can_send)
             self._nav_pgou_btn.setEnabled(can_send)
             self._nav_geo_btn.setEnabled(can_send)
+            self._nav_demo_btn.setEnabled(accepts)
             self._settings_button.setEnabled(allows_cfg)
             self._cancel_button.setVisible(state.cancellable)
 
@@ -1541,7 +1546,7 @@ def launch_desktop_app(
                 ),
                 (
                     "Flujo recomendado para probarla",
-                    "1. Crea un expediente.\n"
+                    "1. Crea un expediente o abre “Modo demo”.\n"
                     "2. Introduce dirección, coordenadas o referencia catastral.\n"
                     "3. Adjunta un PDF de plano.\n"
                     "4. Pulsa “Analizar con PGOU”.\n"
@@ -1607,6 +1612,27 @@ def launch_desktop_app(
                 "Aviso: esta beta es preliminar y no sustituye comprobación oficial "
                 "ni criterio profesional.",
             )
+
+        def _open_demo_expediente(self) -> None:
+            import os
+
+            from adv_archon.core.demo import create_demo_expediente
+            from adv_archon.core.expediente import ExpedienteStore
+
+            data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
+            data_dir.mkdir(parents=True, exist_ok=True)
+            store = ExpedienteStore(data_dir / "expedientes.db")
+            try:
+                exp = create_demo_expediente(store, data_dir=data_dir)
+            except Exception as exc:
+                self._add_notice(f"No se pudo crear el expediente demo: {exc}", object_name="Err")
+                return
+            self._last_exp_label = exp.title
+            self._refresh_status_bar()
+            self.statusBar().showMessage(
+                "Expediente demo preparado con plano e informe PDF.", 5000
+            )
+            self._open_expedientes(selected_id=exp.id)
 
         def _onboarding_done(self) -> bool:
             try:
@@ -1809,7 +1835,7 @@ def launch_desktop_app(
             dlg.exec()
 
         # ── Expedientes panel ─────────────────────────────────────────────────
-        def _open_expedientes(self) -> None:
+        def _open_expedientes(self, selected_id: str | None = None) -> None:
             import dataclasses
             import json
             import os
@@ -2281,8 +2307,14 @@ def launch_desktop_app(
             exps = store.list_all()
             list_panel.populate(exps)
             if exps:
-                detail_panel.load_expediente(exps[0])
-                list_panel._list.setCurrentRow(0)
+                selected_row = 0
+                if selected_id:
+                    for idx, exp in enumerate(exps):
+                        if exp.id == selected_id:
+                            selected_row = idx
+                            break
+                detail_panel.load_expediente(exps[selected_row])
+                list_panel._list.setCurrentRow(selected_row)
             dlg.exec()
 
         # ── Municipality extraction from chat ────────────────────────────────

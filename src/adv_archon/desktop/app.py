@@ -241,6 +241,7 @@ def launch_desktop_app(
             self._current_stream_edit: _AutoTextEdit | None = None
             self._current_stream_text = ""
             self._stream_buffer = ""
+            self._home_visible = False
             self._progress_animation  = None
             self._model_loader_ref: tuple[Any, Any] | None = None
             self._active_file_picker: Any = None
@@ -295,7 +296,7 @@ def launch_desktop_app(
             self._build_professional_status_bar()
             self._load_controls_state()
             self._fit_to_screen()
-            self._append_system("Preparando motor…")
+            self._show_dashboard_home()
             self._backend_thread.start()
             # Do not start the Ollama warmup thread in the window constructor:
             # on macOS/Finder it can abort startup with
@@ -350,9 +351,9 @@ def launch_desktop_app(
         def _build_sidebar(self) -> QFrame:
             sidebar = QFrame()
             sidebar.setObjectName("Sidebar")
-            sidebar.setFixedWidth(220)
+            sidebar.setFixedWidth(196)
             sl = QVBoxLayout(sidebar)
-            sl.setContentsMargins(12, 18, 12, 18)
+            sl.setContentsMargins(10, 18, 10, 18)
             sl.setSpacing(2)
 
             # Brand
@@ -372,21 +373,9 @@ def launch_desktop_app(
             sl.addSpacing(8)
 
             # Navigation
-            self._nav_chat_btn = self._make_nav_btn("  Chat", active=True)
-            self._nav_chat_btn.clicked.connect(self._show_chat_home)
-            sl.addWidget(self._nav_chat_btn)
-
-            self._nav_pgou_btn = self._make_nav_btn("  Análisis PGOU")
-            self._nav_pgou_btn.clicked.connect(self._show_pgou_status)
-            sl.addWidget(self._nav_pgou_btn)
-
-            self._nav_geo_btn = self._make_nav_btn("  Geolocalización")
-            self._nav_geo_btn.clicked.connect(self._send_geo_prompt)
-            sl.addWidget(self._nav_geo_btn)
-
-            self._nav_daily_btn = self._make_nav_btn("  Briefing diario")
-            self._nav_daily_btn.clicked.connect(self._send_daily_prompt)
-            sl.addWidget(self._nav_daily_btn)
+            self._nav_home_btn = self._make_nav_btn("  Inicio", active=True)
+            self._nav_home_btn.clicked.connect(self._show_dashboard_home)
+            sl.addWidget(self._nav_home_btn)
 
             self._nav_exp_btn = self._make_nav_btn("  Expedientes")
             self._nav_exp_btn.clicked.connect(lambda: self._open_expedientes())
@@ -397,17 +386,29 @@ def launch_desktop_app(
             self._nav_demo_btn.clicked.connect(self._open_studio_demo)
             sl.addWidget(self._nav_demo_btn)
 
-            self._nav_client_btn = self._make_nav_btn("  Cliente / Licencia")
+            self._nav_chat_btn = self._make_nav_btn("  Chat contextual")
+            self._nav_chat_btn.clicked.connect(self._show_chat_home)
+            sl.addWidget(self._nav_chat_btn)
+
+            self._nav_pgou_btn = self._make_nav_btn("  PGOU")
+            self._nav_pgou_btn.clicked.connect(self._show_pgou_status)
+            sl.addWidget(self._nav_pgou_btn)
+
+            self._nav_geo_btn = self._make_nav_btn("  Geo")
+            self._nav_geo_btn.clicked.connect(self._send_geo_prompt)
+            sl.addWidget(self._nav_geo_btn)
+
+            self._nav_daily_btn = self._make_nav_btn("  Briefing")
+            self._nav_daily_btn.clicked.connect(self._send_daily_prompt)
+            sl.addWidget(self._nav_daily_btn)
+
+            self._nav_client_btn = self._make_nav_btn("  Cliente")
             self._nav_client_btn.clicked.connect(self._open_client_license)
             sl.addWidget(self._nav_client_btn)
 
-            self._nav_pack_btn = self._make_nav_btn("  Pack Studio")
+            self._nav_pack_btn = self._make_nav_btn("  Pack")
             self._nav_pack_btn.clicked.connect(self._open_studio_pack)
             sl.addWidget(self._nav_pack_btn)
-
-            self._nav_dashboard_btn = self._make_nav_btn("  Dashboard")
-            self._nav_dashboard_btn.clicked.connect(self._open_dashboard)
-            sl.addWidget(self._nav_dashboard_btn)
 
             self._nav_beta_btn = self._make_nav_btn("  Guía beta")
             self._nav_beta_btn.clicked.connect(self._show_beta_guide)
@@ -812,6 +813,7 @@ def launch_desktop_app(
             self._insert_bubble(frame)
 
         def _insert_bubble(self, frame: QFrame) -> None:
+            self._home_visible = False
             idx = self._messages_layout.count() - 1  # before trailing stretch
             self._messages_layout.insertWidget(idx, frame)
             QTimer.singleShot(0, self._scroll_to_bottom)
@@ -820,7 +822,19 @@ def launch_desktop_app(
             sb = self._messages_scroll.verticalScrollBar()
             sb.setValue(sb.maximum())
 
+        def _clear_message_area(self) -> None:
+            self._current_stream_edit = None
+            self._current_stream_text = ""
+            self._stream_buffer = ""
+            while self._messages_layout.count():
+                item = self._messages_layout.takeAt(0)
+                widget = item.widget()
+                if widget is not None:
+                    widget.deleteLater()
+            self._messages_layout.addStretch(1)
+
         def _add_notice(self, text: str, *, object_name: str = "Faint") -> None:
+            self._home_visible = False
             lbl = QLabel(text)
             lbl.setObjectName(object_name)
             lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -929,6 +943,9 @@ def launch_desktop_app(
             self._set_busy(False)
 
         def _handle_backend_ready(self, greeting: str) -> None:
+            if self._home_visible:
+                self.statusBar().showMessage(greeting, 5000)
+                return
             self._append_system(greeting)
 
         def _handle_shutdown_finished(self) -> None:
@@ -1062,6 +1079,10 @@ def launch_desktop_app(
             if not prompt:
                 return
             attachments = list(self._attachments)
+            if self._home_visible:
+                self._clear_message_area()
+                self._home_visible = False
+                self._set_nav_context("chat")
             self._input.clear()
             self._pending_prompt = prompt
             self._pending_attachments = attachments
@@ -1088,6 +1109,213 @@ def launch_desktop_app(
         def _send_nav_prompt(self, prompt: str) -> None:
             self._input.setPlainText(prompt)
             self._submit_prompt()
+
+        def _set_nav_context(self, active: str) -> None:
+            navs = {
+                "home": getattr(self, "_nav_home_btn", None),
+                "chat": getattr(self, "_nav_chat_btn", None),
+            }
+            for key, btn in navs.items():
+                if btn is not None:
+                    btn.setObjectName("NavBtnActive" if key == active else "NavBtn")
+                    btn.style().unpolish(btn)
+                    btn.style().polish(btn)
+
+        def _show_dashboard_home(self) -> None:
+            from adv_archon.core.expediente import ExpedienteStore
+            from adv_archon.core.studio import load_studio_client_config
+
+            self._close_workspace_panels()
+            self._clear_message_area()
+            self._home_visible = True
+            self._set_nav_context("home")
+            data_dir = self._studio_data_dir()
+            store = ExpedienteStore(data_dir / "expedientes.db")
+            expedientes = store.list_all()
+            client_cfg = load_studio_client_config(data_dir)
+            recent = expedientes[:5]
+            reports = sum(1 for exp in expedientes if getattr(exp, "report_path", ""))
+            risks = 0
+            for exp in expedientes:
+                try:
+                    ctx = json.loads(exp.site_context) if exp.site_context else {}
+                except (TypeError, ValueError):
+                    ctx = {}
+                checks = ctx.get("legal_checks") if isinstance(ctx, dict) else []
+                if isinstance(checks, list):
+                    risks += sum(
+                        1
+                        for check in checks
+                        if isinstance(check, dict)
+                        and str(check.get("status") or "")
+                        in {"conditional", "pending_review", "missing"}
+                    )
+
+            page = QFrame()
+            page.setObjectName("HomeStudio")
+            page_lay = QVBoxLayout(page)
+            page_lay.setContentsMargins(6, 4, 6, 4)
+            page_lay.setSpacing(14)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(16)
+            hero_lay.addWidget(self._make_logo(58))
+            hero_text = QVBoxLayout()
+            eyebrow = QLabel("ADV ARCHON STUDIO")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Expedientes urbanísticos, de la parcela al informe.")
+            title.setObjectName("StudioTitle")
+            title.setWordWrap(True)
+            subtitle = QLabel(
+                "Crea un expediente, ADV ARCHON consulta fuentes oficiales, detecta "
+                "riesgos y genera un informe preliminar profesional."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            hero_text.addWidget(eyebrow)
+            hero_text.addWidget(title)
+            hero_text.addWidget(subtitle)
+            hero_lay.addLayout(hero_text, 1)
+            new_btn = QPushButton("Nuevo expediente")
+            new_btn.setObjectName("Primary")
+            new_btn.clicked.connect(lambda: self._open_expedientes(open_new=True))
+            hero_lay.addWidget(new_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+            page_lay.addWidget(hero)
+
+            action_row = QHBoxLayout()
+            action_row.setSpacing(10)
+            actions = [
+                (
+                    "Studio Demo",
+                    "Tres casos guiados con semáforo, riesgos, fuentes e informe.",
+                    self._open_studio_demo,
+                    "Primary",
+                ),
+                (
+                    "Cliente / Licencia",
+                    f"{client_cfg.client_name} · {client_cfg.license_label}",
+                    self._open_client_license,
+                    "Ghost",
+                ),
+                (
+                    "Expedientes",
+                    "Lista, detalle, plano, análisis y exportación PDF.",
+                    lambda: self._open_expedientes(),
+                    "Ghost",
+                ),
+            ]
+            for heading, copy, callback, btn_style in actions:
+                card = QFrame()
+                card.setObjectName("StudioCard")
+                card_lay = QVBoxLayout(card)
+                card_lay.setContentsMargins(14, 14, 14, 14)
+                card_lay.setSpacing(8)
+                h = QLabel(heading)
+                h.setObjectName("StudioCase")
+                body = QLabel(copy)
+                body.setObjectName("Sub")
+                body.setWordWrap(True)
+                btn = QPushButton("Abrir")
+                btn.setObjectName(btn_style)
+                btn.clicked.connect(callback)
+                card_lay.addWidget(h)
+                card_lay.addWidget(body)
+                card_lay.addStretch(1)
+                card_lay.addWidget(btn)
+                action_row.addWidget(card)
+            page_lay.addLayout(action_row)
+
+            metrics_row = QHBoxLayout()
+            metrics_row.setSpacing(10)
+            metrics = [
+                ("Expedientes", str(len(expedientes))),
+                ("Informes", str(reports)),
+                ("Riesgos", str(risks)),
+                ("Ollama", self._ollama_state),
+                ("Modelo", self._ollama_model),
+            ]
+            for label, value in metrics:
+                box = QFrame()
+                box.setObjectName("StudioMetric")
+                box_lay = QVBoxLayout(box)
+                box_lay.setContentsMargins(12, 10, 12, 10)
+                value_lbl = QLabel(value)
+                value_lbl.setObjectName("StudioDecision")
+                value_lbl.setWordWrap(True)
+                label_lbl = QLabel(label)
+                label_lbl.setObjectName("Faint")
+                box_lay.addWidget(value_lbl)
+                box_lay.addWidget(label_lbl)
+                metrics_row.addWidget(box)
+            page_lay.addLayout(metrics_row)
+
+            bottom_row = QHBoxLayout()
+            bottom_row.setSpacing(12)
+            recent_card = QFrame()
+            recent_card.setObjectName("Panel")
+            recent_lay = QVBoxLayout(recent_card)
+            recent_lay.setContentsMargins(14, 14, 14, 14)
+            recent_lay.setSpacing(8)
+            recent_title = QLabel("Últimos expedientes")
+            recent_title.setObjectName("StudioCase")
+            recent_lay.addWidget(recent_title)
+            if recent:
+                for exp in recent:
+                    row = QFrame()
+                    row.setObjectName("StudioMetric")
+                    row_lay = QHBoxLayout(row)
+                    row_lay.setContentsMargins(10, 8, 10, 8)
+                    txt = QLabel(
+                        f"{exp.title}\n{exp.municipality or exp.address or 'Sin ubicación'}"
+                    )
+                    txt.setObjectName("Sub")
+                    txt.setWordWrap(True)
+                    open_btn = QPushButton("Abrir")
+                    open_btn.setObjectName("Ghost")
+                    open_btn.clicked.connect(
+                        lambda _checked=False, eid=exp.id: self._open_expedientes(
+                            selected_id=eid
+                        )
+                    )
+                    row_lay.addWidget(txt, 1)
+                    row_lay.addWidget(open_btn)
+                    recent_lay.addWidget(row)
+            else:
+                empty = QLabel("Aún no hay expedientes. Empieza por Nuevo expediente.")
+                empty.setObjectName("Sub")
+                empty.setWordWrap(True)
+                recent_lay.addWidget(empty)
+            bottom_row.addWidget(recent_card, 2)
+
+            flow_card = QFrame()
+            flow_card.setObjectName("Panel")
+            flow_lay = QVBoxLayout(flow_card)
+            flow_lay.setContentsMargins(14, 14, 14, 14)
+            flow_lay.setSpacing(7)
+            flow_title = QLabel("Flujo guiado")
+            flow_title.setObjectName("StudioCase")
+            flow_lay.addWidget(flow_title)
+            for step in (
+                "1. Tipo de actuación",
+                "2. Dirección, Catastro o coordenadas",
+                "3. Plano del expediente",
+                "4. Análisis PGOU y afecciones",
+                "5. Informe PDF profesional",
+            ):
+                lbl = QLabel(step)
+                lbl.setObjectName("Sub")
+                flow_lay.addWidget(lbl)
+            flow_lay.addStretch(1)
+            bottom_row.addWidget(flow_card, 1)
+            page_lay.addLayout(bottom_row, 1)
+
+            idx = self._messages_layout.count() - 1
+            self._messages_layout.insertWidget(idx, page)
+            self._status_label.setText("Inicio Studio listo.")
+            self.statusBar().showMessage("Inicio Studio listo.", 2500)
 
         def _send_daily_prompt(self) -> None:
             self._input.setPlainText(
@@ -1265,6 +1493,8 @@ def launch_desktop_app(
             self._nav_pgou_btn.setEnabled(True)
             self._nav_geo_btn.setEnabled(True)
             self._nav_demo_btn.setEnabled(accepts)
+            self._nav_client_btn.setEnabled(accepts)
+            self._nav_pack_btn.setEnabled(accepts)
             self._settings_button.setEnabled(allows_cfg)
             self._cancel_button.setVisible(state.cancellable)
 
@@ -1621,7 +1851,7 @@ def launch_desktop_app(
                 self._mark_onboarding_done()
                 dlg.accept()
                 if open_expedientes:
-                    QTimer.singleShot(150, self._open_expedientes)
+                    QTimer.singleShot(150, lambda: self._open_expedientes(open_new=True))
 
             def advance() -> None:
                 if state["idx"] >= len(steps) - 1:
@@ -1674,6 +1904,14 @@ def launch_desktop_app(
 
         def _show_chat_home(self) -> None:
             self._close_workspace_panels()
+            self._set_nav_context("chat")
+            if self._home_visible:
+                self._clear_message_area()
+                self._home_visible = False
+                self._append_system(
+                    "Chat contextual listo. Abre un expediente para que ARCHON use "
+                    "su parcela, municipio, PGOU y afecciones en la respuesta."
+                )
             self._input.setFocus()
             self.statusBar().showMessage("Chat principal listo.", 2500)
 
@@ -2411,14 +2649,21 @@ def launch_desktop_app(
             board.expediente_selected.connect(_on_selected)
             board.new_requested.connect(dlg.accept)
             board.new_requested.connect(
-                lambda: QTimer.singleShot(80, self._open_expedientes)
+                lambda: QTimer.singleShot(
+                    80, lambda: self._open_expedientes(open_new=True)
+                )
             )
 
             lay.addWidget(board)
             dlg.exec()
 
         # ── Expedientes panel ─────────────────────────────────────────────────
-        def _open_expedientes(self, selected_id: str | None = None) -> None:
+        def _open_expedientes(
+            self,
+            selected_id: str | None = None,
+            *,
+            open_new: bool = False,
+        ) -> None:
             import dataclasses
             import json
             import os
@@ -2908,6 +3153,9 @@ def launch_desktop_app(
                 )
                 list_panel.populate(store.list_all())
                 detail_panel.load_expediente(exp)
+                self._set_active_expediente(exp)
+                self._last_exp_label = exp.title
+                self._refresh_status_bar()
                 _launch_geo(exp)
 
             def _delete(eid: str) -> None:
@@ -2952,6 +3200,8 @@ def launch_desktop_app(
             dlg.show()
             dlg.raise_()
             dlg.activateWindow()
+            if open_new:
+                QTimer.singleShot(120, _new)
 
         # ── Municipality extraction from chat ────────────────────────────────
         def _try_extract_municipality_from_input(self, text: str) -> None:

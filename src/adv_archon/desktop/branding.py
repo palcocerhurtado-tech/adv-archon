@@ -337,6 +337,10 @@ QFrame#StudioHero {{
     border: 1px solid {ACCENT};
     border-radius: 14px;
 }}
+QFrame#HomeStudio {{
+    background: {MARBLE_BG};
+    border: none;
+}}
 QFrame#StudioCard {{
     background: {MARBLE_WARM};
     border: 1px solid {MARBLE_BORDER};

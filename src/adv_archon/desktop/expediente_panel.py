@@ -201,11 +201,61 @@ if PYSIDE6_AVAILABLE:
 
         def __init__(self, parent: Any = None) -> None:
             super().__init__(parent)
-            self.setWindowTitle("Nuevo Expediente")
-            self.setMinimumWidth(460)
+            self.setWindowTitle("Nuevo expediente guiado")
+            self.setMinimumWidth(620)
 
             layout = QVBoxLayout(self)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(12)
 
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QVBoxLayout(hero)
+            hero_lay.setContentsMargins(16, 14, 16, 14)
+            hero_lay.setSpacing(6)
+            eyebrow = QLabel("FLUJO DE EXPEDIENTE")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Nuevo expediente")
+            title.setObjectName("StudioTitle")
+            subtitle = QLabel(
+                "Define el tipo de actuación, identifica la parcela y deja el "
+                "expediente listo para plano, análisis e informe."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            hero_lay.addWidget(eyebrow)
+            hero_lay.addWidget(title)
+            hero_lay.addWidget(subtitle)
+            layout.addWidget(hero)
+
+            steps = QHBoxLayout()
+            steps.setSpacing(8)
+            for number, label in (
+                ("1", "Tipo"),
+                ("2", "Parcela"),
+                ("3", "Plano"),
+                ("4", "Análisis"),
+                ("5", "Informe"),
+            ):
+                step = QFrame()
+                step.setObjectName("StudioMetric")
+                step_lay = QVBoxLayout(step)
+                step_lay.setContentsMargins(10, 8, 10, 8)
+                step_lay.setSpacing(2)
+                n = QLabel(number)
+                n.setObjectName("StudioDecision")
+                step_label = QLabel(label)
+                step_label.setObjectName("Faint")
+                step_lay.addWidget(n)
+                step_lay.addWidget(step_label)
+                steps.addWidget(step)
+            layout.addLayout(steps)
+
+            form_frame = QFrame()
+            form_frame.setObjectName("Panel")
+            form_lay = QVBoxLayout(form_frame)
+            form_lay.setContentsMargins(14, 12, 14, 12)
+            form_lay.setSpacing(8)
             form = QFormLayout()
             self._title = QLineEdit()
             self._title.setPlaceholderText("Ej: Reforma local calle Mayor 12")
@@ -228,11 +278,14 @@ if PYSIDE6_AVAILABLE:
             self._notes.setPlaceholderText("Opcional")
             form.addRow("Notas", self._notes)
 
-            layout.addLayout(form)
+            form_lay.addLayout(form)
+            layout.addWidget(form_frame)
 
             buttons = QDialogButtonBox(
                 QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
             )
+            buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Crear expediente")
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancelar")
             buttons.accepted.connect(self._on_accept)
             buttons.rejected.connect(self.reject)
             layout.addWidget(buttons)

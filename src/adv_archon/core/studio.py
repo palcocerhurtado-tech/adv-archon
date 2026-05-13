@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any
 
 
@@ -21,6 +23,15 @@ class CityNormativePack:
     label: str
     sources: tuple[str, ...]
     note: str
+
+
+@dataclass(frozen=True, slots=True)
+class StudioClientConfig:
+    client_name: str
+    logo_path: str
+    included_municipalities: tuple[str, ...]
+    license_status: str
+    license_label: str
 
 
 CASE_TEMPLATES: tuple[StudioCaseTemplate, ...] = (
@@ -225,6 +236,49 @@ def build_studio_payload(
     }
 
 
+def studio_client_config_path(root: Path | None = None) -> Path:
+    base = root if root is not None else Path.home() / ".adv-archon"
+    return base / "studio_client.json"
+
+
+def load_studio_client_config(root: Path | None = None) -> StudioClientConfig:
+    path = studio_client_config_path(root)
+    data: dict[str, Any] = {}
+    if path.exists():
+        try:
+            parsed = json.loads(path.read_text(encoding="utf-8"))
+            data = parsed if isinstance(parsed, dict) else {}
+        except (OSError, ValueError):
+            data = {}
+    municipalities = data.get("included_municipalities")
+    if not isinstance(municipalities, list) or not municipalities:
+        municipalities = ["Madrid", "Zaragoza", "Barcelona", "Valencia", "Sevilla"]
+    return StudioClientConfig(
+        client_name=str(data.get("client_name") or "Despacho beta ADV ARCHON"),
+        logo_path=str(data.get("logo_path") or ""),
+        included_municipalities=tuple(str(item) for item in municipalities),
+        license_status=str(data.get("license_status") or "beta_privada"),
+        license_label=str(data.get("license_label") or "Studio Edition Beta"),
+    )
+
+
+def save_default_studio_client_config(root: Path | None = None) -> Path:
+    path = studio_client_config_path(root)
+    if path.exists():
+        return path
+    cfg = load_studio_client_config(root)
+    payload = {
+        "client_name": cfg.client_name,
+        "logo_path": cfg.logo_path,
+        "included_municipalities": list(cfg.included_municipalities),
+        "license_status": cfg.license_status,
+        "license_label": cfg.license_label,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def _decision_label(verdict: str, warning_count: int, has_checks: bool) -> str:
     if not has_checks:
         return "FALTA INFORMACIÓN"
@@ -254,9 +308,13 @@ __all__ = [
     "CITY_PACKS",
     "CASE_TEMPLATES",
     "CityNormativePack",
+    "StudioClientConfig",
     "StudioCaseTemplate",
     "build_studio_payload",
     "case_template_options",
     "city_pack_for",
     "get_case_template",
+    "load_studio_client_config",
+    "save_default_studio_client_config",
+    "studio_client_config_path",
 ]

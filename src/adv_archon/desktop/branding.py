@@ -311,6 +311,55 @@ QPushButton#NavBtnActive {{
     font-weight: 700;
     min-height: 34px;
 }}
+QPushButton#NavBtnGold {{
+    background: {ACCENT};
+    border: 1px solid {ACCENT_HOVER};
+    color: {OBSIDIAN};
+    text-align: left;
+    padding: 8px 12px;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 800;
+    min-height: 36px;
+}}
+QPushButton#NavBtnGold:hover {{ background: {ACCENT_HOVER}; color: {OBSIDIAN}; }}
+QFrame#StudioHero {{
+    background: {MARBLE_PANEL};
+    border: 1px solid {ACCENT};
+    border-radius: 14px;
+}}
+QFrame#StudioCard {{
+    background: {MARBLE_WARM};
+    border: 1px solid {MARBLE_BORDER};
+    border-radius: 12px;
+}}
+QFrame#StudioCard:hover {{
+    border: 1px solid {ACCENT};
+    background: {MARBLE_PANEL};
+}}
+QFrame#StudioMetric {{
+    background: {MARBLE_PANEL};
+    border: 1px solid {MARBLE_BORDER};
+    border-radius: 8px;
+}}
+QLabel#StudioTitle {{
+    color: {TEXT_DARK};
+    font-family: {FONT_DISPLAY};
+    font-size: 22px;
+    font-weight: 700;
+}}
+QLabel#StudioCase {{
+    color: {TEXT_DARK};
+    font-family: {FONT_DISPLAY};
+    font-size: 15px;
+    font-weight: 700;
+}}
+QLabel#StudioDecision {{
+    color: {ACCENT};
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+}}
 QPushButton#IconBtn {{
     background: transparent;
     border: none;

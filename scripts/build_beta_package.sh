@@ -36,6 +36,9 @@ WINDOWS_SOURCE_DIR="${WINDOWS_DIR}/adv-archon-source"
 WINDOWS_INSTALLER="${WINDOWS_DIR}/Instalar_ADV_ARCHON.bat"
 WINDOWS_LAUNCHER="${WINDOWS_DIR}/ADV_ARCHON.cmd"
 WINDOWS_README="${WINDOWS_DIR}/README_WINDOWS.txt"
+DEMO_DIR="${PAYLOAD_DIR}/Demos Studio"
+FEEDBACK_TXT="${PAYLOAD_DIR}/CHECKLIST_FEEDBACK_ARQUITECTOS.txt"
+FEEDBACK_PDF="${PAYLOAD_DIR}/CHECKLIST_FEEDBACK_ARQUITECTOS.pdf"
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo " ADV ARCHON — paquete beta para probadores"
@@ -400,6 +403,8 @@ Windows:
 6. Al terminar abrirá ADV ARCHON y dejará ADV_ARCHON.cmd en el Escritorio.
 
 Qué probar
+- Abrir “Studio Demo” y pulsar “Iniciar demo comercial”.
+- Abrir los 3 informes de ejemplo incluidos en la carpeta “Demos Studio”.
 - Crear un expediente nuevo.
 - Introducir dirección, coordenadas o referencia catastral.
 - Adjuntar un plano PDF si tenéis uno de prueba.
@@ -446,7 +451,7 @@ sections = [
     ('Objetivo', 'Queremos saber si un arquitecto no técnico puede probar ADV ARCHON sin ayuda y decir si lo compraría para una primera revisión de despacho. Reserva 10-15 minutos; la primera instalación puede tardar más si descarga qwen2.5:7b.'),
     ('Requisitos', '- Internet durante la primera instalación.\\n- macOS 13+ o Windows 10/11.\\n- Ollama instalado o permiso para instalarlo.\\n- 8 GB de RAM recomendados.\\n- 8-12 GB libres.'),
     ('Cómo instalar', 'macOS:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Haz doble clic en Instalar ADV ARCHON.command.\\n3. El instalador comprobará uv, Ollama y el modelo qwen2.5:7b.\\n\\nWindows:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Abre la carpeta Windows.\\n3. Haz doble clic en Instalar_ADV_ARCHON.bat.\\n4. El instalador comprobará uv, dependencias, Ollama y el modelo qwen2.5:7b.'),
-    ('Qué probar', '- Crear un expediente nuevo.\\n- Introducir dirección, coordenadas o referencia catastral.\\n- Adjuntar un plano PDF si tenéis uno de prueba.\\n- Pulsar Analizar.\\n- Exportar el informe PDF.'),
+    ('Qué probar', '- Abrir Studio Demo y pulsar Iniciar demo comercial.\\n- Abrir los 3 informes de ejemplo incluidos en Demos Studio.\\n- Crear un expediente nuevo.\\n- Introducir dirección, coordenadas o referencia catastral.\\n- Adjuntar un plano PDF si tenéis uno de prueba.\\n- Pulsar Analizar.\\n- Exportar el informe PDF.'),
     ('Prueba de compra', '- ¿Entenderías esta app sin explicación?\\n- ¿La usarías en un expediente real como cribado preliminar?\\n- ¿Qué tendría que mejorar para que el precio fuera defendible?\\n- ¿Qué dato o pantalla falta para que parezca herramienta de despacho?'),
     ('Feedback que necesitamos', '- Qué partes se entienden sin explicación.\\n- Qué partes suenan demasiado técnicas.\\n- Si el informe sirve para una primera revisión de despacho.\\n- Si falta algún dato que un arquitecto esperaría ver.\\n- Dónde se siente lento o poco fiable.'),
     ('Si falla', 'macOS: envía una captura y ~/.adv-archon/install.log.\\nWindows: envía una captura y %USERPROFILE%\\\\.adv-archon\\\\install-windows.log.'),
@@ -461,6 +466,88 @@ for title, body in sections:
     pdf.set_font('Helvetica', '', 11)
     pdf.multi_cell(pdf.epw, 6, body)
 pdf.output(out)
+"
+
+cat > "${FEEDBACK_TXT}" <<'FEEDBACK_EOF'
+CHECKLIST DE FEEDBACK PARA ARQUITECTOS — ADV ARCHON STUDIO
+
+Objetivo
+Validar si ADV ARCHON se entiende como herramienta de despacho y si el informe parece suficientemente profesional para una primera revisión urbanística.
+
+Prueba guiada de 10 minutos
+[ ] Abrí Studio Demo sin ayuda.
+[ ] Entendí los 3 casos: cambio de uso, inundabilidad y PGOU pendiente.
+[ ] Abrí al menos un informe PDF.
+[ ] Entendí el semáforo de decisión.
+[ ] Entendí qué fuentes se habían consultado.
+[ ] Entendí qué parte era preliminar y qué parte requería revisión profesional.
+
+Valor percibido
+[ ] Me ahorraría tiempo en una primera lectura de expediente.
+[ ] Me ayudaría a detectar riesgos antes de presupuestar.
+[ ] El PDF podría circular internamente en un despacho.
+[ ] El flujo se parece a cómo trabajaría un arquitecto.
+
+Preguntas clave
+1. ¿Qué caso demo te pareció más creíble?
+2. ¿Qué dato faltó para confiar más?
+3. ¿Qué pantalla o texto te pareció demasiado técnico?
+4. ¿Qué cambiarías del PDF para enseñarlo a un cliente o socio?
+5. ¿Cuánto pagarías por una versión con tus municipios y plantilla de despacho?
+
+Aviso
+Esta beta es preliminar y no sustituye comprobación oficial ni criterio profesional.
+FEEDBACK_EOF
+
+echo "→ Generando CHECKLIST_FEEDBACK_ARQUITECTOS.pdf y PDFs demo Studio…"
+mkdir -p "${DEMO_DIR}"
+PYTHONPATH=src uv run python -c \
+"from pathlib import Path
+from fpdf import FPDF
+
+from adv_archon.core.demo import create_studio_demo_expedientes
+from adv_archon.core.expediente import ExpedienteStore
+
+feedback_pdf = Path('${FEEDBACK_PDF}')
+pdf = FPDF()
+pdf.set_auto_page_break(auto=True, margin=16)
+pdf.add_page()
+pdf.set_font('Helvetica', 'B', 17)
+pdf.cell(0, 10, 'Checklist de feedback para arquitectos')
+pdf.ln(12)
+pdf.set_font('Helvetica', '', 11)
+blocks = [
+    ('Objetivo', 'Validar si ADV ARCHON se entiende como herramienta de despacho y si el informe parece suficientemente profesional para una primera revisión urbanística.'),
+    ('Prueba guiada de 10 minutos', '[ ] Abrí Studio Demo sin ayuda.\\n[ ] Entendí los 3 casos: cambio de uso, inundabilidad y PGOU pendiente.\\n[ ] Abrí al menos un informe PDF.\\n[ ] Entendí el semáforo de decisión.\\n[ ] Entendí qué fuentes se habían consultado.\\n[ ] Entendí qué parte era preliminar y qué parte requería revisión profesional.'),
+    ('Valor percibido', '[ ] Me ahorraría tiempo en una primera lectura de expediente.\\n[ ] Me ayudaría a detectar riesgos antes de presupuestar.\\n[ ] El PDF podría circular internamente en un despacho.\\n[ ] El flujo se parece a cómo trabajaría un arquitecto.'),
+    ('Preguntas clave', '1. ¿Qué caso demo te pareció más creíble?\\n2. ¿Qué dato faltó para confiar más?\\n3. ¿Qué pantalla o texto te pareció demasiado técnico?\\n4. ¿Qué cambiarías del PDF para enseñarlo a un cliente o socio?\\n5. ¿Cuánto pagarías por una versión con tus municipios y plantilla de despacho?'),
+    ('Aviso', 'Esta beta es preliminar y no sustituye comprobación oficial ni criterio profesional.'),
+]
+for title, body in blocks:
+    pdf.ln(5)
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font('Helvetica', 'B', 13)
+    pdf.multi_cell(pdf.epw, 7, title)
+    pdf.set_x(pdf.l_margin)
+    pdf.set_font('Helvetica', '', 11)
+    pdf.multi_cell(pdf.epw, 6, body)
+pdf.output(feedback_pdf)
+
+data_dir = Path('${WORK_DIR}') / 'studio-demo-data'
+data_dir.mkdir(parents=True, exist_ok=True)
+store = ExpedienteStore(data_dir / 'expedientes.db')
+demos = create_studio_demo_expedientes(store, data_dir=data_dir)
+demo_dir = Path('${DEMO_DIR}')
+names = {
+    'cambio_uso_vivienda': '01_cambio_de_uso_local_a_vivienda.pdf',
+    'vivienda_unifamiliar': '02_parcela_con_inundabilidad.pdf',
+    'obra_nueva': '03_vivienda_unifamiliar_pgou_pendiente.pdf',
+}
+for exp in demos:
+    src = Path(exp.report_path)
+    if src.exists():
+        target = demo_dir / names.get(exp.case_type, f'{exp.case_type}.pdf')
+        target.write_bytes(src.read_bytes())
 "
 
 echo "→ Quitando cuarentena local del payload…"

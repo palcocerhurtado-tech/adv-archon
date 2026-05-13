@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Sequence
 from contextlib import suppress
 from dataclasses import dataclass
@@ -668,8 +669,10 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     next_steps = analysis.get("next_steps") or []
     if not full_analysis and isinstance(next_steps, list) and next_steps:
         full_analysis = "Próximos pasos:\n" + "\n".join(f"- {step}" for step in next_steps)
-    from adv_archon.core.studio import build_studio_payload
+    from adv_archon.core.studio import build_studio_payload, load_studio_client_config
 
+    client_root = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
+    client_config = load_studio_client_config(client_root)
     studio = build_studio_payload(
         case_type=getattr(expediente, "case_type", "cambio_uso_vivienda"),
         municipality=municipality,
@@ -697,7 +700,18 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     else:
         pdf.set_y(24)
 
-    pdf.set_font(pdf._fn, "B", 20)
+    pdf.set_font(pdf._fn, "B", 9)
+    pdf.set_text_color(*_C_DARK)
+    pdf.cell(
+        0,
+        5,
+        "ADV ARCHON STUDIO EDITION",
+        align="C",
+        new_x=XPos.LMARGIN,
+        new_y=YPos.NEXT,
+    )
+    pdf.ln(1)
+    pdf.set_font(pdf._fn, "B", 19)
     pdf.set_text_color(*_C_ACCENT)
     pdf.multi_cell(
         0,
@@ -783,7 +797,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     pdf.ln(3)
 
     _section_title(pdf, "ADV ARCHON STUDIO EDITION")
-    _studio_value_panel(pdf, studio)
+    _studio_value_panel(pdf, studio, client_name=client_config.client_name)
     pdf.ln(4)
 
     _section_title(pdf, "CHECKLIST POR TIPO DE EXPEDIENTE")
@@ -862,10 +876,16 @@ def _default_report_logo_path() -> Path | None:
     return path if path.exists() else None
 
 
-def _studio_value_panel(pdf: ArchonPDF, studio: dict[str, Any]) -> None:
+def _studio_value_panel(
+    pdf: ArchonPDF,
+    studio: dict[str, Any],
+    *,
+    client_name: str,
+) -> None:
     value = studio.get("estimated_value") or {}
     city = studio.get("city_pack") or {}
     rows = [
+        ("Preparado para", client_name),
         ("Tipo de expediente", studio.get("case_label", "")),
         ("Semáforo de decisión", studio.get("decision", "")),
         ("Horas evitadas", f"{value.get('hours_saved', 0)} h"),

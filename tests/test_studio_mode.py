@@ -6,7 +6,14 @@ from pathlib import Path
 
 from adv_archon.core.demo import create_studio_demo_expedientes
 from adv_archon.core.expediente import ExpedienteStore
-from adv_archon.core.studio import build_studio_payload, city_pack_for, get_case_template
+from adv_archon.core.studio import (
+    build_studio_payload,
+    city_pack_for,
+    get_case_template,
+    load_studio_client_config,
+    save_default_studio_client_config,
+    studio_client_config_path,
+)
 
 
 def test_studio_templates_cover_commercial_case_types() -> None:
@@ -77,3 +84,31 @@ def test_create_studio_demo_expedientes_generates_three_reports(tmp_path: Path) 
         assert Path(demo.plan_path).exists()
         assert Path(demo.report_path).exists()
         assert json.loads(demo.site_context)["demo"] is True
+
+
+def test_studio_client_config_defaults_and_preserves_existing_file(tmp_path: Path) -> None:
+    path = save_default_studio_client_config(tmp_path)
+
+    assert path == studio_client_config_path(tmp_path)
+    cfg = load_studio_client_config(tmp_path)
+    assert cfg.client_name == "Despacho beta ADV ARCHON"
+    assert "Madrid" in cfg.included_municipalities
+    assert cfg.license_status == "beta_privada"
+
+    path.write_text(
+        json.dumps(
+            {
+                "client_name": "Estudio Norte",
+                "included_municipalities": ["Madrid"],
+                "license_status": "beta_cliente",
+                "license_label": "Studio Trial",
+            }
+        ),
+        encoding="utf-8",
+    )
+    save_default_studio_client_config(tmp_path)
+
+    cfg = load_studio_client_config(tmp_path)
+    assert cfg.client_name == "Estudio Norte"
+    assert cfg.included_municipalities == ("Madrid",)
+    assert cfg.license_label == "Studio Trial"

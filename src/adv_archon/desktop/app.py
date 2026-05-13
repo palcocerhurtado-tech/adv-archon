@@ -213,6 +213,7 @@ def launch_desktop_app(
             self._warmup_agent_ref: tuple[Any, Any] | None = None
             self._onboarding_dialog: Any = None
             self._expedientes_dialog: Any = None
+            self._studio_demo_dialog: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
             self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
@@ -389,8 +390,9 @@ def launch_desktop_app(
             self._nav_exp_btn.clicked.connect(lambda: self._open_expedientes())
             sl.addWidget(self._nav_exp_btn)
 
-            self._nav_demo_btn = self._make_nav_btn("  Modo demo")
-            self._nav_demo_btn.clicked.connect(self._open_demo_expediente)
+            self._nav_demo_btn = self._make_nav_btn("  Studio Demo")
+            self._nav_demo_btn.setObjectName("NavBtnGold")
+            self._nav_demo_btn.clicked.connect(self._open_studio_demo)
             sl.addWidget(self._nav_demo_btn)
 
             self._nav_dashboard_btn = self._make_nav_btn("  Dashboard")
@@ -1648,38 +1650,255 @@ def launch_desktop_app(
             )
 
         def _close_workspace_panels(self) -> None:
-            dlg = getattr(self, "_expedientes_dialog", None)
-            if dlg is not None:
-                with suppress(RuntimeError):
-                    dlg.close()
-                self._expedientes_dialog = None
+            for attr in ("_expedientes_dialog", "_studio_demo_dialog"):
+                dlg = getattr(self, attr, None)
+                if dlg is not None:
+                    with suppress(RuntimeError):
+                        dlg.close()
+                    setattr(self, attr, None)
 
         def _show_chat_home(self) -> None:
             self._close_workspace_panels()
             self._input.setFocus()
             self.statusBar().showMessage("Chat principal listo.", 2500)
 
-        def _open_demo_expediente(self) -> None:
+        def _open_studio_demo(self) -> None:
             import os
+
+            from PySide6.QtWidgets import QDialog
 
             from adv_archon.core.demo import create_studio_demo_expedientes
             from adv_archon.core.expediente import ExpedienteStore
+            from adv_archon.core.studio import (
+                build_studio_payload,
+                load_studio_client_config,
+                save_default_studio_client_config,
+            )
 
+            self._close_workspace_panels()
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
+            save_default_studio_client_config(data_dir)
+            client_cfg = load_studio_client_config(data_dir)
             store = ExpedienteStore(data_dir / "expedientes.db")
-            try:
-                demos = create_studio_demo_expedientes(store, data_dir=data_dir)
-                exp = demos[0]
-            except Exception as exc:
-                self._add_notice(f"No se pudo crear el expediente demo: {exc}", object_name="Err")
-                return
-            self._last_exp_label = exp.title
-            self._refresh_status_bar()
-            self.statusBar().showMessage(
-                "Studio Mode: 3 expedientes demo preparados con informes PDF.", 5000
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Studio Demo — ADV ARCHON")
+            dlg.setMinimumSize(980, 640)
+            dlg.setWindowModality(Qt.WindowModality.NonModal)
+
+            layout = QVBoxLayout(dlg)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(12)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(14)
+            hero_lay.addWidget(self._make_logo(58))
+
+            hero_text = QVBoxLayout()
+            eyebrow = QLabel("ADV ARCHON STUDIO EDITION")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Demo comercial guiada de 10 minutos")
+            title.setObjectName("StudioTitle")
+            subtitle = QLabel(
+                "Tres expedientes preparados para enseñar valor: decisión, horas "
+                "ahorradas, riesgos, fuentes oficiales e informe listo para abrir."
             )
-            self._open_expedientes(selected_id=exp.id)
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            client = QLabel(
+                f"Preparado para: {client_cfg.client_name} · "
+                f"{client_cfg.license_label} · "
+                f"{', '.join(client_cfg.included_municipalities)}"
+            )
+            client.setObjectName("Accent")
+            client.setWordWrap(True)
+            hero_text.addWidget(eyebrow)
+            hero_text.addWidget(title)
+            hero_text.addWidget(subtitle)
+            hero_text.addWidget(client)
+            hero_lay.addLayout(hero_text, 1)
+
+            start_btn = QPushButton("Iniciar demo comercial")
+            start_btn.setObjectName("Primary")
+            start_btn.setMinimumWidth(190)
+            hero_lay.addWidget(start_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+            layout.addWidget(hero)
+
+            status_lbl = QLabel(
+                "Pulsa iniciar para generar los tres casos demo y sus informes PDF. "
+                "La demo no bloquea el chat principal."
+            )
+            status_lbl.setObjectName("Sub")
+            status_lbl.setWordWrap(True)
+            layout.addWidget(status_lbl)
+
+            scroll = QScrollArea()
+            scroll.setWidgetResizable(True)
+            cards_host = QWidget()
+            cards_lay = QHBoxLayout(cards_host)
+            cards_lay.setContentsMargins(0, 0, 0, 0)
+            cards_lay.setSpacing(12)
+            scroll.setWidget(cards_host)
+            layout.addWidget(scroll, 1)
+
+            def clear_cards() -> None:
+                while cards_lay.count():
+                    item = cards_lay.takeAt(0)
+                    widget = item.widget()
+                    if widget is not None:
+                        widget.deleteLater()
+
+            def metric(label: str, value: str) -> QFrame:
+                box = QFrame()
+                box.setObjectName("StudioMetric")
+                box_lay = QVBoxLayout(box)
+                box_lay.setContentsMargins(10, 8, 10, 8)
+                box_lay.setSpacing(2)
+                value_lbl = QLabel(value)
+                value_lbl.setObjectName("StudioDecision")
+                label_lbl = QLabel(label)
+                label_lbl.setObjectName("Faint")
+                label_lbl.setWordWrap(True)
+                box_lay.addWidget(value_lbl)
+                box_lay.addWidget(label_lbl)
+                return box
+
+            def open_report(path_text: str) -> None:
+                path = Path(path_text)
+                if path.exists():
+                    QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+                else:
+                    status_lbl.setText("El informe no existe todavía. Regenera la demo.")
+
+            def open_expediente(exp_id: str) -> None:
+                dlg.close()
+                QTimer.singleShot(80, lambda: self._open_expedientes(selected_id=exp_id))
+
+            def loads_json(raw: object) -> dict[str, Any]:
+                if not isinstance(raw, str) or not raw.strip():
+                    return {}
+                try:
+                    parsed = json.loads(raw)
+                except ValueError:
+                    return {}
+                return parsed if isinstance(parsed, dict) else {}
+
+            def make_card(exp: object) -> QFrame:
+                site_context = loads_json(getattr(exp, "site_context", ""))
+                analysis = loads_json(getattr(exp, "analysis_result", ""))
+                studio = build_studio_payload(
+                    case_type=getattr(exp, "case_type", ""),
+                    municipality=getattr(exp, "municipality", ""),
+                    site_context=site_context,
+                    analysis=analysis,
+                )
+                value = studio.get("estimated_value") or {}
+                city = studio.get("city_pack") or {}
+
+                card = QFrame()
+                card.setObjectName("StudioCard")
+                card.setMinimumWidth(280)
+                card_lay = QVBoxLayout(card)
+                card_lay.setContentsMargins(14, 14, 14, 14)
+                card_lay.setSpacing(10)
+
+                decision = QLabel(str(studio.get("decision") or "REVISAR"))
+                decision.setObjectName("StudioDecision")
+                card_lay.addWidget(decision)
+
+                name = QLabel(str(studio.get("case_label") or getattr(exp, "title", "")))
+                name.setObjectName("StudioCase")
+                name.setWordWrap(True)
+                card_lay.addWidget(name)
+
+                focus = QLabel(str(studio.get("decision_focus") or ""))
+                focus.setObjectName("Sub")
+                focus.setWordWrap(True)
+                card_lay.addWidget(focus)
+
+                metrics_row_1 = QHBoxLayout()
+                metrics_row_1.setSpacing(8)
+                metrics_row_1.addWidget(
+                    metric("horas ahorradas", str(value.get("hours_saved", 0)))
+                )
+                metrics_row_1.addWidget(metric("riesgos", str(value.get("risks_detected", 0))))
+                card_lay.addLayout(metrics_row_1)
+
+                metrics_row_2 = QHBoxLayout()
+                metrics_row_2.setSpacing(8)
+                metrics_row_2.addWidget(metric("fuentes", str(value.get("sources_consulted", 0))))
+                metrics_row_2.addWidget(
+                    metric("documentos", str(value.get("documents_generated", 0)))
+                )
+                card_lay.addLayout(metrics_row_2)
+
+                pack = QLabel(
+                    f"{city.get('label', 'Paquete municipal')} · "
+                    f"estado {city.get('status', 'pendiente')}"
+                )
+                pack.setObjectName("Faint")
+                pack.setWordWrap(True)
+                card_lay.addWidget(pack)
+                card_lay.addStretch(1)
+
+                buttons = QHBoxLayout()
+                buttons.setSpacing(8)
+                report_path = str(getattr(exp, "report_path", ""))
+                exp_id = str(getattr(exp, "id", ""))
+                report_btn = QPushButton("Abrir informe")
+                report_btn.setObjectName("Primary")
+                report_btn.clicked.connect(
+                    lambda _checked=False, path=report_path: open_report(path)
+                )
+                exp_btn = QPushButton("Abrir expediente")
+                exp_btn.setObjectName("Ghost")
+                exp_btn.clicked.connect(
+                    lambda _checked=False, eid=exp_id: open_expediente(eid)
+                )
+                buttons.addWidget(report_btn)
+                buttons.addWidget(exp_btn)
+                card_lay.addLayout(buttons)
+                return card
+
+            def start_demo() -> None:
+                start_btn.setEnabled(False)
+                start_btn.setText("Preparando…")
+                status_lbl.setText("Generando expedientes demo e informes PDF…")
+                try:
+                    demos = create_studio_demo_expedientes(store, data_dir=data_dir)
+                except Exception as exc:
+                    status_lbl.setText(f"No se pudo crear la demo: {exc}")
+                    start_btn.setEnabled(True)
+                    start_btn.setText("Reintentar demo comercial")
+                    return
+                clear_cards()
+                for exp in demos:
+                    cards_lay.addWidget(make_card(exp))
+                cards_lay.addStretch(1)
+                if demos:
+                    self._last_exp_label = demos[0].title
+                    self._refresh_status_bar()
+                self.statusBar().showMessage(
+                    "Studio Demo lista: 3 casos comerciales y PDFs generados.", 5000
+                )
+                status_lbl.setText(
+                    "Demo lista. Abre los informes o entra en cada expediente para "
+                    "recorrer el flujo completo."
+                )
+                start_btn.setEnabled(True)
+                start_btn.setText("Regenerar demo comercial")
+
+            start_btn.clicked.connect(start_demo)
+            dlg.finished.connect(lambda _code: setattr(self, "_studio_demo_dialog", None))
+            self._studio_demo_dialog = dlg
+            dlg.show()
+
+        def _open_demo_expediente(self) -> None:
+            self._open_studio_demo()
 
         def _onboarding_done(self) -> bool:
             try:

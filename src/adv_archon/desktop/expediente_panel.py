@@ -22,6 +22,7 @@ Qt: Any = None
 QDialog: Any = None
 QDialogButtonBox: Any = None
 QDesktopServices: Any = None
+QComboBox: Any = None
 QFileDialog: Any = None
 QFormLayout: Any = None
 QFrame: Any = None
@@ -50,6 +51,7 @@ if PYSIDE6_AVAILABLE:
     QUrl = _c.QUrl
     QDesktopServices = _g.QDesktopServices
     QIcon = _g.QIcon
+    QComboBox = _w.QComboBox
     QDialog = _w.QDialog
     QDialogButtonBox = _w.QDialogButtonBox
     QFileDialog = _w.QFileDialog
@@ -215,6 +217,13 @@ if PYSIDE6_AVAILABLE:
             )
             form.addRow("Dirección, coordenadas o referencia *", self._address)
 
+            self._case_type = QComboBox()
+            from adv_archon.core.studio import case_template_options
+
+            for code, label in case_template_options():
+                self._case_type.addItem(label, code)
+            form.addRow("Tipo de expediente Studio", self._case_type)
+
             self._notes = QLineEdit()
             self._notes.setPlaceholderText("Opcional")
             form.addRow("Notas", self._notes)
@@ -251,6 +260,9 @@ if PYSIDE6_AVAILABLE:
 
         def notes_text(self) -> str:
             return cast(str, self._notes.text()).strip()
+
+        def case_type(self) -> str:
+            return cast(str, self._case_type.currentData() or "cambio_uso_vivienda")
 
     # ── Detail panel ──────────────────────────────────────────────────────────
 
@@ -421,6 +433,18 @@ if PYSIDE6_AVAILABLE:
                 "</style>"
             )
             lines: list[str] = [style]
+            case_type = getattr(exp, "case_type", "cambio_uso_vivienda")
+            try:
+                from adv_archon.core.studio import get_case_template
+
+                template = get_case_template(case_type)
+                lines.append(
+                    "<h4>🏛 ADV ARCHON Studio</h4>"
+                    f"<p><b>{escape(template.label)}</b></p>"
+                    f"<p style='font-size:11px;color:#555;'>{escape(template.decision_focus)}</p>"
+                )
+            except Exception:
+                pass
 
             # ── Paso 1: Ubicación ─────────────────────────────────────────
             if not exp.municipality and not exp.site_context:
@@ -480,6 +504,33 @@ if PYSIDE6_AVAILABLE:
                 try:
                     ctx = json.loads(exp.site_context)
                     checks = ctx.get("legal_checks") or []
+                    try:
+                        ar = json.loads(exp.analysis_result) if exp.analysis_result else {}
+                    except (json.JSONDecodeError, TypeError):
+                        ar = {}
+                    from adv_archon.core.studio import build_studio_payload
+
+                    studio = build_studio_payload(
+                        case_type=case_type,
+                        municipality=exp.municipality,
+                        site_context=ctx if isinstance(ctx, dict) else {},
+                        analysis=ar if isinstance(ar, dict) else {},
+                    )
+                    value = studio["estimated_value"]
+                    city = studio["city_pack"]
+                    lines.append(
+                        "<h4>💼 Valor estimado ahorrado</h4><table>"
+                        f"<tr><td>Horas evitadas</td><td><b>{value['hours_saved']} h</b></td></tr>"
+                        "<tr><td>Riesgos detectados</td>"
+                        f"<td><b>{value['risks_detected']}</b></td></tr>"
+                        "<tr><td>Fuentes consultadas</td>"
+                        f"<td><b>{value['sources_consulted']}</b></td></tr>"
+                        "<tr><td>Documentos generados</td>"
+                        f"<td><b>{value['documents_generated']}</b></td></tr>"
+                        "<tr><td>Paquete ciudad</td>"
+                        f"<td><b>{escape(str(city['status']))}</b></td></tr>"
+                        "</table>"
+                    )
                     if checks:
                         verdict, v_colour = _veredicto_from_checks(checks)
                         if verdict:

@@ -25,6 +25,7 @@ class Expediente:
     created_at: str
     updated_at: str
     notes: str
+    case_type: str = "cambio_uso_vivienda"
 
 
 class ExpedienteStore:
@@ -58,7 +59,8 @@ class ExpedienteStore:
                 report_path TEXT NOT NULL DEFAULT '',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
-                notes TEXT NOT NULL DEFAULT ''
+                notes TEXT NOT NULL DEFAULT '',
+                case_type TEXT NOT NULL DEFAULT 'cambio_uso_vivienda'
             );
         """)
         existing = {
@@ -80,6 +82,7 @@ class ExpedienteStore:
             "created_at": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
             "notes": "TEXT NOT NULL DEFAULT ''",
+            "case_type": "TEXT NOT NULL DEFAULT 'cambio_uso_vivienda'",
         }
         for name, definition in columns.items():
             if name not in existing:
@@ -105,6 +108,7 @@ class ExpedienteStore:
         longitude: float | None = None,
         cadastral_ref: str = "",
         notes: str = "",
+        case_type: str = "cambio_uso_vivienda",
     ) -> Expediente:
         now = datetime.now(UTC).isoformat()
         expediente = Expediente(
@@ -124,6 +128,7 @@ class ExpedienteStore:
             created_at=now,
             updated_at=now,
             notes=notes,
+            case_type=case_type,
         )
         self._conn.execute(
             """
@@ -131,8 +136,8 @@ class ExpedienteStore:
                 id, title, address, municipality, province,
                 latitude, longitude, cadastral_ref, status,
                 plan_path, site_context, analysis_result, report_path,
-                created_at, updated_at, notes
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, notes, case_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 expediente.id,
@@ -151,6 +156,7 @@ class ExpedienteStore:
                 expediente.created_at,
                 expediente.updated_at,
                 expediente.notes,
+                expediente.case_type,
             ),
         )
         self._conn.commit()
@@ -187,7 +193,8 @@ class ExpedienteStore:
                 analysis_result = ?,
                 report_path = ?,
                 updated_at = ?,
-                notes = ?
+                notes = ?,
+                case_type = ?
             WHERE id = ?
             """,
             (
@@ -205,6 +212,7 @@ class ExpedienteStore:
                 expediente.report_path,
                 expediente.updated_at,
                 expediente.notes,
+                expediente.case_type,
                 expediente.id,
             ),
         )
@@ -240,6 +248,7 @@ class ExpedienteStore:
             created_at=row["created_at"],
             updated_at=row["updated_at"],
             notes=row["notes"],
+            case_type=row["case_type"],
         )
 
 

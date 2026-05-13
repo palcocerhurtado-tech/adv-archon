@@ -1662,21 +1662,22 @@ def launch_desktop_app(
         def _open_demo_expediente(self) -> None:
             import os
 
-            from adv_archon.core.demo import create_demo_expediente
+            from adv_archon.core.demo import create_studio_demo_expedientes
             from adv_archon.core.expediente import ExpedienteStore
 
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
             store = ExpedienteStore(data_dir / "expedientes.db")
             try:
-                exp = create_demo_expediente(store, data_dir=data_dir)
+                demos = create_studio_demo_expedientes(store, data_dir=data_dir)
+                exp = demos[0]
             except Exception as exc:
                 self._add_notice(f"No se pudo crear el expediente demo: {exc}", object_name="Err")
                 return
             self._last_exp_label = exp.title
             self._refresh_status_bar()
             self.statusBar().showMessage(
-                "Expediente demo preparado con plano e informe PDF.", 5000
+                "Studio Mode: 3 expedientes demo preparados con informes PDF.", 5000
             )
             self._open_expedientes(selected_id=exp.id)
 
@@ -1941,6 +1942,9 @@ def launch_desktop_app(
                 return normalized if re.fullmatch(r"[A-Z0-9]{14,20}", normalized) else ""
 
             def _build_expediente_analysis(exp: Expediente) -> dict[str, Any]:
+                from adv_archon.core.studio import get_case_template
+
+                template = get_case_template(getattr(exp, "case_type", ""))
                 try:
                     ctx = json.loads(exp.site_context) if exp.site_context else {}
                 except (TypeError, ValueError):
@@ -2009,10 +2013,14 @@ def launch_desktop_app(
                         next_steps.append(action)
                 if exp.plan_path:
                     next_steps.append("Revisar el plano adjunto frente a la ordenanza aplicable.")
+                for item in template.checklist:
+                    if len(next_steps) >= 12:
+                        break
+                    next_steps.append(item)
                 return {
                     "verdict": verdict,
                     "verdict_label": verdict_label,
-                    "summary": summary,
+                    "summary": f"{template.label}. {summary}",
                     "annotations": annotations[:30],
                     "next_steps": next_steps[:12],
                     "generated_at": datetime.now().isoformat(timespec="minutes"),
@@ -2360,6 +2368,7 @@ def launch_desktop_app(
                     title=d.title_text(),
                     address=d.address_text(),
                     notes=d.notes_text(),
+                    case_type=d.case_type(),
                 )
                 list_panel.populate(store.list_all())
                 detail_panel.load_expediente(exp)

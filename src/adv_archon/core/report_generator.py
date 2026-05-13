@@ -668,6 +668,14 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     next_steps = analysis.get("next_steps") or []
     if not full_analysis and isinstance(next_steps, list) and next_steps:
         full_analysis = "Próximos pasos:\n" + "\n".join(f"- {step}" for step in next_steps)
+    from adv_archon.core.studio import build_studio_payload
+
+    studio = build_studio_payload(
+        case_type=getattr(expediente, "case_type", "cambio_uso_vivienda"),
+        municipality=municipality,
+        site_context=site_ctx,
+        analysis=analysis,
+    )
 
     # Default output path: Desktop
     if output_path is None:
@@ -774,6 +782,14 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     _verdict_box(pdf, verdict or "revisar")
     pdf.ln(3)
 
+    _section_title(pdf, "ADV ARCHON STUDIO EDITION")
+    _studio_value_panel(pdf, studio)
+    pdf.ln(4)
+
+    _section_title(pdf, "CHECKLIST POR TIPO DE EXPEDIENTE")
+    _studio_checklist(pdf, studio)
+    pdf.ln(4)
+
     _section_title(pdf, "FUENTES CONSULTADAS")
     _sources_table(pdf, site_ctx)
     pdf.ln(5)
@@ -844,6 +860,37 @@ def _default_report_logo_path() -> Path | None:
         return None
     path = report_logo_path()
     return path if path.exists() else None
+
+
+def _studio_value_panel(pdf: ArchonPDF, studio: dict[str, Any]) -> None:
+    value = studio.get("estimated_value") or {}
+    city = studio.get("city_pack") or {}
+    rows = [
+        ("Tipo de expediente", studio.get("case_label", "")),
+        ("Semáforo de decisión", studio.get("decision", "")),
+        ("Horas evitadas", f"{value.get('hours_saved', 0)} h"),
+        ("Riesgos detectados", str(value.get("risks_detected", 0))),
+        ("Fuentes consultadas", str(value.get("sources_consulted", 0))),
+        ("Documentos generados", str(value.get("documents_generated", 0))),
+        ("Paquete ciudad", f"{city.get('municipality', '')} · {city.get('status', '')}"),
+    ]
+    _simple_key_value_table(pdf, rows)
+    note = str(city.get("note") or "")
+    if note:
+        pdf.ln(2)
+        _summary_box(pdf, note)
+
+
+def _studio_checklist(pdf: ArchonPDF, studio: dict[str, Any]) -> None:
+    checklist = studio.get("checklist") or []
+    if not isinstance(checklist, list):
+        checklist = []
+    pdf.set_font(pdf._fn, "", 8.5)
+    for item in checklist:
+        _ensure_space(pdf, 7)
+        pdf.set_x(pdf.l_margin)
+        width = pdf.w - pdf.l_margin - pdf.r_margin
+        pdf.multi_cell(width, 5.5, f"  OK  {_clean_text(str(item))}", border=1)
 
 
 def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:

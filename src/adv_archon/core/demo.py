@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 
 from fpdf import FPDF
 
@@ -13,6 +15,8 @@ from adv_archon.core.report_generator import generate_expediente_pdf
 DEMO_TITLE = "DEMO - Cambio de uso local a vivienda"
 DEMO_ADDRESS = "Calle Mayor 24, Madrid"
 DEMO_NOTES = "ADV_ARCHON_DEMO_EXPEDIENTE"
+DEMO_NOTES_FLOOD = "ADV_ARCHON_DEMO_INUNDABILIDAD"
+DEMO_NOTES_PGOU_PENDING = "ADV_ARCHON_DEMO_PGOU_PENDIENTE"
 
 
 def create_demo_expediente(
@@ -21,38 +25,103 @@ def create_demo_expediente(
     data_dir: Path,
 ) -> Expediente:
     """Create or refresh a fully offline demo expediente for sales/product demos."""
+    return create_studio_demo_expedientes(store, data_dir=data_dir)[0]
+
+
+def create_studio_demo_expedientes(
+    store: ExpedienteStore,
+    *,
+    data_dir: Path,
+) -> list[Expediente]:
+    """Create or refresh the offline Studio Edition demo portfolio."""
     demo_dir = data_dir / "demo"
     demo_dir.mkdir(parents=True, exist_ok=True)
-    plan_path = demo_dir / "plano_demo_archon.pdf"
-    report_path = demo_dir / "informe_demo_archon.pdf"
-    _write_demo_plan(plan_path)
+    specs = [
+        {
+            "notes": DEMO_NOTES,
+            "title": DEMO_TITLE,
+            "address": DEMO_ADDRESS,
+            "municipality": "Madrid",
+            "province": "Madrid",
+            "latitude": 40.415363,
+            "longitude": -3.707398,
+            "cadastral_ref": "2807901VK4720G0001ZX",
+            "case_type": "cambio_uso_vivienda",
+            "plan": demo_dir / "plano_demo_archon.pdf",
+            "report": demo_dir / "informe_demo_archon.pdf",
+            "site_context": _demo_site_context(),
+            "analysis": _demo_analysis(),
+        },
+        {
+            "notes": DEMO_NOTES_FLOOD,
+            "title": "DEMO - Parcela con riesgo de inundabilidad",
+            "address": "Camino de la Ribera 8, Zaragoza",
+            "municipality": "Zaragoza",
+            "province": "Zaragoza",
+            "latitude": 41.6561,
+            "longitude": -0.8773,
+            "cadastral_ref": "5029701XM7152H0001QT",
+            "case_type": "vivienda_unifamiliar",
+            "plan": demo_dir / "plano_demo_inundabilidad.pdf",
+            "report": demo_dir / "informe_demo_inundabilidad.pdf",
+            "site_context": _demo_site_context_flood(),
+            "analysis": _demo_analysis_flood(),
+        },
+        {
+            "notes": DEMO_NOTES_PGOU_PENDING,
+            "title": "DEMO - Vivienda unifamiliar con PGOU pendiente",
+            "address": "Urbanización Los Pinos 3, Valencia",
+            "municipality": "Valencia",
+            "province": "Valencia",
+            "latitude": 39.4699,
+            "longitude": -0.3763,
+            "cadastral_ref": "4625001YJ2742C0001SA",
+            "case_type": "obra_nueva",
+            "plan": demo_dir / "plano_demo_pgou_pendiente.pdf",
+            "report": demo_dir / "informe_demo_pgou_pendiente.pdf",
+            "site_context": _demo_site_context_pgou_pending(),
+            "analysis": _demo_analysis_pgou_pending(),
+        },
+    ]
+    return [_refresh_demo(store, spec) for spec in specs]
 
-    existing = next((exp for exp in store.list_all() if exp.notes == DEMO_NOTES), None)
+
+def _refresh_demo(store: ExpedienteStore, spec: dict[str, object]) -> Expediente:
+    plan_path = spec["plan"]
+    report_path = spec["report"]
+    if not isinstance(plan_path, Path) or not isinstance(report_path, Path):
+        raise TypeError("Demo paths must be Path instances.")
+    _write_demo_plan(plan_path, title=str(spec["title"]), case_type=str(spec["case_type"]))
+
+    notes = str(spec["notes"])
+    existing = next((exp for exp in store.list_all() if exp.notes == notes), None)
     exp = existing or store.create(
-        title=DEMO_TITLE,
-        address=DEMO_ADDRESS,
-        municipality="Madrid",
-        province="Madrid",
-        latitude=40.415363,
-        longitude=-3.707398,
-        cadastral_ref="2807901VK4720G0001ZX",
-        notes=DEMO_NOTES,
+        title=str(spec["title"]),
+        address=str(spec["address"]),
+        municipality=str(spec["municipality"]),
+        province=str(spec["province"]),
+        latitude=float(cast(float, spec["latitude"])),
+        longitude=float(cast(float, spec["longitude"])),
+        cadastral_ref=str(spec["cadastral_ref"]),
+        notes=notes,
+        case_type=str(spec["case_type"]),
     )
 
     updated = replace(
         exp,
-        title=DEMO_TITLE,
-        address=DEMO_ADDRESS,
-        municipality="Madrid",
-        province="Madrid",
-        latitude=40.415363,
-        longitude=-3.707398,
-        cadastral_ref="2807901VK4720G0001ZX",
+        title=str(spec["title"]),
+        address=str(spec["address"]),
+        municipality=str(spec["municipality"]),
+        province=str(spec["province"]),
+        latitude=float(cast(float, spec["latitude"])),
+        longitude=float(cast(float, spec["longitude"])),
+        cadastral_ref=str(spec["cadastral_ref"]),
         status="analizado",
         plan_path=str(plan_path),
-        site_context=json.dumps(_demo_site_context(), ensure_ascii=False),
-        analysis_result=json.dumps(_demo_analysis(), ensure_ascii=False),
-        notes=DEMO_NOTES,
+        site_context=json.dumps(spec["site_context"], ensure_ascii=False),
+        analysis_result=json.dumps(spec["analysis"], ensure_ascii=False),
+        notes=notes,
+        case_type=str(spec["case_type"]),
     )
     store.update(updated)
 
@@ -63,17 +132,17 @@ def create_demo_expediente(
     return store.get(final.id) or final
 
 
-def _write_demo_plan(path: Path) -> None:
+def _write_demo_plan(path: Path, *, title: str, case_type: str) -> None:
     pdf = FPDF(orientation="L", unit="mm", format="A4")
     pdf.add_page()
     pdf.set_font("Helvetica", "B", 18)
-    pdf.cell(0, 10, "PLANO DEMO - ADV ARCHON", align="C")
+    pdf.cell(0, 10, "PLANO DEMO STUDIO - ADV ARCHON", align="C")
     pdf.ln(10)
     pdf.set_font("Helvetica", "", 10)
     pdf.cell(
         0,
         7,
-        "Cambio de uso local a vivienda - pieza demostrativa sin validez tecnica",
+        f"{title} - {case_type} - pieza demostrativa sin validez tecnica",
         align="C",
     )
     pdf.ln(7)
@@ -245,4 +314,210 @@ def _demo_analysis() -> dict[str, object]:
     }
 
 
-__all__ = ["DEMO_NOTES", "DEMO_TITLE", "create_demo_expediente"]
+def _demo_site_context_flood() -> dict[str, object]:
+    ctx = deepcopy(_demo_site_context())
+    ctx.update(
+        {
+            "demo": True,
+            "municipality": "Zaragoza",
+            "province": "Zaragoza",
+            "autonomous_community": "Aragón",
+            "latitude": 41.6561,
+            "longitude": -0.8773,
+            "cadastral_ref": "5029701XM7152H0001QT",
+            "cadastral_address": "Camino de la Ribera 8, Zaragoza",
+            "pgou_indexed": True,
+            "legal_readiness": "sectorial-review",
+            "parcel_detail": {
+                "surface_m2": 520,
+                "construction_year": 1992,
+                "floors_above": 1,
+                "floors_below": 0,
+                "use_detail": "Residencial unifamiliar / parcela",
+            },
+            "parcel_zoning": {
+                "status": "preliminary",
+                "summary": "Parcela residencial con lectura PGOU preliminar.",
+                "confidence": "media",
+            },
+            "flood_zone": {
+                "in_flood_zone": True,
+                "zones": ["T100", "T500"],
+                "source": "SNCZI/CNIG - demo",
+            },
+        }
+    )
+    ctx["legal_checks"] = [
+        {
+            "title": "Identificación catastral",
+            "status": "ready",
+            "detail": "Referencia demo localizada.",
+            "recommended_action": "Usar como base preliminar.",
+        },
+        {
+            "title": "PGOU municipal",
+            "status": "ready",
+            "detail": "PGOU demo disponible.",
+            "recommended_action": "Contrastar parámetros de parcela.",
+        },
+        {
+            "title": "Zonificación de parcela",
+            "status": "conditional",
+            "detail": "Ordenanza residencial inferida de forma preliminar.",
+            "recommended_action": "Confirmar ordenanza exacta en planos municipales.",
+        },
+        {
+            "title": "Dominio hidráulico",
+            "status": "conditional",
+            "detail": "Cribado demo con posible afección T100/T500.",
+            "recommended_action": "Solicitar contraste SNCZI y criterio hidráulico.",
+        },
+        {
+            "title": "Carreteras y servidumbres",
+            "status": "ready",
+            "detail": "Sin proximidad relevante a viario estatal en cribado demo.",
+            "recommended_action": "Sin actuación inicial.",
+        },
+        {
+            "title": "Costas",
+            "status": "not_applicable",
+            "detail": "Parcela interior sin afección litoral.",
+            "recommended_action": "No aplica.",
+        },
+    ]
+    return ctx
+
+
+def _demo_analysis_flood() -> dict[str, object]:
+    return {
+        "verdict": "condicionado",
+        "verdict_label": "CONDICIONADO",
+        "confidence": "media",
+        "summary": (
+            "La parcela demo es urbanísticamente interesante, pero el cribado detecta "
+            "riesgo hidráulico. El despacho debe resolver esta afección antes de "
+            "prometer viabilidad al cliente."
+        ),
+        "annotations": [
+            {
+                "status": "warning",
+                "description": "Posible afección de inundabilidad T100/T500.",
+                "recommendation": "Contrastar con SNCZI y administración hidráulica.",
+            },
+            {
+                "status": "warning",
+                "description": "Ordenanza residencial pendiente de confirmación gráfica.",
+                "recommendation": "Verificar plano de ordenación municipal.",
+            },
+        ],
+        "next_steps": [
+            "Contrastar la afección hidráulica antes de redactar anteproyecto.",
+            "Confirmar parámetros de edificabilidad y retranqueos.",
+            "Preparar nota al cliente con riesgo sectorial y decisión condicionada.",
+        ],
+        "full_analysis": (
+            "Demo diseñada para mostrar que ADV ARCHON no solo genera informes: "
+            "detecta riesgos que pueden cambiar la decisión comercial del despacho."
+        ),
+        "generated_at": datetime.now(UTC).isoformat(timespec="minutes"),
+    }
+
+
+def _demo_site_context_pgou_pending() -> dict[str, object]:
+    ctx = deepcopy(_demo_site_context())
+    ctx.update(
+        {
+            "demo": True,
+            "municipality": "Valencia",
+            "province": "Valencia",
+            "autonomous_community": "Comunitat Valenciana",
+            "latitude": 39.4699,
+            "longitude": -0.3763,
+            "cadastral_ref": "4625001YJ2742C0001SA",
+            "cadastral_address": "Urbanización Los Pinos 3, Valencia",
+            "pgou_indexed": False,
+            "legal_readiness": "pgou-pending",
+            "parcel_detail": {
+                "surface_m2": 970,
+                "construction_year": "",
+                "floors_above": 0,
+                "floors_below": 0,
+                "use_detail": "Solar / parcela sin edificar",
+            },
+            "parcel_zoning": {
+                "status": "pending",
+                "summary": "Zonificación pendiente hasta cargar PGOU validado.",
+                "confidence": "baja",
+            },
+        }
+    )
+    ctx["legal_checks"] = [
+        {
+            "title": "Identificación catastral",
+            "status": "ready",
+            "detail": "Referencia demo localizada.",
+            "recommended_action": "Usar como punto de partida.",
+        },
+        {
+            "title": "PGOU municipal",
+            "status": "pending_review",
+            "detail": "Paquete normativo municipal pendiente de validación Studio.",
+            "recommended_action": "Cargar y validar PGOU antes de emitir criterio.",
+        },
+        {
+            "title": "Zonificación de parcela",
+            "status": "missing",
+            "detail": "No puede fijarse zona/ordenanza sin PGOU o visor municipal.",
+            "recommended_action": "Resolver ordenanza exacta como primer hito.",
+        },
+        {
+            "title": "Dominio hidráulico",
+            "status": "ready",
+            "detail": "Sin alerta sectorial demo en cribado inicial.",
+            "recommended_action": "Revisar de nuevo al completar PGOU.",
+        },
+    ]
+    return ctx
+
+
+def _demo_analysis_pgou_pending() -> dict[str, object]:
+    return {
+        "verdict": "revisar",
+        "verdict_label": "FALTA INFORMACIÓN",
+        "confidence": "baja",
+        "summary": (
+            "La vivienda unifamiliar demo no debe venderse como viable hasta cargar "
+            "y validar el paquete PGOU municipal. ADV ARCHON fuerza una decisión "
+            "prudente: falta información normativa crítica."
+        ),
+        "annotations": [
+            {
+                "status": "info",
+                "description": "Catastro y parcela están identificados.",
+                "recommendation": "Completar paquete normativo municipal.",
+            },
+            {
+                "status": "violation",
+                "description": "No existe ordenanza validada para confirmar edificabilidad.",
+                "recommendation": "No prometer viabilidad hasta revisar PGOU o visor.",
+            },
+        ],
+        "next_steps": [
+            "Cargar PGOU municipal o enlazar visor de planeamiento.",
+            "Confirmar zona, edificabilidad, ocupación, retranqueos y parcela mínima.",
+            "Emitir informe actualizado solo cuando el paquete esté al menos preliminar.",
+        ],
+        "full_analysis": (
+            "Demo diseñada para vender confianza: ARCHON no inventa viabilidad cuando "
+            "faltan datos normativos críticos."
+        ),
+        "generated_at": datetime.now(UTC).isoformat(timespec="minutes"),
+    }
+
+
+__all__ = [
+    "DEMO_NOTES",
+    "DEMO_TITLE",
+    "create_demo_expediente",
+    "create_studio_demo_expedientes",
+]

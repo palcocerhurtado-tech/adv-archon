@@ -123,3 +123,31 @@ def test_generate_expediente_pdf_plain_text_analysis(tmp_path: Path) -> None:
     out = tmp_path / "test_plain_text.pdf"
     result = generate_expediente_pdf(exp, output_path=out)
     assert result.exists()
+
+
+def test_generate_expediente_pdf_uses_studio_client_config(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    """Studio client config is optional, local and should not break PDF generation."""
+    config_dir = tmp_path / "adv-home"
+    config_dir.mkdir()
+    (config_dir / "studio_client.json").write_text(
+        json.dumps(
+            {
+                "client_name": "Estudio Claro",
+                "included_municipalities": ["Madrid", "Zaragoza"],
+                "license_status": "piloto_despacho",
+                "license_label": "Piloto Studio",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("ADV_ARCHON_HOME", str(config_dir))
+
+    exp = _make_exp(municipality="Madrid")
+    out = tmp_path / "test_client_config.pdf"
+    result = generate_expediente_pdf(exp, output_path=out)
+
+    assert result.exists()
+    assert result.stat().st_size > 2000

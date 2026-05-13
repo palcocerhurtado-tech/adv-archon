@@ -279,6 +279,35 @@ def save_default_studio_client_config(root: Path | None = None) -> Path:
     return path
 
 
+def save_studio_client_config(
+    *,
+    client_name: str,
+    logo_path: str = "",
+    included_municipalities: tuple[str, ...] | list[str] | None = None,
+    license_status: str = "beta_privada",
+    license_label: str = "Studio Edition Beta",
+    root: Path | None = None,
+) -> Path:
+    path = studio_client_config_path(root)
+    municipalities = [
+        item.strip()
+        for item in (included_municipalities or [])
+        if str(item).strip()
+    ]
+    if not municipalities:
+        municipalities = ["Madrid", "Zaragoza", "Barcelona", "Valencia", "Sevilla"]
+    payload = {
+        "client_name": client_name.strip() or "Despacho beta ADV ARCHON",
+        "logo_path": logo_path.strip(),
+        "included_municipalities": municipalities,
+        "license_status": license_status.strip() or "beta_privada",
+        "license_label": license_label.strip() or "Studio Edition Beta",
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return path
+
+
 def _decision_label(verdict: str, warning_count: int, has_checks: bool) -> str:
     if not has_checks:
         return "FALTA INFORMACIÓN"
@@ -316,5 +345,6 @@ __all__ = [
     "get_case_template",
     "load_studio_client_config",
     "save_default_studio_client_config",
+    "save_studio_client_config",
     "studio_client_config_path",
 ]

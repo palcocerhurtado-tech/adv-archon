@@ -214,6 +214,8 @@ def launch_desktop_app(
             self._onboarding_dialog: Any = None
             self._expedientes_dialog: Any = None
             self._studio_demo_dialog: Any = None
+            self._client_license_dialog: Any = None
+            self._studio_pack_dialog: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
             self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
@@ -394,6 +396,14 @@ def launch_desktop_app(
             self._nav_demo_btn.setObjectName("NavBtnGold")
             self._nav_demo_btn.clicked.connect(self._open_studio_demo)
             sl.addWidget(self._nav_demo_btn)
+
+            self._nav_client_btn = self._make_nav_btn("  Cliente / Licencia")
+            self._nav_client_btn.clicked.connect(self._open_client_license)
+            sl.addWidget(self._nav_client_btn)
+
+            self._nav_pack_btn = self._make_nav_btn("  Pack Studio")
+            self._nav_pack_btn.clicked.connect(self._open_studio_pack)
+            sl.addWidget(self._nav_pack_btn)
 
             self._nav_dashboard_btn = self._make_nav_btn("  Dashboard")
             self._nav_dashboard_btn.clicked.connect(self._open_dashboard)
@@ -1650,7 +1660,12 @@ def launch_desktop_app(
             )
 
         def _close_workspace_panels(self) -> None:
-            for attr in ("_expedientes_dialog", "_studio_demo_dialog"):
+            for attr in (
+                "_expedientes_dialog",
+                "_studio_demo_dialog",
+                "_client_license_dialog",
+                "_studio_pack_dialog",
+            ):
                 dlg = getattr(self, attr, None)
                 if dlg is not None:
                     with suppress(RuntimeError):
@@ -1661,6 +1676,308 @@ def launch_desktop_app(
             self._close_workspace_panels()
             self._input.setFocus()
             self.statusBar().showMessage("Chat principal listo.", 2500)
+
+        def _studio_data_dir(self) -> Path:
+            import os
+
+            data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
+            data_dir.mkdir(parents=True, exist_ok=True)
+            return data_dir
+
+        def _open_client_license(self) -> None:
+            from PySide6.QtWidgets import QDialog, QDialogButtonBox, QLineEdit
+
+            from adv_archon.core.studio import (
+                load_studio_client_config,
+                save_default_studio_client_config,
+                save_studio_client_config,
+                studio_client_config_path,
+            )
+
+            self._close_workspace_panels()
+            data_dir = self._studio_data_dir()
+            save_default_studio_client_config(data_dir)
+            client_cfg = load_studio_client_config(data_dir)
+
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Cliente / Licencia — ADV ARCHON Studio")
+            dlg.setMinimumSize(720, 580)
+            dlg.setWindowModality(Qt.WindowModality.NonModal)
+
+            layout = QVBoxLayout(dlg)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(12)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QVBoxLayout(hero)
+            hero_lay.setContentsMargins(16, 14, 16, 14)
+            hero_lay.setSpacing(6)
+            eyebrow = QLabel("STUDIO EDITION")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Cliente / Licencia")
+            title.setObjectName("StudioTitle")
+            subtitle = QLabel(
+                "Personaliza ADV ARCHON para que cada informe parezca preparado "
+                "para un despacho real: nombre, logo, municipios y estado de licencia."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            hero_lay.addWidget(eyebrow)
+            hero_lay.addWidget(title)
+            hero_lay.addWidget(subtitle)
+            layout.addWidget(hero)
+
+            form = QFrame()
+            form.setObjectName("Panel")
+            form_lay = QVBoxLayout(form)
+            form_lay.setContentsMargins(16, 14, 16, 14)
+            form_lay.setSpacing(10)
+
+            name_lbl = QLabel("Nombre del despacho")
+            name_lbl.setObjectName("Eyebrow")
+            name_input = QLineEdit(client_cfg.client_name)
+            form_lay.addWidget(name_lbl)
+            form_lay.addWidget(name_input)
+
+            logo_lbl = QLabel("Logo del despacho")
+            logo_lbl.setObjectName("Eyebrow")
+            logo_row = QHBoxLayout()
+            logo_input = QLineEdit(client_cfg.logo_path)
+            logo_btn = QPushButton("Elegir logo…")
+            logo_btn.setObjectName("Ghost")
+            logo_row.addWidget(logo_input, 1)
+            logo_row.addWidget(logo_btn)
+            logo_preview = QLabel("")
+            logo_preview.setObjectName("Sub")
+            logo_preview.setFixedHeight(42)
+            logo_preview.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            form_lay.addWidget(logo_lbl)
+            form_lay.addLayout(logo_row)
+            form_lay.addWidget(logo_preview)
+
+            municipalities_lbl = QLabel("Municipios incluidos")
+            municipalities_lbl.setObjectName("Eyebrow")
+            municipalities_input = QPlainTextEdit()
+            municipalities_input.setPlainText("\n".join(client_cfg.included_municipalities))
+            municipalities_input.setFixedHeight(86)
+            form_lay.addWidget(municipalities_lbl)
+            form_lay.addWidget(municipalities_input)
+
+            license_row = QHBoxLayout()
+            license_box = QVBoxLayout()
+            license_lbl = QLabel("Estado de licencia")
+            license_lbl.setObjectName("Eyebrow")
+            status_combo = QComboBox()
+            status_options = [
+                ("Beta privada", "beta_privada"),
+                ("Piloto de despacho", "piloto_despacho"),
+                ("Activa", "activa"),
+                ("Pendiente de activar", "pendiente_activar"),
+            ]
+            for label, value in status_options:
+                status_combo.addItem(label, value)
+            idx = status_combo.findData(client_cfg.license_status)
+            if idx >= 0:
+                status_combo.setCurrentIndex(idx)
+            license_box.addWidget(license_lbl)
+            license_box.addWidget(status_combo)
+
+            label_box = QVBoxLayout()
+            license_label_lbl = QLabel("Etiqueta visible")
+            license_label_lbl.setObjectName("Eyebrow")
+            license_label_input = QLineEdit(client_cfg.license_label)
+            label_box.addWidget(license_label_lbl)
+            label_box.addWidget(license_label_input)
+            license_row.addLayout(license_box, 1)
+            license_row.addLayout(label_box, 1)
+            form_lay.addLayout(license_row)
+
+            config_path_lbl = QLabel(
+                f"Archivo local: {studio_client_config_path(data_dir)}"
+            )
+            config_path_lbl.setObjectName("Faint")
+            config_path_lbl.setWordWrap(True)
+            form_lay.addWidget(config_path_lbl)
+            layout.addWidget(form, 1)
+
+            status_lbl = QLabel("")
+            status_lbl.setObjectName("Sub")
+            status_lbl.setWordWrap(True)
+            layout.addWidget(status_lbl)
+
+            buttons = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Save
+                | QDialogButtonBox.StandardButton.Cancel
+            )
+            buttons.button(QDialogButtonBox.StandardButton.Save).setText("Guardar")
+            buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Cerrar")
+            layout.addWidget(buttons)
+
+            def update_logo_preview() -> None:
+                path = Path(logo_input.text().strip()).expanduser()
+                if not path.exists() or not path.is_file():
+                    logo_preview.setPixmap(QPixmap())
+                    logo_preview.setText("Sin logo de cliente. El informe usará solo ADV ARCHON.")
+                    return
+                pixmap = QPixmap(str(path))
+                if pixmap.isNull():
+                    logo_preview.setPixmap(QPixmap())
+                    logo_preview.setText("No se pudo leer el logo seleccionado.")
+                    return
+                logo_preview.setText("")
+                logo_preview.setPixmap(
+                    pixmap.scaled(
+                        120,
+                        38,
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+
+            def choose_logo() -> None:
+                selected, _filter = QFileDialog.getOpenFileName(
+                    dlg,
+                    "Elegir logo del despacho",
+                    str(Path.home()),
+                    "Imágenes (*.png *.jpg *.jpeg *.webp)",
+                )
+                if selected:
+                    logo_input.setText(selected)
+                    update_logo_preview()
+
+            def municipalities() -> list[str]:
+                raw = municipalities_input.toPlainText().replace(",", "\n")
+                return [item.strip() for item in raw.splitlines() if item.strip()]
+
+            def save() -> None:
+                try:
+                    save_studio_client_config(
+                        client_name=name_input.text(),
+                        logo_path=logo_input.text(),
+                        included_municipalities=municipalities(),
+                        license_status=str(status_combo.currentData() or ""),
+                        license_label=license_label_input.text(),
+                        root=data_dir,
+                    )
+                except Exception as exc:
+                    status_lbl.setText(f"No se pudo guardar la configuración: {exc}")
+                    return
+                status_lbl.setText(
+                    "Configuración guardada. Los próximos informes PDF usarán estos datos."
+                )
+                self.statusBar().showMessage(
+                    "Cliente / Licencia actualizado para Studio Edition.", 5000
+                )
+
+            logo_btn.clicked.connect(choose_logo)
+            logo_input.textChanged.connect(lambda _text: update_logo_preview())
+            buttons.accepted.connect(save)
+            buttons.rejected.connect(dlg.close)
+            dlg.finished.connect(lambda _code: setattr(self, "_client_license_dialog", None))
+            self._client_license_dialog = dlg
+            update_logo_preview()
+            dlg.show()
+
+        def _open_studio_pack(self) -> None:
+            from PySide6.QtWidgets import QDialog
+
+            self._close_workspace_panels()
+            dlg = QDialog(self)
+            dlg.setWindowTitle("Pack Studio — ADV ARCHON")
+            dlg.setMinimumSize(860, 560)
+            dlg.setWindowModality(Qt.WindowModality.NonModal)
+
+            layout = QVBoxLayout(dlg)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(12)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QVBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(6)
+            eyebrow = QLabel("ADV ARCHON STUDIO")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Paquete profesional para despacho")
+            title.setObjectName("StudioTitle")
+            subtitle = QLabel(
+                "Una forma cerrada y demostrable de presentar ADV ARCHON como "
+                "infraestructura local de revisión urbanística preliminar."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            hero_lay.addWidget(eyebrow)
+            hero_lay.addWidget(title)
+            hero_lay.addWidget(subtitle)
+            layout.addWidget(hero)
+
+            cards = QHBoxLayout()
+            cards.setSpacing(12)
+            sections = [
+                (
+                    "Instalación local",
+                    "ADV ARCHON.app configurado en el equipo del despacho, con motor "
+                    "local, privacidad y flujo de expedientes preparado.",
+                ),
+                (
+                    "Municipios configurados",
+                    "Paquete inicial de municipios incluidos, con estado validado, "
+                    "preliminar o pendiente según la curación normativa disponible.",
+                ),
+                (
+                    "Expedientes demo",
+                    "Casos de prueba del propio despacho o ejemplos guiados para formar "
+                    "criterio interno antes de usar expedientes reales.",
+                ),
+            ]
+            for heading, copy in sections:
+                card = QFrame()
+                card.setObjectName("StudioCard")
+                card_lay = QVBoxLayout(card)
+                card_lay.setContentsMargins(14, 14, 14, 14)
+                card_lay.setSpacing(8)
+                h = QLabel(heading)
+                h.setObjectName("StudioCase")
+                body = QLabel(copy)
+                body.setObjectName("Sub")
+                body.setWordWrap(True)
+                card_lay.addWidget(h)
+                card_lay.addWidget(body)
+                card_lay.addStretch(1)
+                cards.addWidget(card)
+            layout.addLayout(cards, 1)
+
+            scope = QFrame()
+            scope.setObjectName("Panel")
+            scope_lay = QVBoxLayout(scope)
+            scope_lay.setContentsMargins(16, 14, 16, 14)
+            scope_lay.setSpacing(6)
+            scope_title = QLabel("Alcance del paquete")
+            scope_title.setObjectName("StudioCase")
+            scope_lay.addWidget(scope_title)
+            items = [
+                "Instalación local en el despacho.",
+                "Municipios incluidos y etiquetados por estado de validación.",
+                "Expedientes demo configurados para enseñar el flujo completo.",
+                "Plantilla PDF personalizada con nombre y logo del cliente.",
+                "Soporte beta privado durante la implantación inicial.",
+                "Actualizaciones de producto durante el periodo contratado.",
+            ]
+            for item in items:
+                lbl = QLabel(f"• {item}")
+                lbl.setObjectName("Sub")
+                lbl.setWordWrap(True)
+                scope_lay.addWidget(lbl)
+            layout.addWidget(scope)
+
+            close_btn = QPushButton("Cerrar")
+            close_btn.setObjectName("Primary")
+            close_btn.clicked.connect(dlg.close)
+            layout.addWidget(close_btn, alignment=Qt.AlignmentFlag.AlignRight)
+            dlg.finished.connect(lambda _code: setattr(self, "_studio_pack_dialog", None))
+            self._studio_pack_dialog = dlg
+            dlg.show()
 
         def _open_studio_demo(self) -> None:
             import os

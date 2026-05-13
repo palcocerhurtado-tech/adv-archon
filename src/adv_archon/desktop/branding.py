@@ -230,7 +230,7 @@ QLabel#RoleTagUser {{
 QLabel#Timestamp {{ color: {TEXT_FAINT}; font-size: 10px; }}
 
 /* ── Inputs (marble context) ─────────────────────────────── */
-QPlainTextEdit, QTextEdit {{
+QLineEdit, QPlainTextEdit, QTextEdit {{
     background: transparent;
     color: {TEXT_DARK};
     border: none;
@@ -247,6 +247,15 @@ QTextEdit[readOnly="true"] {{
 QPlainTextEdit {{
     color: {TEXT_SUB_DARK}; font-size: 12px;
 }}
+QLineEdit {{
+    background: {MARBLE_PANEL};
+    border: 1px solid {MARBLE_BORDER};
+    border-radius: 8px;
+    padding: 7px 10px;
+    min-height: 28px;
+}}
+QLineEdit:hover {{ border-color: {ACCENT}; }}
+QLineEdit:focus {{ border-color: {ACCENT}; background: {MARBLE_PANEL}; }}
 
 /* ── Buttons ─────────────────────────────────────────────── */
 QPushButton {{

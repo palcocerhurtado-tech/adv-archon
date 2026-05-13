@@ -12,6 +12,7 @@ from adv_archon.core.studio import (
     get_case_template,
     load_studio_client_config,
     save_default_studio_client_config,
+    save_studio_client_config,
     studio_client_config_path,
 )
 
@@ -112,3 +113,22 @@ def test_studio_client_config_defaults_and_preserves_existing_file(tmp_path: Pat
     assert cfg.client_name == "Estudio Norte"
     assert cfg.included_municipalities == ("Madrid",)
     assert cfg.license_label == "Studio Trial"
+
+
+def test_save_studio_client_config_normalizes_payload(tmp_path: Path) -> None:
+    path = save_studio_client_config(
+        client_name="  Estudio Claro  ",
+        logo_path="  /tmp/logo.png  ",
+        included_municipalities=[" Madrid ", "", "Zaragoza"],
+        license_status=" piloto_despacho ",
+        license_label="  Piloto Studio  ",
+        root=tmp_path,
+    )
+
+    assert path == studio_client_config_path(tmp_path)
+    cfg = load_studio_client_config(tmp_path)
+    assert cfg.client_name == "Estudio Claro"
+    assert cfg.logo_path == "/tmp/logo.png"
+    assert cfg.included_municipalities == ("Madrid", "Zaragoza")
+    assert cfg.license_status == "piloto_despacho"
+    assert cfg.license_label == "Piloto Studio"

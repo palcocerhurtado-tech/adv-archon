@@ -693,9 +693,19 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
 
     # ── Cover: expediente metadata ────────────────────────────────────────
     report_logo = _default_report_logo_path()
-    if report_logo is not None:
+    client_logo = _valid_logo_path(client_config.logo_path)
+    if report_logo is not None and client_logo is not None:
+        logo_w = 17
+        pdf.image(str(report_logo), x=82, y=20, w=logo_w)
+        pdf.image(str(client_logo), x=111, y=20, w=logo_w)
+        pdf.set_y(47)
+    elif report_logo is not None:
         logo_w = 18
         pdf.image(str(report_logo), x=(210 - logo_w) / 2, y=20, w=logo_w)
+        pdf.set_y(48)
+    elif client_logo is not None:
+        logo_w = 20
+        pdf.image(str(client_logo), x=(210 - logo_w) / 2, y=20, w=logo_w)
         pdf.set_y(48)
     else:
         pdf.set_y(24)
@@ -716,7 +726,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     pdf.multi_cell(
         0,
         10,
-        "INFORME DE CUMPLIMIENTO NORMATIVO",
+        "INFORME PRELIMINAR DE VIABILIDAD URBANÍSTICA",
         align="C",
         new_x=XPos.LMARGIN,
         new_y=YPos.NEXT,
@@ -741,11 +751,14 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
         fecha_exp = str(expediente.created_at or "")[:10]
 
     cover_rows = [
+        ("Preparado para", client_config.client_name),
         ("Dirección", expediente.address or "-"),
         ("Municipio", municipality),
         ("Provincia", expediente.province or "-"),
         ("Ref. catastral", expediente.cadastral_ref or "-"),
         ("Plano analizado", plan_name),
+        ("Municipios incluidos", ", ".join(client_config.included_municipalities)),
+        ("Licencia", f"{client_config.license_label} · {client_config.license_status}"),
         ("Fecha expediente", fecha_exp),
     ]
     if expediente.latitude and expediente.longitude:
@@ -874,6 +887,13 @@ def _default_report_logo_path() -> Path | None:
         return None
     path = report_logo_path()
     return path if path.exists() else None
+
+
+def _valid_logo_path(raw_path: str) -> Path | None:
+    if not raw_path.strip():
+        return None
+    path = Path(raw_path).expanduser()
+    return path if path.exists() and path.is_file() else None
 
 
 def _studio_value_panel(

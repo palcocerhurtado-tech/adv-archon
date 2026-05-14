@@ -188,6 +188,92 @@ if PYSIDE6_AVAILABLE:
             if self._runtime is not None:
                 self._runtime.agent.set_expediente(expediente)
 
+        def run_live_voice(self, max_turns: int) -> None:
+            runtime = self._runtime
+            if runtime is None or not self._backend_ready:
+                self.failed.emit("El backend desktop todavía no está listo.")
+                return
+            self._cancel_event.clear()
+            max_turns = max(1, min(20, int(max_turns)))
+            previous_mode = runtime.llm.mode
+            runtime.llm.set_mode("local")
+            self._mode = runtime.llm.mode
+            try:
+                from adv_archon.core.llm_types import LLMMessage
+
+                history: list[LLMMessage] = []
+                system_prompt = (
+                    "Eres ADV ARCHON en modo voz local dentro de la app de escritorio. "
+                    "Responde breve, claro y útil. Prioriza expedientes, arquitectura, "
+                    "PGOU, tareas y contexto local del usuario."
+                )
+                runtime.tts.enable()
+                self._emit_state(
+                    DesktopBusyState(
+                        backend_ready=True,
+                        busy=True,
+                        task="prompt",
+                        detail="Modo voz local activo. Escuchando por micrófono…",
+                        progress=25,
+                        cancellable=True,
+                    )
+                )
+                self.chunk.emit(
+                    "Modo voz local activo.\n"
+                    "Habla cuando macOS active el micrófono. Di 'salir' para terminar.\n\n"
+                )
+                for turn in range(max_turns):
+                    self._check_cancelled()
+                    self._emit_state(
+                        DesktopBusyState(
+                            backend_ready=True,
+                            busy=True,
+                            task="prompt",
+                            detail=f"Escuchando turno {turn + 1}/{max_turns}…",
+                            progress=35,
+                            cancellable=True,
+                        )
+                    )
+                    heard = runtime.stt.listen_once()
+                    text = heard.text.strip()
+                    if not text:
+                        self.chunk.emit("No he captado voz suficiente.\n\n")
+                        continue
+                    self.chunk.emit(f"Tú: {text}\n")
+                    if text.casefold() in {"salir", "adiós", "adios", "para", "cancelar"}:
+                        break
+                    history.append(LLMMessage(role="user", content=text))
+                    self._emit_state(
+                        DesktopBusyState(
+                            backend_ready=True,
+                            busy=True,
+                            task="prompt",
+                            detail="Pensando con Ollama local…",
+                            progress=75,
+                            cancellable=True,
+                        )
+                    )
+                    response = runtime.llm.complete(
+                        history[-8:],
+                        system_prompt=system_prompt,
+                        task="assistant",
+                        prefer_local=True,
+                    )
+                    answer = response.text.strip()
+                    history.append(LLMMessage(role="model", content=answer))
+                    self.chunk.emit(f"ARCHON: {answer}\n\n")
+                    runtime.tts.speak_async(answer)
+                self.chunk.emit("Modo voz local finalizado.")
+                self.prompt_finished.emit("Modo voz local finalizado.")
+            except DesktopOperationCancelled:
+                self.cancelled.emit("Modo voz cancelado por el usuario.")
+            except Exception as exc:
+                self.failed.emit(f"No se pudo iniciar el modo voz local: {exc}")
+            finally:
+                runtime.llm.set_mode(previous_mode)
+                self._mode = runtime.llm.mode
+                self._emit_state(DesktopBusyState(backend_ready=True))
+
         def run_prompt(self, prompt: str, attachments: list[str]) -> None:
             runtime = self._runtime
             if runtime is None or not self._backend_ready:

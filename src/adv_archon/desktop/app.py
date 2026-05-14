@@ -178,6 +178,7 @@ def launch_desktop_app(
     class DesktopWindow(QMainWindow):
         prompt_requested = Signal(str, object)
         import_requested = Signal(object)
+        live_requested = Signal(int)
         mode_requested   = Signal(str)
         profile_requested = Signal(str)
         ollama_model_requested = Signal(str)
@@ -267,6 +268,7 @@ def launch_desktop_app(
             self._backend_worker.moveToThread(self._backend_thread)
             self.prompt_requested.connect(self._backend_worker.run_prompt)
             self.import_requested.connect(self._backend_worker.import_paths)
+            self.live_requested.connect(self._backend_worker.run_live_voice)
             self.mode_requested.connect(self._backend_worker.set_mode)
             self.profile_requested.connect(self._backend_worker.set_profile)
             self.ollama_model_requested.connect(self._backend_worker.set_ollama_model)
@@ -1078,6 +1080,9 @@ def launch_desktop_app(
             prompt = self._input.toPlainText().strip()
             if not prompt:
                 return
+            if prompt.casefold().startswith("/live"):
+                self._submit_live_prompt(prompt)
+                return
             attachments = list(self._attachments)
             if self._home_visible:
                 self._clear_message_area()
@@ -1105,6 +1110,35 @@ def launch_desktop_app(
             else:
                 full_prompt = prompt
             self.prompt_requested.emit(full_prompt, [str(p) for p in attachments])
+
+        def _submit_live_prompt(self, prompt: str) -> None:
+            from adv_archon.desktop.voice_commands import parse_live_turns
+
+            try:
+                max_turns = parse_live_turns(prompt)
+            except ValueError as exc:
+                self._append_system(str(exc))
+                self._input.clear()
+                return
+            if max_turns is None:
+                return
+            if self._home_visible:
+                self._clear_message_area()
+                self._home_visible = False
+                self._set_nav_context("chat")
+            self._input.clear()
+            self._pending_prompt = prompt
+            self._pending_attachments = []
+            self._active_tool_names = []
+            self._last_snapshot = None
+            self._refresh_sources_view()
+            self._refresh_tool_badges()
+            self._append_user(prompt, [])
+            self._append_assistant_prefix()
+            self._current_stream_text = ""
+            self._stream_buffer = ""
+            self._set_busy(True, task="prompt")
+            self.live_requested.emit(max_turns)
 
         def _send_nav_prompt(self, prompt: str) -> None:
             self._input.setPlainText(prompt)

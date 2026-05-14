@@ -140,6 +140,12 @@ def create_macos_app_bundle(
         "NSDocumentsFolderUsageDescription": (
             "ADV ARCHON accede a tus documentos para analizar planos."
         ),
+        "NSMicrophoneUsageDescription": (
+            "ADV ARCHON usa el micrófono para el modo voz local con Whisper."
+        ),
+        "NSCameraUsageDescription": (
+            "ADV ARCHON puede usar la cámara para análisis visual local cuando lo solicites."
+        ),
         # Ensure PATH includes common uv/homebrew locations when launched from Finder
         "LSEnvironment": {
             "PATH": (

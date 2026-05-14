@@ -34,9 +34,21 @@ class FakeLogger:
 class FakeLLM:
     def __init__(self) -> None:
         self.mode = "local"
+        self.requests: list[dict[str, object]] = []
 
     def set_mode(self, mode: str) -> None:
         self.mode = mode
+
+    def complete(self, messages, *, system_prompt: str, task=None, prefer_local=None, **_kwargs):
+        self.requests.append(
+            {
+                "messages": list(messages),
+                "system_prompt": system_prompt,
+                "task": task,
+                "prefer_local": prefer_local,
+            }
+        )
+        return SimpleNamespace(text="Respuesta local")
 
 
 class FakeUsageLedger:
@@ -227,6 +239,7 @@ class FakePythonTool:
 class FakeTTS:
     def __init__(self) -> None:
         self.enabled = False
+        self.spoken: list[str] = []
 
     def enable(self) -> None:
         self.enabled = True
@@ -236,6 +249,13 @@ class FakeTTS:
 
     def describe(self) -> str:
         return "on" if self.enabled else "off"
+
+    def is_enabled(self) -> bool:
+        return self.enabled
+
+    def speak_async(self, text: str):
+        self.spoken.append(text)
+        return SimpleNamespace(started=True)
 
 
 class FakeSTT:
@@ -332,6 +352,19 @@ def test_listen_command_injects_transcribed_prompt() -> None:
 
     assert result.handled is True
     assert result.injected_prompt == "abre el README"
+
+
+def test_live_command_uses_local_llm_turns() -> None:
+    services = build_services()
+    services.tts.enable()
+
+    result = handle_command("/live 1", services=services)
+
+    assert result.handled is True
+    assert services.llm.requests[-1]["prefer_local"] is True
+    assert services.llm.mode == "local"
+    assert services.tts.spoken == ["Respuesta local"]
+    assert "Modo voz local finalizado." in services.renderer.infos[-1]
 
 
 def test_memory_command_lists_overview() -> None:

@@ -30,9 +30,9 @@ rtk uv run mypy src/adv_archon
 
 echo
 echo "== CLI smoke tests =="
-rtk uv run adv-archon --help >/dev/null
-rtk uv run adv --help >/dev/null
-rtk uv run adv-archon-api --help >/dev/null
+PYTHONPATH=src rtk uv run adv-archon --help >/dev/null
+PYTHONPATH=src rtk uv run adv --help >/dev/null
+PYTHONPATH=src rtk uv run adv-archon-api --help >/dev/null
 
 echo
 echo "== API smoke test =="
@@ -86,7 +86,7 @@ echo
 echo "== Desktop bundle smoke =="
 bundle_dir="/private/tmp/adv-archon-qa-bundle"
 rm -rf "${bundle_dir}"
-rtk uv run adv-archon desktop-bundle "${bundle_dir}" >/dev/null
+PYTHONPATH=src rtk uv run adv-archon desktop-bundle "${bundle_dir}" >/dev/null
 test -x "${bundle_dir}/ADV ARCHON.app/Contents/Resources/launch-adv-archon.sh"
 
 echo

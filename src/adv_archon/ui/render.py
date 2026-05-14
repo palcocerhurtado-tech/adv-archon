@@ -93,5 +93,6 @@ class Renderer:
         text.append("/log [n]\n")
         text.append("/plan <objetivo>\n")
         text.append("/skills\n")
+        text.append("/live [turnos]  — voz local por turnos con Whisper + Ollama\n")
         text.append("/kb [status|index <ruta|url|texto>|ask <consulta>|list [n]|clear]\n")
         self.console.print(Panel.fit(text, border_style="green"))

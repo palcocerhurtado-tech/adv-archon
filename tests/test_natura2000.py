@@ -3,7 +3,14 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-from adv_archon.integrations.natura2000 import query_protected_area
+import pytest
+
+from adv_archon.integrations.natura2000 import clear_cache, query_protected_area
+
+
+@pytest.fixture(autouse=True)
+def _clear_natura_cache() -> None:
+    clear_cache()
 
 
 def _resp(features: list) -> MagicMock:

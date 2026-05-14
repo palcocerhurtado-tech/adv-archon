@@ -107,6 +107,7 @@ class LLMConfig:
     mode: str = "cloud"
     gemini_model: str = "gemini-2.5-flash"
     ollama_model: str = "qwen2.5:7b"
+    vision_local_model: str = "llava:latest"
     fast_local_model: str | None = None
     planner_local_model: str | None = None
     document_local_model: str | None = None
@@ -373,6 +374,8 @@ def load_app_config(
         or _lookup(data, "llm", "gemini_model", default="gemini-2.5-flash"),
         ollama_model=os.getenv("ADV_ARCHON_DEFAULT_OLLAMA_MODEL")
         or _lookup(data, "llm", "ollama_model", default="qwen2.5:7b"),
+        vision_local_model=os.getenv("ADV_ARCHON_VISION_MODEL")
+        or _lookup(data, "llm", "vision_local_model", default="llava:latest"),
         fast_local_model=str(_lookup(data, "llm", "fast_local_model", default="")).strip()
         or None,
         planner_local_model=str(

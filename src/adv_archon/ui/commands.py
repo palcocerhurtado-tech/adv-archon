@@ -358,6 +358,9 @@ def handle_command(raw: str, *, services: CommandServices) -> CommandResult:
         services.renderer.show_info(_format_log_entries(entries))
         return CommandResult(handled=True)
 
+    if command == "/live":
+        return _handle_live_command(argument, services=services)
+
     if command == "/plan":
         if not argument:
             services.renderer.show_error("Uso: /plan <objetivo>")
@@ -395,6 +398,64 @@ def _format_memory_records(records: list[MemoryRecord]) -> str:
         )
         lines.append(f"- [#{record.id}] ({descriptor}) {record.content}{tags}{score}")
     return "\n".join(lines)
+
+
+def _handle_live_command(argument: str, *, services: CommandServices) -> CommandResult:
+    """Run a local voice loop using Whisper STT, Ollama and local TTS."""
+    from adv_archon.core.llm_types import LLMMessage
+
+    max_turns = 5
+    if argument.strip():
+        try:
+            max_turns = max(1, min(20, int(argument.strip())))
+        except ValueError:
+            services.renderer.show_error("Uso: /live [número_de_turnos]")
+            return CommandResult(handled=True)
+
+    services.renderer.show_info(
+        "Modo voz local iniciado. Usa Whisper local para escuchar, Ollama para "
+        "responder y la voz del sistema si /voice está activo. Di 'salir' para terminar."
+    )
+    previous_mode = services.llm.mode
+    services.llm.set_mode("local")
+    history: list[LLMMessage] = []
+    system_prompt = (
+        "Eres ADV ARCHON en modo voz local. Responde breve, claro y útil. "
+        "Prioriza arquitectura, expedientes, tareas y contexto local del usuario."
+    )
+    try:
+        for _turn in range(max_turns):
+            services.renderer.show_info(f"Escuchando... {services.stt.describe()}")
+            heard = services.stt.listen_once()
+            text = heard.text.strip()
+            if not text:
+                services.renderer.show_info("No he captado voz suficiente.")
+                continue
+            services.renderer.show_info(f"[Tú] {text}")
+            if text.casefold() in {"salir", "adiós", "adios", "para", "cancelar"}:
+                break
+            history.append(LLMMessage(role="user", content=text))
+            try:
+                response = services.llm.complete(
+                    history[-8:],
+                    system_prompt=system_prompt,
+                    task="assistant",
+                    prefer_local=True,
+                )
+            except Exception as exc:
+                services.renderer.show_error(f"No se pudo responder en modo local: {exc}")
+                break
+            answer = response.text.strip()
+            history.append(LLMMessage(role="model", content=answer))
+            services.renderer.show_info(f"[ARCHON] {answer}")
+            if services.tts.is_enabled():
+                services.tts.speak_async(answer)
+    except KeyboardInterrupt:
+        services.renderer.show_info("\nModo voz local interrumpido.")
+    finally:
+        services.llm.set_mode(previous_mode)
+    services.renderer.show_info("Modo voz local finalizado.")
+    return CommandResult(handled=True)
 
 
 def _handle_plan_command(objective: str, *, services: CommandServices) -> CommandResult:

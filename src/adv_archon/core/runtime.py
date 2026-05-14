@@ -47,6 +47,7 @@ from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
+from adv_archon.tools.vision import VisionTools, build_vision_tool_specs
 from adv_archon.tools.web import WebTools
 from adv_archon.tools.web_library_tools import (
     WebLibraryTools,
@@ -268,6 +269,7 @@ class ArchonRuntime:
         self.informe_tools = InformeProyectoTools(llm, knowledge_store=self.knowledge_store)
         self.pem_pdf_tools = PEMPDFTools()
         self.team_tools = TeamTools(config)
+        self.vision_tools = VisionTools(llm=llm)
         # ExpedienteStore se inyecta externamente (opcional — desktop lo hace)
 
         _progress(88, "Creando agente de IA…")
@@ -609,6 +611,8 @@ class ArchonRuntime:
         for definition in _build_informe_tool_specs(self.informe_tools):
             specs.append(ToolSpec(**definition))
         for definition in _build_team_tool_specs(self.team_tools):
+            specs.append(ToolSpec(**definition))
+        for definition in build_vision_tool_specs(self.vision_tools):
             specs.append(ToolSpec(**definition))
         # Skills (Fase 2)
         import adv_archon.skills.code_patcher  # noqa: F401

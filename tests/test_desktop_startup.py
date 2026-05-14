@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -23,9 +24,13 @@ blocked = [
 ]
 print(json.dumps({name: name in sys.modules for name in blocked}))
 """
+    project_src = Path(__file__).resolve().parents[1] / "src"
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(project_src)
     completed = subprocess.run(
         [sys.executable, "-c", script],
         capture_output=True,
+        env=env,
         text=True,
         check=True,
     )

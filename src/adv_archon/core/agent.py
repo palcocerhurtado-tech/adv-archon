@@ -346,6 +346,13 @@ PGOU_SEARCH_KEYWORDS = {
     "regulacion de", "regulación de", "altura maxima", "altura máxima",
     "retranqueo", "ocupacion", "ocupación", "edificabilidad", "uso permitido",
 }
+VISION_KEYWORDS = {
+    "pantalla", "screen", "captura", "screenshot", "mira mi pantalla",
+    "qué ves", "que ves", "qué hay en pantalla", "que hay en pantalla",
+    "camara", "cámara", "webcam", "imagen", "foto", "render",
+    "describe lo que", "que hay en", "qué hay en", "analiza la imagen",
+    "analiza esta imagen",
+}
 GEO_CONTEXT_KEYWORDS = {
     "catastro",
     "coordenadas",
@@ -952,6 +959,17 @@ class Agent:
     ) -> dict[str, Any] | None:
         normalized = _normalize_text(user_input)
         executed = set(executed_tools)
+
+        # ── Vision rules (screen/webcam/image — fires before PGOU to avoid false match) ──
+        wants_vision = _contains_any(normalized, VISION_KEYWORDS)
+        if wants_vision and "screen_describe" in self._tools and "screen_describe" not in executed:
+            question = user_input if len(user_input) < 200 else "¿Qué ves en la pantalla?"
+            return {
+                "kind": "tool",
+                "tool_name": "screen_describe",
+                "arguments": {"question": question},
+                "step_summary": "capturar y analizar pantalla con visión",
+            }
 
         # ── PGOU / urban compliance rules (resolved locally, no LLM planning needed) ──
         wants_geo_compliance = _looks_like_geo_compliance_request(normalized, user_input)

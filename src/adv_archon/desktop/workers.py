@@ -220,7 +220,9 @@ if PYSIDE6_AVAILABLE:
                 )
                 self.chunk.emit(
                     "Modo voz local activo.\n"
-                    "Habla cuando macOS active el micrófono. Di 'salir' para terminar.\n\n"
+                    "Habla cuando macOS active el micrófono. Si es la primera vez, "
+                    "revisa el permiso de micrófono de ADV ARCHON en macOS. "
+                    "Di 'salir' para terminar.\n\n"
                 )
                 for turn in range(max_turns):
                     self._check_cancelled()
@@ -234,7 +236,19 @@ if PYSIDE6_AVAILABLE:
                             cancellable=True,
                         )
                     )
-                    heard = runtime.stt.listen_once()
+                    try:
+                        heard = runtime.stt.listen_once()
+                    except RuntimeError as exc:
+                        message = str(exc)
+                        if "No he detectado voz" in message:
+                            self.chunk.emit(
+                                "No he detectado voz. Habla más cerca del micrófono "
+                                "cuando veas 'Escuchando…'. Si macOS no ha pedido permiso, "
+                                "actívalo en Ajustes del Sistema > Privacidad y seguridad "
+                                "> Micrófono > ADV ARCHON.\n\n"
+                            )
+                            continue
+                        raise
                     text = heard.text.strip()
                     if not text:
                         self.chunk.emit("No he captado voz suficiente.\n\n")

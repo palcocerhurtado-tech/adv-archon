@@ -144,6 +144,8 @@ app = BUNDLE(
         "NSHumanReadableCopyright": "© 2025 Pablo Alcocer",
         # Privacy strings — macOS requires these for any app using them
         "NSMicrophoneUsageDescription": "ADV ARCHON usa el micrófono para dictado por voz.",
+        "NSCameraUsageDescription":
+            "ADV ARCHON puede usar la cámara para análisis visual local cuando lo solicites.",
         "NSDocumentsFolderUsageDescription":
             "ADV ARCHON accede a documentos locales para analizarlos.",
     },

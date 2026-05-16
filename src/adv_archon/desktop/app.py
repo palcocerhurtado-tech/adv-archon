@@ -178,7 +178,7 @@ def launch_desktop_app(
     class DesktopWindow(QMainWindow):
         prompt_requested = Signal(str, object)
         import_requested = Signal(object)
-        live_requested = Signal(int)
+        live_requested = Signal(int, str)
         mode_requested   = Signal(str)
         profile_requested = Signal(str)
         ollama_model_requested = Signal(str)
@@ -217,6 +217,8 @@ def launch_desktop_app(
             self._studio_demo_dialog: Any = None
             self._client_license_dialog: Any = None
             self._studio_pack_dialog: Any = None
+            self._qa_dialog: Any = None
+            self._qa_runner_ref: tuple[Any, Any] | None = None
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
             self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
@@ -288,6 +290,7 @@ def launch_desktop_app(
             self._backend_worker.import_finished.connect(self._handle_import_finished)
             self._backend_worker.failed.connect(self._handle_worker_error)
             self._backend_worker.cancelled.connect(self._handle_worker_cancelled)
+            self._backend_worker.voice_intent.connect(self._handle_voice_intent)
             self._backend_worker.shutdown_finished.connect(self._handle_shutdown_finished)
             self._backend_thread.finished.connect(self._handle_backend_thread_finished)
             self._backend_thread.finished.connect(self._backend_worker.deleteLater)
@@ -444,6 +447,10 @@ def launch_desktop_app(
             self._settings_button = self._make_nav_btn("  Ajustes")
             self._settings_button.clicked.connect(self._open_settings)
             sl.addWidget(self._settings_button)
+
+            self._qa_button = self._make_nav_btn("  QA permisos")
+            self._qa_button.clicked.connect(self._open_qa_panel)
+            sl.addWidget(self._qa_button)
 
             sl.addSpacing(6)
             self._mode_status_lbl = QLabel("")
@@ -610,6 +617,12 @@ def launch_desktop_app(
             self._send_button.clicked.connect(self._submit_prompt)
             btn_col.addWidget(self._send_button)
 
+            self._voice_button = QPushButton("Hablar con ARCHON")
+            self._voice_button.setObjectName("Primary")
+            self._voice_button.setToolTip("Escuchar por micrófono y responder con voz local")
+            self._voice_button.clicked.connect(lambda _=False: self._submit_live_prompt("/live"))
+            btn_col.addWidget(self._voice_button)
+
             self._add_button = QPushButton("Adjuntar")
             self._add_button.setObjectName("Ghost")
             self._add_button.clicked.connect(self._pick_attachments)
@@ -644,18 +657,51 @@ def launch_desktop_app(
 
         # ── Expediente context bar ────────────────────────────────────────────
         def _set_active_expediente(self, exp: Any) -> None:
-            self._active_exp_context = (
-                f"[Contexto del expediente activo — incluir en tu respuesta si es relevante]\n"
-                f"Expediente: {exp.title}\n"
-                f"Dirección: {exp.address or 'No indicada'}\n"
-                f"Municipio: {exp.municipality or 'No indicado'} / {exp.province or ''}\n"
-                f"Ref. catastral: {exp.cadastral_ref or 'No disponible'}\n"
-                f"Estado: {exp.status or 'borrador'}\n"
-                f"[Fin contexto expediente]\n\n"
-            )
+            self._active_exp_context = self._build_expediente_voice_context(exp)
             label = f"  \U0001f4c1 {exp.title[:45]}  ·  {exp.municipality or ''}"
             self._exp_context_label.setText(label)
             self._exp_context_bar.setVisible(True)
+
+        def _build_expediente_voice_context(self, exp: Any) -> str:
+            lines = [
+                "[Contexto del expediente activo — incluir en la respuesta si es relevante]",
+                f"Expediente: {exp.title}",
+                f"Tipo de actuación: {getattr(exp, 'case_type', '') or 'No indicado'}",
+                f"Dirección: {exp.address or 'No indicada'}",
+                f"Municipio: {exp.municipality or 'No indicado'} / {exp.province or ''}",
+                f"Ref. catastral: {exp.cadastral_ref or 'No disponible'}",
+                f"Estado: {exp.status or 'borrador'}",
+                f"Plano: {getattr(exp, 'plan_path', '') or 'Sin plano adjunto'}",
+                f"Informe: {getattr(exp, 'report_path', '') or 'Sin informe generado'}",
+            ]
+            try:
+                import json as _json
+
+                if exp.analysis_result:
+                    analysis = _json.loads(exp.analysis_result)
+                    if isinstance(analysis, dict):
+                        if analysis.get("verdict_label"):
+                            lines.append(f"Veredicto: {analysis['verdict_label']}")
+                        if analysis.get("summary"):
+                            lines.append(f"Resumen: {str(analysis['summary'])[:500]}")
+                if exp.site_context:
+                    ctx = _json.loads(exp.site_context)
+                    checks = ctx.get("legal_checks") if isinstance(ctx, dict) else None
+                    if isinstance(checks, list):
+                        risk_lines = []
+                        for check in checks[:8]:
+                            if not isinstance(check, dict):
+                                continue
+                            name = check.get("name") or check.get("title") or check.get("id")
+                            status = check.get("status")
+                            detail = check.get("detail") or check.get("recommendation") or ""
+                            risk_lines.append(f"{name}: {status} — {str(detail)[:120]}")
+                        if risk_lines:
+                            lines.append("Checks/riesgos: " + " | ".join(risk_lines))
+            except Exception:
+                pass
+            lines.append("[Fin contexto expediente]\n")
+            return "\n".join(lines) + "\n"
 
         def _dismiss_exp_context(self) -> None:
             self._active_exp_context = ""
@@ -944,6 +990,38 @@ def launch_desktop_app(
             self._append_system(message)
             self._set_busy(False)
 
+        def _handle_voice_intent(self, action: str, detail_prompt: str) -> None:
+            if action == "new_expediente":
+                self._append_system("Abriendo el flujo de expedientes para crear uno nuevo.")
+                QTimer.singleShot(50, self._show_expedientes_dialog)
+                return
+            if action == "export_report":
+                if self._active_exp_store and self._active_exp_id:
+                    exp = self._active_exp_store.get(self._active_exp_id)
+                    raw_report = getattr(exp, "report_path", "") if exp else ""
+                    report_path = Path(raw_report) if raw_report else None
+                    if report_path is not None and report_path.exists():
+                        QDesktopServices.openUrl(QUrl.fromLocalFile(str(report_path)))
+                        self._append_system("Informe del expediente activo abierto.")
+                        return
+                self._append_system(
+                    "No encuentro un informe generado en el expediente activo. "
+                    "Abre Expedientes y pulsa Exportar informe PDF."
+                )
+                return
+            if detail_prompt:
+                if self._active_exp_context:
+                    self._input.setPlainText(detail_prompt)
+                    self._append_system(
+                        "He preparado la consulta contextual en el cuadro de texto. "
+                        "Pulsa Enviar cuando termine el modo voz."
+                    )
+                else:
+                    self._append_system(
+                        "Para responder con precisión necesito un expediente activo. "
+                        "Abre Expedientes y selecciona uno."
+                    )
+
         def _handle_backend_ready(self, greeting: str) -> None:
             if self._home_visible:
                 self.statusBar().showMessage(greeting, 5000)
@@ -1138,7 +1216,7 @@ def launch_desktop_app(
             self._current_stream_text = ""
             self._stream_buffer = ""
             self._set_busy(True, task="prompt")
-            self.live_requested.emit(max_turns)
+            self.live_requested.emit(max_turns, self._active_exp_context)
 
         def _send_nav_prompt(self, prompt: str) -> None:
             self._input.setPlainText(prompt)
@@ -1517,6 +1595,7 @@ def launch_desktop_app(
 
             self._input.setEnabled(accepts)
             self._send_button.setEnabled(can_send)
+            self._voice_button.setEnabled(can_send)
             self._add_button.setEnabled(accepts)
             self._import_button.setEnabled(can_send and has_attach)
             self._analyze_button.setEnabled(can_send and self._compliance.can_run)
@@ -1757,6 +1836,107 @@ def launch_desktop_app(
             buttons.accepted.connect(save)
             buttons.rejected.connect(dlg.reject)
             load_models()
+            dlg.open()
+
+        def _open_qa_panel(self) -> None:
+            from PySide6.QtCore import QObject as _QObject
+            from PySide6.QtCore import Signal as _Signal
+            from PySide6.QtWidgets import QDialog, QDialogButtonBox
+
+            class _QAWorker(_QObject):
+                loaded = _Signal(object)
+
+                def run(self) -> None:
+                    from adv_archon.desktop.qa import run_qa_checks
+
+                    self.loaded.emit(run_qa_checks(config))
+
+            dlg = QDialog(self)
+            self._qa_dialog = dlg
+            dlg.setWindowTitle("QA de permisos — ADV ARCHON")
+            dlg.setMinimumWidth(560)
+            layout = QVBoxLayout(dlg)
+            layout.setContentsMargins(18, 16, 18, 16)
+            layout.setSpacing(10)
+
+            title = QLabel("QA de voz, Ollama y visión")
+            title.setObjectName("AppName")
+            layout.addWidget(title)
+            intro = QLabel(
+                "Comprueba micrófono, Ollama, modelo local, visión local y pantalla."
+            )
+            intro.setObjectName("Sub")
+            intro.setWordWrap(True)
+            layout.addWidget(intro)
+
+            results = QVBoxLayout()
+            results.setSpacing(6)
+            layout.addLayout(results)
+
+            status = QLabel("Ejecutando comprobaciones…")
+            status.setObjectName("Faint")
+            layout.addWidget(status)
+
+            buttons = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            retry_btn = QPushButton("Volver a comprobar")
+            retry_btn.setObjectName("Primary")
+            buttons.addButton(retry_btn, QDialogButtonBox.ButtonRole.ActionRole)
+            buttons.button(QDialogButtonBox.StandardButton.Close).setText("Cerrar")
+            buttons.rejected.connect(dlg.reject)
+            layout.addWidget(buttons)
+
+            def clear_rows() -> None:
+                while results.count():
+                    item = results.takeAt(0)
+                    if item and item.widget():
+                        item.widget().deleteLater()
+
+            def add_row(item: object) -> None:
+                row = QFrame()
+                row.setObjectName("Card")
+                rl = QVBoxLayout(row)
+                rl.setContentsMargins(10, 8, 10, 8)
+                name = getattr(item, "nombre", "Check")
+                ok = bool(getattr(item, "ok", False))
+                detail = str(getattr(item, "detalle", ""))
+                action = str(getattr(item, "accion", ""))
+                head = QLabel(f"● {name}")
+                head.setStyleSheet(f"color:{OK if ok else WARN};font-weight:700;")
+                rl.addWidget(head)
+                body = QLabel(detail + (f"\n{action}" if action and not ok else ""))
+                body.setObjectName("Sub")
+                body.setWordWrap(True)
+                rl.addWidget(body)
+                results.addWidget(row)
+
+            def on_loaded(items: object) -> None:
+                clear_rows()
+                qa_items = items if isinstance(items, list) else []
+                for item in qa_items:
+                    add_row(item)
+                failed = sum(1 for item in qa_items if not bool(getattr(item, "ok", False)))
+                status.setText(
+                    "Todo listo para voz local." if failed == 0
+                    else f"{failed} punto(s) requieren atención."
+                )
+                self._qa_runner_ref = None
+
+            def run() -> None:
+                clear_rows()
+                status.setText("Ejecutando comprobaciones…")
+                thread = QThread(dlg)
+                worker = _QAWorker()
+                worker.moveToThread(thread)
+                thread.started.connect(worker.run)
+                worker.loaded.connect(on_loaded)
+                worker.loaded.connect(worker.deleteLater)
+                worker.loaded.connect(thread.quit)
+                thread.finished.connect(thread.deleteLater)
+                self._qa_runner_ref = (thread, worker)
+                thread.start()
+
+            retry_btn.clicked.connect(run)
+            run()
             dlg.open()
 
         # ── Warmup agent (Phase 7B) ───────────────────────────────────────────
@@ -3132,10 +3312,21 @@ def launch_desktop_app(
                 _active_export_threads.append((t, w, bridge))
                 t.start()
 
+            def _on_talk(eid: str) -> None:
+                exp = store.get(eid)
+                if not exp:
+                    return
+                detail_panel.load_expediente(exp)
+                self._set_active_expediente(exp)
+                self.expediente_selected.emit(exp)
+                dlg.accept()
+                QTimer.singleShot(80, lambda: self._submit_live_prompt("/live"))
+
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),
                 on_analyze=_on_analyze,
                 on_export=_on_export,
+                on_talk=_on_talk,
             )
 
             def _attach_plan(eid: str) -> None:

@@ -328,11 +328,13 @@ if PYSIDE6_AVAILABLE:
             on_attach_plan: Any = None,
             on_analyze: Any = None,
             on_export: Any = None,
+            on_talk: Any = None,
         ) -> None:
             super().__init__()
             self._on_attach_plan = on_attach_plan
             self._on_analyze = on_analyze
             self._on_export = on_export
+            self._on_talk = on_talk
             self._expediente_id: str | None = None
             self._expediente: Any = None
             self._operation_busy = False
@@ -422,6 +424,15 @@ if PYSIDE6_AVAILABLE:
             )
             self._open_report_btn.clicked.connect(self._on_open_report_clicked)
             btn_row.addWidget(self._open_report_btn)
+
+            self._talk_btn = QPushButton("Hablar con ARCHON")
+            self._set_brand_icon(self._talk_btn)
+            self._talk_btn.setEnabled(False)
+            self._talk_btn.setToolTip(
+                "Hablar con ARCHON usando este expediente como contexto"
+            )
+            self._talk_btn.clicked.connect(self._on_talk_clicked)
+            btn_row.addWidget(self._talk_btn)
             btn_row.addStretch()
             layout.addLayout(btn_row)
 
@@ -465,6 +476,7 @@ if PYSIDE6_AVAILABLE:
             has_report = bool(exp.report_path) and Path(exp.report_path).exists()
             self._open_report_btn.setEnabled(has_report and not self._operation_busy)
             self._open_report_btn.setVisible(has_report)
+            self._talk_btn.setEnabled(not self._operation_busy)
 
         def set_operation_busy(self, busy: bool, label: str = "") -> None:
             self._operation_busy = busy
@@ -474,6 +486,7 @@ if PYSIDE6_AVAILABLE:
             self._analyze_btn.setEnabled(False)
             self._export_btn.setEnabled(False)
             self._open_report_btn.setEnabled(False)
+            self._talk_btn.setEnabled(False)
             if not busy and self._expediente is not None:
                 self.load_expediente(self._expediente)
 
@@ -662,6 +675,7 @@ if PYSIDE6_AVAILABLE:
             self._export_btn.setEnabled(False)
             self._open_report_btn.setEnabled(False)
             self._open_report_btn.setVisible(False)
+            self._talk_btn.setEnabled(False)
 
         def _on_attach_clicked(self) -> None:
             if not self._expediente_id:
@@ -680,6 +694,10 @@ if PYSIDE6_AVAILABLE:
         def _on_export_clicked(self) -> None:
             if self._on_export and self._expediente_id:
                 self._on_export(self._expediente_id)
+
+        def _on_talk_clicked(self) -> None:
+            if self._on_talk and self._expediente_id:
+                self._on_talk(self._expediente_id)
 
         def _on_open_report_clicked(self) -> None:
             if self._expediente and self._expediente.report_path:

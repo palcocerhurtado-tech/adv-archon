@@ -65,6 +65,8 @@ def test_create_macos_app_bundle_writes_plist_and_launcher(tmp_path: Path, monke
     assert "Beta" in plist["CFBundleShortVersionString"]
     assert plist["CFBundleExecutable"] == "adv-archon-desktop"
     assert plist["CFBundleIconFile"] == result.icon_path.name
+    assert "micrófono" in plist["NSMicrophoneUsageDescription"]
+    assert "cámara" in plist["NSCameraUsageDescription"]
 
 
 def test_create_macos_app_bundle_can_embed_project_source(

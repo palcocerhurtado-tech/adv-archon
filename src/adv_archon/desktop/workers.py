@@ -77,6 +77,7 @@ if PYSIDE6_AVAILABLE:
         cancelled = Signal(str)
         shutdown_finished = Signal()
         expediente_selected = Signal(object)
+        voice_intent = Signal(str, str)
 
         def __init__(
             self,
@@ -188,7 +189,7 @@ if PYSIDE6_AVAILABLE:
             if self._runtime is not None:
                 self._runtime.agent.set_expediente(expediente)
 
-        def run_live_voice(self, max_turns: int) -> None:
+        def run_live_voice(self, max_turns: int, expediente_context: str = "") -> None:
             runtime = self._runtime
             if runtime is None or not self._backend_ready:
                 self.failed.emit("El backend desktop todavía no está listo.")
@@ -200,13 +201,14 @@ if PYSIDE6_AVAILABLE:
             self._mode = runtime.llm.mode
             try:
                 from adv_archon.core.llm_types import LLMMessage
+                from adv_archon.desktop.voice_commands import (
+                    build_voice_system_prompt,
+                    classify_voice_intent,
+                    split_voice_response,
+                )
 
                 history: list[LLMMessage] = []
-                system_prompt = (
-                    "Eres ADV ARCHON en modo voz local dentro de la app de escritorio. "
-                    "Responde breve, claro y útil. Prioriza expedientes, arquitectura, "
-                    "PGOU, tareas y contexto local del usuario."
-                )
+                system_prompt = build_voice_system_prompt(expediente_context)
                 runtime.tts.enable()
                 self._emit_state(
                     DesktopBusyState(
@@ -256,6 +258,13 @@ if PYSIDE6_AVAILABLE:
                     self.chunk.emit(f"Tú: {text}\n")
                     if text.casefold() in {"salir", "adiós", "adios", "para", "cancelar"}:
                         break
+                    intent = classify_voice_intent(text)
+                    if intent is not None:
+                        self.chunk.emit(f"ARCHON: {intent.spoken_summary}\n\n")
+                        runtime.tts.speak_async(intent.spoken_summary)
+                        self.voice_intent.emit(intent.action, intent.detail_prompt)
+                        if not intent.detail_prompt:
+                            continue
                     history.append(LLMMessage(role="user", content=text))
                     self._emit_state(
                         DesktopBusyState(
@@ -274,9 +283,11 @@ if PYSIDE6_AVAILABLE:
                         prefer_local=True,
                     )
                     answer = response.text.strip()
+                    spoken, screen_text = split_voice_response(answer)
                     history.append(LLMMessage(role="model", content=answer))
-                    self.chunk.emit(f"ARCHON: {answer}\n\n")
-                    runtime.tts.speak_async(answer)
+                    self.chunk.emit(f"ARCHON: {screen_text}\n\n")
+                    if spoken:
+                        runtime.tts.speak_async(spoken)
                 self.chunk.emit("Modo voz local finalizado.")
                 self.prompt_finished.emit("Modo voz local finalizado.")
             except DesktopOperationCancelled:

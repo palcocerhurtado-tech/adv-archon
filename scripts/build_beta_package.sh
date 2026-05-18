@@ -71,7 +71,7 @@ rsync -a \
   --exclude ".pytest_cache" \
   --exclude ".ruff_cache" \
   --exclude ".venv" \
-  --exclude "__pycache__" \
+  --exclude "__pycache__*" \
   --exclude "dist" \
   --exclude "docs/archive" \
   --exclude "normativa_arquitectura_es" \
@@ -89,7 +89,8 @@ PACKAGE_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SRC="${PACKAGE_DIR}/ADV ARCHON.app"
 INSTALL_DIR="${HOME}/Applications"
 APP_DST="${INSTALL_DIR}/ADV ARCHON.app"
-MODEL="qwen2.5:7b"
+MODEL="llama3.1:8b"
+FAST_MODEL="llama3.2:3b"
 LOG_FILE="${HOME}/.adv-archon/install.log"
 
 mkdir -p "${HOME}/.adv-archon"
@@ -174,6 +175,10 @@ if ! "$OLLAMA_BIN" list | awk '{print $1}' | grep -qx "$MODEL"; then
   echo "Descargando modelo local ${MODEL}. Puede tardar varios minutos…"
   "$OLLAMA_BIN" pull "$MODEL"
 fi
+if ! "$OLLAMA_BIN" list | awk '{print $1}' | grep -qx "$FAST_MODEL"; then
+  echo "Descargando modelo rápido ${FAST_MODEL}. Puede tardar varios minutos…"
+  "$OLLAMA_BIN" pull "$FAST_MODEL"
+fi
 
 echo "5/5 Guardando configuración y preparando acceso directo…"
 mkdir -p "$HOME/.adv-archon"
@@ -181,7 +186,11 @@ if [ ! -f "$HOME/.adv-archon/config.toml" ]; then
   cat > "$HOME/.adv-archon/config.toml" <<CONFIG_EOF
 [llm]
 mode = "local"
-ollama_model = "qwen2.5:7b"
+ollama_model = "llama3.1:8b"
+fast_local_model = "llama3.2:3b"
+planner_local_model = "llama3.2:3b"
+reasoning_local_model = "llama3.1:8b"
+document_local_model = "llama3.1:8b"
 CONFIG_EOF
 fi
 
@@ -230,7 +239,8 @@ cat > "${WINDOWS_INSTALLER}" <<'WIN_INSTALLER_EOF'
 setlocal EnableExtensions
 
 title ADV ARCHON - instalador beta
-set "MODEL=qwen2.5:7b"
+set "MODEL=llama3.1:8b"
+set "FAST_MODEL=llama3.2:3b"
 set "PACKAGE_DIR=%~dp0"
 set "SOURCE_DIR=%PACKAGE_DIR%adv-archon-source"
 set "INSTALL_DIR=%USERPROFILE%\ADV ARCHON Beta"
@@ -320,13 +330,22 @@ if errorlevel 1 (
   echo Descargando modelo %MODEL%. Puede tardar varios minutos...
   ollama pull "%MODEL%" >> "%LOG_FILE%" 2>&1
 )
+ollama list | findstr /B /C:"%FAST_MODEL% " >nul 2>&1
+if errorlevel 1 (
+  echo Descargando modelo rapido %FAST_MODEL%. Puede tardar varios minutos...
+  ollama pull "%FAST_MODEL%" >> "%LOG_FILE%" 2>&1
+)
 
 echo 5/5 Guardando configuracion y acceso directo...
 mkdir "%USERPROFILE%\.adv-archon" >nul 2>&1
 if not exist "%USERPROFILE%\.adv-archon\config.toml" (
   > "%USERPROFILE%\.adv-archon\config.toml" echo [llm]
   >> "%USERPROFILE%\.adv-archon\config.toml" echo mode = "local"
-  >> "%USERPROFILE%\.adv-archon\config.toml" echo ollama_model = "qwen2.5:7b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo ollama_model = "llama3.1:8b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo fast_local_model = "llama3.2:3b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo planner_local_model = "llama3.2:3b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo reasoning_local_model = "llama3.1:8b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo document_local_model = "llama3.1:8b"
 )
 copy "%INSTALL_DIR%\ADV_ARCHON.cmd" "%DESKTOP%\ADV_ARCHON.cmd" >nul
 
@@ -347,7 +366,7 @@ Cómo instalar:
 2. Abre la carpeta Windows.
 3. Haz doble clic en Instalar_ADV_ARCHON.bat.
 4. Windows puede mostrar SmartScreen porque esta beta no está firmada. Pulsa "Más información" > "Ejecutar de todas formas" si confías en el origen.
-5. El instalador comprobará uv, dependencias Python, Ollama y el modelo qwen2.5:7b.
+5. El instalador comprobará uv, dependencias Python, Ollama y los modelos llama3.1:8b y llama3.2:3b.
 6. Al terminar abrirá ADV ARCHON y dejará ADV_ARCHON.cmd en el Escritorio.
 
 Requisitos:
@@ -376,7 +395,7 @@ Objetivo de esta beta
 Queremos saber si un arquitecto no técnico puede probar ADV ARCHON sin ayuda y decir si lo compraría para una primera revisión de despacho.
 
 Tiempo recomendado
-Reserva 10-15 minutos. La primera instalación puede tardar más si hay que descargar el modelo local qwen2.5:7b.
+Reserva 10-15 minutos. La primera instalación puede tardar más si hay que descargar los modelos locales llama3.1:8b y llama3.2:3b.
 
 Requisitos
 - Internet durante la primera instalación.
@@ -391,7 +410,7 @@ macOS:
 2. Abre la carpeta ADV_ARCHON_BETA.
 3. Haz doble clic en “Instalar ADV ARCHON.command”.
 4. Si macOS pregunta, confirma que quieres abrirlo.
-5. El instalador comprobará uv, Ollama y el modelo qwen2.5:7b.
+5. El instalador comprobará uv, Ollama y los modelos llama3.1:8b y llama3.2:3b.
 6. Al terminar abrirá ADV ARCHON y dejará un acceso directo en el Escritorio.
 
 Windows:
@@ -399,7 +418,7 @@ Windows:
 2. Abre la carpeta Windows.
 3. Haz doble clic en “Instalar_ADV_ARCHON.bat”.
 4. Si Windows SmartScreen avisa, pulsa “Más información” > “Ejecutar de todas formas”.
-5. El instalador comprobará uv, dependencias, Ollama y el modelo qwen2.5:7b.
+5. El instalador comprobará uv, dependencias, Ollama y los modelos llama3.1:8b y llama3.2:3b.
 6. Al terminar abrirá ADV ARCHON y dejará ADV_ARCHON.cmd en el Escritorio.
 
 Qué probar
@@ -448,9 +467,9 @@ pdf.ln(12)
 pdf.set_font('Helvetica', '', 11)
 sections = [
     ('Qué es', 'ADV ARCHON es una app local-first para revisar expedientes urbanísticos de arquitectura en España: parcela, Catastro, PGOU, afecciones sectoriales, análisis preliminar e informe PDF.'),
-    ('Objetivo', 'Queremos saber si un arquitecto no técnico puede probar ADV ARCHON sin ayuda y decir si lo compraría para una primera revisión de despacho. Reserva 10-15 minutos; la primera instalación puede tardar más si descarga qwen2.5:7b.'),
+    ('Objetivo', 'Queremos saber si un arquitecto no técnico puede probar ADV ARCHON sin ayuda y decir si lo compraría para una primera revisión de despacho. Reserva 10-15 minutos; la primera instalación puede tardar más si descarga llama3.1:8b y llama3.2:3b.'),
     ('Requisitos', '- Internet durante la primera instalación.\\n- macOS 13+ o Windows 10/11.\\n- Ollama instalado o permiso para instalarlo.\\n- 8 GB de RAM recomendados.\\n- 8-12 GB libres.'),
-    ('Cómo instalar', 'macOS:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Haz doble clic en Instalar ADV ARCHON.command.\\n3. El instalador comprobará uv, Ollama y el modelo qwen2.5:7b.\\n\\nWindows:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Abre la carpeta Windows.\\n3. Haz doble clic en Instalar_ADV_ARCHON.bat.\\n4. El instalador comprobará uv, dependencias, Ollama y el modelo qwen2.5:7b.'),
+    ('Cómo instalar', 'macOS:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Haz doble clic en Instalar ADV ARCHON.command.\\n3. El instalador comprobará uv, Ollama y los modelos llama3.1:8b y llama3.2:3b.\\n\\nWindows:\\n1. Descomprime ADV_ARCHON_BETA.zip.\\n2. Abre la carpeta Windows.\\n3. Haz doble clic en Instalar_ADV_ARCHON.bat.\\n4. El instalador comprobará uv, dependencias, Ollama y los modelos llama3.1:8b y llama3.2:3b.'),
     ('Qué probar', '- Abrir Studio Demo y pulsar Iniciar demo comercial.\\n- Abrir los 3 informes de ejemplo incluidos en Demos Studio.\\n- Crear un expediente nuevo.\\n- Introducir dirección, coordenadas o referencia catastral.\\n- Adjuntar un plano PDF si tenéis uno de prueba.\\n- Pulsar Analizar.\\n- Exportar el informe PDF.'),
     ('Prueba de compra', '- ¿Entenderías esta app sin explicación?\\n- ¿La usarías en un expediente real como cribado preliminar?\\n- ¿Qué tendría que mejorar para que el precio fuera defendible?\\n- ¿Qué dato o pantalla falta para que parezca herramienta de despacho?'),
     ('Feedback que necesitamos', '- Qué partes se entienden sin explicación.\\n- Qué partes suenan demasiado técnicas.\\n- Si el informe sirve para una primera revisión de despacho.\\n- Si falta algún dato que un arquitecto esperaría ver.\\n- Dónde se siente lento o poco fiable.'),
@@ -570,7 +589,7 @@ if grep -E '(^|/)\.env($|\.)' "${ZIP_LIST}" | grep -v '/\.env\.example$'; then
   echo "ERROR: El ZIP contiene archivos .env. No se puede distribuir esta beta."
   exit 1
 fi
-if grep -E '(^|/)(\.git|\.venv|__pycache__|\.pytest_cache|\.ruff_cache|\.mypy_cache)(/|$)' "${ZIP_LIST}"; then
+if grep -E '(^|/)(\.git|\.venv|__pycache__[^/]*|\.pytest_cache|\.ruff_cache|\.mypy_cache)(/|$)' "${ZIP_LIST}"; then
   echo "ERROR: El ZIP contiene carpetas internas o caches. No se puede distribuir esta beta."
   exit 1
 fi

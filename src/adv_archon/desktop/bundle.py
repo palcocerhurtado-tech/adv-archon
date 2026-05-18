@@ -190,7 +190,11 @@ def _project_copy_ignore(directory: str, names: list[str]) -> set[str]:
         for name in names
         if name == ".env" or (name.startswith(".env.") and name != ".env.example")
     )
-    ignored.update(name for name in names if name.endswith((".pyc", ".pyo")))
+    ignored.update(
+        name
+        for name in names
+        if name.startswith("__pycache__") or name.endswith((".pyc", ".pyo"))
+    )
     return ignored.intersection(names)
 
 

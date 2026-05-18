@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 import json
 import re
 from collections.abc import Callable, Sequence
@@ -7,6 +8,7 @@ from contextlib import nullcontext
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from adv_archon.core.context import RuntimeContext
@@ -638,12 +640,14 @@ class Agent:
         on_tool: ToolCallback | None = None,
         on_chunk: ChunkCallback | None = None,
         on_context: ContextCallback | None = None,
+        cancel_event: Event | None = None,
     ) -> LLMResponse:
         return self._execute_turn(
             user_input,
             on_tool=on_tool,
             on_chunk=on_chunk,
             on_context=on_context,
+            cancel_event=cancel_event,
         )
 
     def _execute_turn(
@@ -653,6 +657,7 @@ class Agent:
         on_tool: ToolCallback | None,
         on_chunk: ChunkCallback | None,
         on_context: ContextCallback | None,
+        cancel_event: Event | None = None,
     ) -> LLMResponse:
         self._session.append(SessionMessage(role="user", content=user_input))
         state = self._prepare_turn_state(user_input)
@@ -707,7 +712,8 @@ class Agent:
         )
         with llm_mode_context:
             while tool_steps < max_steps:
-                plan = self._plan(user_input, state, executed_tools)
+                self._raise_if_cancelled(cancel_event)
+                plan = self._plan(user_input, state, executed_tools, cancel_event=cancel_event)
                 if on_context is not None and not context_rendered:
                     packet = self._build_context_packet(
                         user_input=user_input,
@@ -741,7 +747,8 @@ class Agent:
                     on_tool(tool_name, arguments)
 
                 try:
-                    result = tool.fn(**arguments)
+                    self._raise_if_cancelled(cancel_event)
+                    result = self._call_tool(tool.fn, arguments, cancel_event=cancel_event)
                     payload: dict[str, Any] = result.payload
                 except Exception as exc:
                     payload = {"error": str(exc)}
@@ -804,6 +811,7 @@ class Agent:
                 state,
                 tool_observations=tool_observations,
                 on_chunk=on_chunk,
+                cancel_event=cancel_event,
             )
             self._session.append(SessionMessage(role="assistant", content=response.text))
             return response
@@ -902,6 +910,8 @@ class Agent:
         user_input: str,
         state: _TurnState,
         executed_tools: Sequence[str],
+        *,
+        cancel_event: Event | None = None,
     ) -> dict[str, Any]:
         heuristic_plan = self._rule_based_plan(user_input, state, executed_tools)
         if heuristic_plan is not None:
@@ -941,15 +951,37 @@ class Agent:
                 '{"kind":"tool","tool_name":"<tool_name>","arguments":{"key":"value"},'
                 '"step_summary":"<short next step>"}\n'
             )
-        response = self._llm.complete(
+        response = self._llm.stream_complete(
             self._build_messages(),
             system_prompt=planner_prompt,
             response_mime_type="application/json",
+            on_chunk=lambda _chunk: self._raise_if_cancelled(cancel_event),
+            cancel_event=cancel_event,
             task="planner",
             prefer_local=True,
         )
         self._record_usage("planner", response)
         return self._parse_plan(response.text)
+
+    @staticmethod
+    def _raise_if_cancelled(cancel_event: Event | None) -> None:
+        if cancel_event is not None and cancel_event.is_set():
+            raise RuntimeError("Operación cancelada por el usuario.")
+
+    def _call_tool(
+        self,
+        fn: ToolFn,
+        arguments: dict[str, Any],
+        *,
+        cancel_event: Event | None,
+    ) -> Any:
+        try:
+            accepts_cancel_event = "cancel_event" in inspect.signature(fn).parameters
+        except (TypeError, ValueError):
+            accepts_cancel_event = False
+        if accepts_cancel_event:
+            return fn(**arguments, cancel_event=cancel_event)
+        return fn(**arguments)
 
     def _rule_based_plan(
         self,
@@ -1741,6 +1773,7 @@ class Agent:
         *,
         tool_observations: Sequence[ToolObservation],
         on_chunk: ChunkCallback | None,
+        cancel_event: Event | None = None,
     ) -> LLMResponse:
         specialized = self._specialized_final_response(
             user_input=user_input,
@@ -1811,6 +1844,7 @@ class Agent:
             self._build_messages(),
             system_prompt=final_prompt,
             on_chunk=on_chunk,
+            cancel_event=cancel_event,
             task=_task_kind_for_intent(state.intent.category),
         )
         if not response.text.strip():
@@ -1853,6 +1887,13 @@ class Agent:
 
         if _looks_like_self_memory_query(user_input):
             return self._deterministic_self_memory_response(
+                user_input=user_input,
+                state=state,
+                on_context=on_context,
+            )
+
+        if _looks_like_current_datetime_query(user_input):
+            return self._deterministic_current_datetime_response(
                 user_input=user_input,
                 state=state,
                 on_context=on_context,
@@ -1971,6 +2012,45 @@ class Agent:
             usage=LLMUsage(),
             provider="deterministic",
             model="capability-handler",
+        )
+
+    def _deterministic_current_datetime_response(
+        self,
+        *,
+        user_input: str,
+        state: _TurnState,
+        on_context: ContextCallback | None,
+    ) -> LLMResponse:
+        if on_context is not None:
+            packet = self._build_context_packet(
+                user_input=user_input,
+                state=state,
+                plan={"kind": "answer", "step_summary": "responder fecha local"},
+                tool_observations=[],
+            )
+            on_context(self._build_context_snapshot(packet))
+
+        now = state.runtime_context.now if state.runtime_context is not None else datetime.now()
+        weekday = _SPANISH_WEEKDAYS[now.weekday()]
+        month = _SPANISH_MONTHS[now.month - 1]
+        normalized = _normalize_text(user_input)
+        wants_time = _contains_any(normalized, {"hora", "horario"})
+        wants_date = _contains_any(normalized, {"dia", "día", "fecha", "hoy"})
+        if wants_time and not wants_date:
+            text = f"Ahora son las {now:%H:%M}."
+        elif wants_time:
+            text = (
+                f"Hoy es {weekday}, {now.day} de {month} de {now.year}. "
+                f"Son las {now:%H:%M}."
+            )
+        else:
+            text = f"Hoy es {weekday}, {now.day} de {month} de {now.year}."
+
+        return LLMResponse(
+            text=text,
+            usage=LLMUsage(),
+            provider="deterministic",
+            model="datetime-handler",
         )
 
     def _specialized_final_response(
@@ -2631,6 +2711,21 @@ class Agent:
                 )
             else:
                 text = f"No he podido consultar tus recordatorios. Error: {error}"
+        elif tool_name in {"web_search", "web_fetch"}:
+            lowered = error.lower()
+            if "cancelad" in lowered:
+                text = "Búsqueda cancelada. He recuperado el control de la app."
+            elif (
+                "timeout" in lowered
+                or "tardó demasiado" in lowered
+                or "tardo demasiado" in lowered
+            ):
+                text = (
+                    "La búsqueda tardó demasiado. Intenta de nuevo con una consulta más "
+                    "concreta o reformula la petición."
+                )
+            else:
+                text = f"No se pudo completar la consulta web. Error: {error}"
 
         if text is None:
             return None
@@ -3222,6 +3317,60 @@ def _contains_any(text: str, keywords: set[str]) -> bool:
         if keyword in text:
             return True
     return False
+
+
+_SPANISH_WEEKDAYS = (
+    "lunes",
+    "martes",
+    "miércoles",
+    "jueves",
+    "viernes",
+    "sábado",
+    "domingo",
+)
+_SPANISH_MONTHS = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
+
+
+def _looks_like_current_datetime_query(text: str) -> bool:
+    normalized = _normalize_text(text).strip(" ¿?!.")
+    compact = re.sub(r"\s+", " ", normalized)
+    patterns = {
+        "que dia es hoy",
+        "qué día es hoy",
+        "que día es hoy",
+        "qué dia es hoy",
+        "que fecha es hoy",
+        "qué fecha es hoy",
+        "que fecha es",
+        "qué fecha es",
+        "fecha actual",
+        "dime la fecha",
+        "dime el dia de hoy",
+        "dime el día de hoy",
+        "que hora es",
+        "qué hora es",
+        "dime la hora",
+        "hora actual",
+    }
+    if compact in patterns:
+        return True
+    return (
+        ("hoy" in compact and _contains_any(compact, {"fecha", "dia", "día"}))
+        or ("hora" in compact and _contains_any(compact, {"actual", "es", "dime"}))
+    )
 
 
 def _looks_like_calendar_lookup(text: str) -> bool:

@@ -4,6 +4,7 @@ import json
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
+from threading import Event
 
 import httpx
 
@@ -105,6 +106,8 @@ class GeminiClient:
         *,
         system_prompt: str,
         on_chunk: Callable[[str], None] | None = None,
+        response_mime_type: str | None = None,
+        cancel_event: Event | None = None,
     ) -> tuple[str, LLMUsage]:
         """
         Stream a completion, retrying up to `max_stream_retries` times on
@@ -127,6 +130,8 @@ class GeminiClient:
                     messages_list,
                     system_prompt=system_prompt,
                     on_chunk=on_chunk,
+                    response_mime_type=response_mime_type,
+                    cancel_event=cancel_event,
                     already_accumulated=accumulated,
                 )
                 accumulated.extend(chunks)
@@ -162,9 +167,15 @@ class GeminiClient:
         *,
         system_prompt: str,
         on_chunk: Callable[[str], None] | None,
+        response_mime_type: str | None,
+        cancel_event: Event | None,
         already_accumulated: list[str],
     ) -> tuple[list[str], LLMUsage]:
-        payload = self._build_payload(messages, system_prompt=system_prompt)
+        payload = self._build_payload(
+            messages,
+            system_prompt=system_prompt,
+            response_mime_type=response_mime_type,
+        )
         chunks: list[str] = []
         usage = LLMUsage()
 
@@ -176,6 +187,8 @@ class GeminiClient:
         ) as response:
             response.raise_for_status()
             for line in response.iter_lines():
+                if cancel_event is not None and cancel_event.is_set():
+                    break
                 if not line or not line.startswith("data: "):
                     continue
                 raw = line[6:]

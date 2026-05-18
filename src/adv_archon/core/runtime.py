@@ -4,6 +4,7 @@ import re
 from collections.abc import Callable, Sequence
 from contextlib import suppress
 from pathlib import Path
+from threading import Event
 from typing import Any
 
 from adv_archon.core.agent import Agent, ToolSpec, TurnContextSnapshot
@@ -82,6 +83,7 @@ class ArchonRuntime:
         self.llm = llm
         self.project_root = project_root
         self.system_prompt = system_prompt
+        self.effective_system_prompt = self._build_effective_system_prompt(system_prompt)
         self.incognito = incognito
         self.confirm = confirm
 
@@ -275,7 +277,7 @@ class ArchonRuntime:
         _progress(88, "Creando agente de IA…")
         self.agent = Agent(
             llm=llm,
-            system_prompt=system_prompt,
+            system_prompt=self.effective_system_prompt,
             session=self.session_store,
             project_root=project_root,
             max_tool_steps=config.ui.max_tool_steps,
@@ -302,6 +304,20 @@ class ArchonRuntime:
     def greeting(self) -> str:
         return self.runtime_context().greeting()
 
+    def _build_effective_system_prompt(self, system_prompt: str) -> str:
+        try:
+            from personality.context_builder import PersonalityPaths, build_system_prompt
+
+            return build_system_prompt(
+                system_prompt,
+                paths=PersonalityPaths(
+                    core_identity_path=self.project_root / "personality" / "core_identity.json",
+                    state_db_path=self.config.paths.root / "personality" / "adaptive_state.sqlite",
+                ),
+            )
+        except Exception:
+            return system_prompt
+
     def runtime_context(self) -> RuntimeContext:
         return capture_runtime_context(
             self.project_root,
@@ -316,6 +332,7 @@ class ArchonRuntime:
         on_tool: Callable[[str, dict[str, object]], None] | None = None,
         on_chunk: Callable[[str], None] | None = None,
         on_context: Callable[[TurnContextSnapshot], None] | None = None,
+        cancel_event: Event | None = None,
     ) -> LLMResponse:
         resolved_attachments = list(attachments or ())
         enriched_prompt = _maybe_build_compliance_prompt(
@@ -334,6 +351,7 @@ class ArchonRuntime:
             on_tool=on_tool,
             on_chunk=on_chunk,
             on_context=on_context,
+            cancel_event=cancel_event,
         )
 
     def import_paths_to_knowledge(
@@ -391,6 +409,13 @@ class ArchonRuntime:
 
     def shutdown(self) -> None:
         self.tts.stop()
+        with suppress(Exception):
+            from personality.evolution import evolve_personality
+
+            evolve_personality(
+                "ADV ARCHON session closed.",
+                db_path=self.config.paths.root / "personality" / "adaptive_state.sqlite",
+            )
         with suppress(Exception):
             self.scraper_daemon.stop()
         with suppress(Exception):

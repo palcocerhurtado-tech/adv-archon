@@ -3,10 +3,19 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass
+from threading import Event
 
 import httpx
 
 from adv_archon.core.llm_types import LLMMessage, LLMUsage
+
+
+class OllamaCancelledError(RuntimeError):
+    """Raised when a local Ollama stream is cancelled by the UI."""
+
+
+class OllamaUnavailableError(RuntimeError):
+    """Raised when Ollama cannot be reached before generation starts."""
 
 
 @dataclass(slots=True)
@@ -68,6 +77,8 @@ class OllamaClient:
         *,
         system_prompt: str,
         on_chunk: Callable[[str], None] | None = None,
+        response_mime_type: str | None = None,
+        cancel_event: Event | None = None,
     ) -> tuple[str, LLMUsage]:
         payload: dict[str, object] = {
             "model": self.model,
@@ -76,26 +87,35 @@ class OllamaClient:
             "keep_alive": self._keep_alive_value(),
             "options": self._options(),
         }
+        if response_mime_type == "application/json":
+            payload["format"] = "json"
         chunks: list[str] = []
         usage = LLMUsage()
-        with httpx.Client(timeout=self.timeout) as client, client.stream(
-            "POST",
-            f"{self.base_url}/api/chat",
-            json=payload,
-        ) as response:
-            response.raise_for_status()
-            for line in response.iter_lines():
-                if not line:
-                    continue
-                data = json.loads(line)
-                message = data.get("message", {})
-                content = message.get("content", "") if isinstance(message, dict) else ""
-                if content:
-                    chunks.append(str(content))
-                    if on_chunk is not None:
-                        on_chunk(str(content))
-                if data.get("done"):
-                    usage = self._extract_usage(data)
+        try:
+            with httpx.Client(timeout=self.timeout) as client, client.stream(
+                "POST",
+                f"{self.base_url}/api/chat",
+                json=payload,
+            ) as response:
+                response.raise_for_status()
+                for line in response.iter_lines():
+                    if cancel_event is not None and cancel_event.is_set():
+                        raise OllamaCancelledError("Generación local cancelada por el usuario.")
+                    if not line:
+                        continue
+                    data = json.loads(line)
+                    message = data.get("message", {})
+                    content = message.get("content", "") if isinstance(message, dict) else ""
+                    if content:
+                        chunks.append(str(content))
+                        if on_chunk is not None:
+                            on_chunk(str(content))
+                    if data.get("done"):
+                        usage = self._extract_usage(data)
+        except httpx.ConnectError as exc:
+            raise OllamaUnavailableError(
+                "No puedo conectar con Ollama. Abre Ollama.app o ejecuta `ollama serve`."
+            ) from exc
         return "".join(chunks), usage
 
     @staticmethod

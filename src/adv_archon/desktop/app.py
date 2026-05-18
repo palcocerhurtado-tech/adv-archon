@@ -244,6 +244,7 @@ def launch_desktop_app(
             self._current_stream_edit: _AutoTextEdit | None = None
             self._current_stream_text = ""
             self._stream_buffer = ""
+            self._voice_transcript_edit: _AutoTextEdit | None = None
             self._home_visible = False
             self._progress_animation  = None
             self._model_loader_ref: tuple[Any, Any] | None = None
@@ -291,6 +292,7 @@ def launch_desktop_app(
             self._backend_worker.failed.connect(self._handle_worker_error)
             self._backend_worker.cancelled.connect(self._handle_worker_cancelled)
             self._backend_worker.voice_intent.connect(self._handle_voice_intent)
+            self._backend_worker.voice_transcription.connect(self._handle_voice_transcription)
             self._backend_worker.shutdown_finished.connect(self._handle_shutdown_finished)
             self._backend_thread.finished.connect(self._handle_backend_thread_finished)
             self._backend_thread.finished.connect(self._backend_worker.deleteLater)
@@ -802,7 +804,7 @@ def launch_desktop_app(
             text: str,
             *,
             attachments: list[Path] | None = None,
-        ) -> None:
+        ) -> _AutoTextEdit:
             frame = QFrame()
             frame.setObjectName("MsgUser" if role == "user" else "MsgAssistant")
             fl = QVBoxLayout(frame)
@@ -833,6 +835,7 @@ def launch_desktop_app(
                     fl.addWidget(att_lbl)
 
             self._insert_bubble(frame)
+            return body
 
         def _start_assistant_stream(self) -> None:
             frame = QFrame()
@@ -979,6 +982,7 @@ def launch_desktop_app(
             self._current_stream_text = ""
             self._stream_buffer = ""
             self._stream_flush_timer.stop()
+            self._voice_transcript_edit = None
             self._add_notice(f"Error: {message}", object_name="Err")
             self._set_busy(False)
 
@@ -987,8 +991,24 @@ def launch_desktop_app(
             self._current_stream_text = ""
             self._stream_buffer = ""
             self._stream_flush_timer.stop()
+            self._voice_transcript_edit = None
             self._append_system(message)
             self._set_busy(False)
+
+        def _handle_voice_transcription(self, text: str, is_final: bool) -> None:
+            display = text if is_final else f"{text}…"
+            if self._voice_transcript_edit is None:
+                self._voice_transcript_edit = self._add_message_bubble("user", display)
+            else:
+                self._voice_transcript_edit.setPlainText(display)
+            if is_final:
+                self._voice_transcript_edit.setStyleSheet("")
+                self._voice_transcript_edit = None
+            elif self._voice_transcript_edit is not None:
+                self._voice_transcript_edit.setStyleSheet(
+                    "color:#77746B;font-style:italic;"
+                )
+            QTimer.singleShot(0, self._scroll_to_bottom)
 
         def _handle_voice_intent(self, action: str, detail_prompt: str) -> None:
             if action == "new_expediente":
@@ -1155,7 +1175,8 @@ def launch_desktop_app(
 
         # ── Prompt submission ─────────────────────────────────────────────────
         def _submit_prompt(self) -> None:
-            prompt = self._input.toPlainText().strip()
+            raw_prompt = self._input.toPlainText()
+            prompt = raw_prompt.strip()
             if not prompt:
                 return
             if prompt.casefold().startswith("/live"):
@@ -1173,7 +1194,7 @@ def launch_desktop_app(
             self._last_snapshot = None
             self._refresh_sources_view()
             self._refresh_tool_badges()
-            self._append_user(prompt, attachments)
+            self._append_user(raw_prompt, attachments)
             self._append_assistant_prefix()
             self._current_stream_text = ""
             self._stream_buffer = ""
@@ -1215,6 +1236,7 @@ def launch_desktop_app(
             self._append_assistant_prefix()
             self._current_stream_text = ""
             self._stream_buffer = ""
+            self._voice_transcript_edit = None
             self._set_busy(True, task="prompt")
             self.live_requested.emit(max_turns, self._active_exp_context)
 

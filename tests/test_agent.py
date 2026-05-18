@@ -958,6 +958,42 @@ def test_capability_query_returns_deterministic_overview_even_inside_repo(tmp_pa
     assert "`demo` con 31 cambios" in result.reply
 
 
+def test_current_date_query_is_deterministic_even_inside_repo(tmp_path: Path) -> None:
+    agent = Agent(
+        llm=FakeLLM(),  # type: ignore[arg-type]
+        system_prompt="system",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        context_provider=lambda: RuntimeContext(
+            cwd=tmp_path,
+            now=datetime(2026, 5, 18, 13, 54),
+            git=GitContext(
+                repo_root=tmp_path,
+                branch="claude/deepseek-v4-exploration-P51AF",
+                dirty=True,
+                changed_files=12,
+                changed_paths=["src/adv_archon/core/agent.py"],
+            ),
+            working_set=WorkingSet(
+                project_root=tmp_path,
+                project_name="adv-archon",
+                markers=["pyproject.toml"],
+                top_entries=["src/", "tests/"],
+            ),
+            active_profile="coding",
+        ),
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    result = agent.run_turn("que dia es hoy")
+
+    assert result.reply == "Hoy es lunes, 18 de mayo de 2026."
+    assert "normativa" not in result.reply.lower()
+    assert "pgou" not in result.reply.lower()
+    assert result.usage.provider == "deterministic"
+    assert result.usage.model == "datetime-handler"
+
+
 def test_self_memory_query_without_memories_returns_direct_answer(tmp_path: Path) -> None:
     agent = Agent(
         llm=FakeLLM(),  # type: ignore[arg-type]

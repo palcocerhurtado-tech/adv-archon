@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 import re
+import time
+from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import TimeoutError as FutureTimeout
 from dataclasses import dataclass
+from threading import Event
 from typing import Any
 from urllib.parse import urlparse
 from urllib.robotparser import RobotFileParser
@@ -40,6 +44,17 @@ PRICE_LINE_SKIP_TOKENS = (
     "gratuito",
     "shipping",
 )
+DEFAULT_SEARCH_TIMEOUT_SECONDS = 15.0
+DEFAULT_FETCH_TIMEOUT_SECONDS = 15.0
+DEFAULT_BROWSER_TIMEOUT_MS = 20_000
+
+
+class ToolTimeoutError(TimeoutError):
+    """Raised when a web tool exceeds its bounded execution window."""
+
+
+class ToolCancelledError(RuntimeError):
+    """Raised when the desktop UI cancels a running web tool."""
 
 
 @dataclass(slots=True)
@@ -68,10 +83,23 @@ class WebTools:
             ),
         )
 
-    def web_search(self, query: str, n: int = 5) -> ToolResult:
+    def web_search(
+        self,
+        query: str,
+        n: int = 5,
+        cancel_event: Event | None = None,
+    ) -> ToolResult:
         def _run() -> ToolResult:
-            with DDGS() as ddgs:
-                results = list(ddgs.text(query, max_results=n))
+            def _search() -> list[dict[str, Any]]:
+                with DDGS() as ddgs:
+                    return list(ddgs.text(query, max_results=n))
+
+            results = _run_cancellable(
+                _search,
+                timeout_seconds=DEFAULT_SEARCH_TIMEOUT_SECONDS,
+                cancel_event=cancel_event,
+                timeout_message="La búsqueda tardó demasiado.",
+            )
             normalized = [
                 {
                     "title": item.get("title", ""),
@@ -87,19 +115,27 @@ class WebTools:
 
         return self._executor.run(_run)
 
-    def web_fetch(self, url: str) -> ToolResult:
+    def web_fetch(self, url: str, cancel_event: Event | None = None) -> ToolResult:
         def _run() -> ToolResult:
-            if not _allowed_by_robots(url):
+            _raise_if_cancelled(cancel_event)
+            allowed = _run_cancellable(
+                lambda: _allowed_by_robots(url),
+                timeout_seconds=5.0,
+                cancel_event=cancel_event,
+                timeout_message="La comprobación de robots.txt tardó demasiado.",
+            )
+            if not allowed:
                 raise PermissionError(f"robots.txt disallows fetching: {url}")
 
             extracted = ""
             try:
-                extracted = _fetch_static_text(url)
+                extracted = _fetch_static_text(url, cancel_event=cancel_event)
             except Exception:
                 extracted = ""
 
+            _raise_if_cancelled(cancel_event)
             if _should_fallback_to_browser(url, extracted):
-                browser_text = _fetch_browser_text(url)
+                browser_text = _fetch_browser_text(url, cancel_event=cancel_event)
                 if browser_text:
                     extracted = browser_text
 
@@ -117,22 +153,24 @@ class WebTools:
 _DEFAULT_WEB_TOOLS = WebTools()
 
 
-def web_search(query: str, n: int = 5) -> ToolResult:
-    return _DEFAULT_WEB_TOOLS.web_search(query, n=n)
+def web_search(query: str, n: int = 5, cancel_event: Event | None = None) -> ToolResult:
+    return _DEFAULT_WEB_TOOLS.web_search(query, n=n, cancel_event=cancel_event)
 
 
-def web_fetch(url: str) -> ToolResult:
-    return _DEFAULT_WEB_TOOLS.web_fetch(url)
+def web_fetch(url: str, cancel_event: Event | None = None) -> ToolResult:
+    return _DEFAULT_WEB_TOOLS.web_fetch(url, cancel_event=cancel_event)
 
 
-def _fetch_static_text(url: str) -> str:
+def _fetch_static_text(url: str, cancel_event: Event | None = None) -> str:
+    _raise_if_cancelled(cancel_event)
     with httpx.Client(
         follow_redirects=True,
         headers={"User-Agent": USER_AGENT},
-        timeout=30.0,
+        timeout=DEFAULT_FETCH_TIMEOUT_SECONDS,
     ) as client:
         response = client.get(url)
         response.raise_for_status()
+    _raise_if_cancelled(cancel_event)
     return trafilatura.extract(
         response.text,
         include_links=True,
@@ -146,17 +184,21 @@ def _should_fallback_to_browser(url: str, extracted: str) -> bool:
     return len(extracted.strip()) < 200 or (shop_page and not has_price)
 
 
-def _fetch_browser_text(url: str) -> str:
+def _fetch_browser_text(url: str, cancel_event: Event | None = None) -> str:
     from playwright.sync_api import sync_playwright
 
     with sync_playwright() as playwright:
         browser = playwright.chromium.launch(headless=True)
-        page = browser.new_page(user_agent=USER_AGENT)
-        page.goto(url, wait_until="networkidle", timeout=30_000)
-        _accept_cookie_banner(page)
-        page_text = str(page.evaluate("() => document.body.innerText") or "")
-        page_html = page.content()
-        browser.close()
+        try:
+            page = browser.new_page(user_agent=USER_AGENT)
+            _raise_if_cancelled(cancel_event)
+            page.goto(url, wait_until="networkidle", timeout=DEFAULT_BROWSER_TIMEOUT_MS)
+            _accept_cookie_banner(page)
+            _raise_if_cancelled(cancel_event)
+            page_text = str(page.evaluate("() => document.body.innerText") or "")
+            page_html = page.content()
+        finally:
+            browser.close()
 
     extracted = trafilatura.extract(
         page_html,
@@ -169,6 +211,36 @@ def _fetch_browser_text(url: str) -> str:
     if not extracted:
         return page_text[:6000]
     return extracted
+
+
+def _run_cancellable(
+    fn: Any,
+    *,
+    timeout_seconds: float,
+    cancel_event: Event | None,
+    timeout_message: str,
+) -> Any:
+    deadline = time.monotonic() + timeout_seconds
+    executor = ThreadPoolExecutor(max_workers=1)
+    future = executor.submit(fn)
+    try:
+        while True:
+            _raise_if_cancelled(cancel_event)
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                future.cancel()
+                raise ToolTimeoutError(timeout_message)
+            try:
+                return future.result(timeout=min(0.2, remaining))
+            except FutureTimeout:
+                continue
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
+
+
+def _raise_if_cancelled(cancel_event: Event | None) -> None:
+    if cancel_event is not None and cancel_event.is_set():
+        raise ToolCancelledError("Operación web cancelada por el usuario.")
 
 
 def _accept_cookie_banner(page: Any) -> None:

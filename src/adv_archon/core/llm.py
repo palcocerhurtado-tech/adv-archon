@@ -4,6 +4,7 @@ from collections import deque
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
+from threading import Event
 from typing import Literal, Protocol
 
 from adv_archon.core.config import LLMConfig
@@ -40,6 +41,8 @@ class ProviderClient(Protocol):
         *,
         system_prompt: str,
         on_chunk: Callable[[str], None] | None = None,
+        response_mime_type: str | None = None,
+        cancel_event: Event | None = None,
     ) -> tuple[str, LLMUsage]: ...
 
 
@@ -116,8 +119,10 @@ class LLMRouter:
         *,
         system_prompt: str,
         on_chunk: Callable[[str], None] | None = None,
+        response_mime_type: str | None = None,
         task: TaskKind | None = None,
         prefer_local: bool | None = None,
+        cancel_event: Event | None = None,
     ) -> LLMResponse:
         prepared = self._prepare_request(messages, system_prompt=system_prompt)
         route = self._resolve_route(task=task, prefer_local=prefer_local)
@@ -128,6 +133,8 @@ class LLMRouter:
             prepared.messages,
             system_prompt=prepared.system_prompt,
             on_chunk=stream_callback,
+            response_mime_type=response_mime_type,
+            cancel_event=cancel_event,
         )
         usage = self._estimate_cost(usage)
         restored_text = prepared.restore(text)

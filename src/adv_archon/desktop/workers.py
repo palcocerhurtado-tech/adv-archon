@@ -78,6 +78,7 @@ if PYSIDE6_AVAILABLE:
         shutdown_finished = Signal()
         expediente_selected = Signal(object)
         voice_intent = Signal(str, str)
+        voice_transcription = Signal(str, bool)
 
         def __init__(
             self,
@@ -239,7 +240,11 @@ if PYSIDE6_AVAILABLE:
                         )
                     )
                     try:
-                        heard = runtime.stt.listen_once()
+                        heard = runtime.stt.listen_streaming(
+                            on_partial=lambda text: self.voice_transcription.emit(text, False),
+                            on_final=lambda text: self.voice_transcription.emit(text, True),
+                            cancel_event=self._cancel_event,
+                        )
                     except RuntimeError as exc:
                         message = str(exc)
                         if "No he detectado voz" in message:
@@ -251,21 +256,21 @@ if PYSIDE6_AVAILABLE:
                             )
                             continue
                         raise
-                    text = heard.text.strip()
-                    if not text:
+                    display_text = heard.text
+                    prompt_text = display_text.strip()
+                    if not prompt_text:
                         self.chunk.emit("No he captado voz suficiente.\n\n")
                         continue
-                    self.chunk.emit(f"Tú: {text}\n")
-                    if text.casefold() in {"salir", "adiós", "adios", "para", "cancelar"}:
+                    if prompt_text.casefold() in {"salir", "adiós", "adios", "para", "cancelar"}:
                         break
-                    intent = classify_voice_intent(text)
+                    intent = classify_voice_intent(prompt_text)
                     if intent is not None:
                         self.chunk.emit(f"ARCHON: {intent.spoken_summary}\n\n")
                         runtime.tts.speak_async(intent.spoken_summary)
                         self.voice_intent.emit(intent.action, intent.detail_prompt)
                         if not intent.detail_prompt:
                             continue
-                    history.append(LLMMessage(role="user", content=text))
+                    history.append(LLMMessage(role="user", content=prompt_text))
                     self._emit_state(
                         DesktopBusyState(
                             backend_ready=True,
@@ -276,13 +281,21 @@ if PYSIDE6_AVAILABLE:
                             cancellable=True,
                         )
                     )
-                    response = runtime.llm.complete(
+                    voice_chunks: list[str] = []
+
+                    def on_voice_chunk(chunk: str, chunk_sink: list[str] = voice_chunks) -> None:
+                        self._check_cancelled()
+                        chunk_sink.append(chunk)
+
+                    response = runtime.llm.stream_complete(
                         history[-8:],
                         system_prompt=system_prompt,
+                        on_chunk=on_voice_chunk,
+                        cancel_event=self._cancel_event,
                         task="assistant",
                         prefer_local=True,
                     )
-                    answer = response.text.strip()
+                    answer = (response.text or "".join(voice_chunks)).strip()
                     spoken, screen_text = split_voice_response(answer)
                     history.append(LLMMessage(role="model", content=answer))
                     self.chunk.emit(f"ARCHON: {screen_text}\n\n")
@@ -293,6 +306,9 @@ if PYSIDE6_AVAILABLE:
             except DesktopOperationCancelled:
                 self.cancelled.emit("Modo voz cancelado por el usuario.")
             except Exception as exc:
+                if self._cancel_event.is_set():
+                    self.cancelled.emit("Modo voz cancelado por el usuario.")
+                    return
                 self.failed.emit(f"No se pudo iniciar el modo voz local: {exc}")
             finally:
                 runtime.llm.set_mode(previous_mode)
@@ -372,12 +388,17 @@ if PYSIDE6_AVAILABLE:
                     on_tool=on_tool,
                     on_chunk=on_chunk,
                     on_context=on_context,
+                    cancel_event=self._cancel_event,
                 )
             except DesktopOperationCancelled:
                 self.cancelled.emit("Operación cancelada por el usuario.")
                 self._emit_state(DesktopBusyState(backend_ready=True))
                 return
             except Exception as exc:
+                if self._cancel_event.is_set():
+                    self.cancelled.emit("Operación cancelada por el usuario.")
+                    self._emit_state(DesktopBusyState(backend_ready=True))
+                    return
                 self._emit_state(DesktopBusyState(backend_ready=True))
                 self.failed.emit(str(exc))
                 return

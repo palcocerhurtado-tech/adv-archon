@@ -209,6 +209,11 @@ class VisionTools:
 
         base_url = self._ollama_base_url()
         model = self._vision_model()
+        if not self._vision_model_installed(base_url, model):
+            raise RuntimeError(
+                "Visión local no instalada. ADV ARCHON seguirá funcionando sin visión. "
+                f"Para activarla, instala un modelo multimodal con: `ollama pull {model}`."
+            )
         payload = {
             "model": model,
             "messages": [
@@ -248,6 +253,28 @@ class VisionTools:
         if not text:
             raise RuntimeError("Ollama no devolvió descripción visual.")
         return text
+
+    def _vision_model_installed(self, base_url: str, model: str) -> bool:
+        import httpx
+
+        try:
+            with httpx.Client(timeout=3.0) as client:
+                response = client.get(f"{base_url}/api/tags")
+                response.raise_for_status()
+        except Exception:
+            return False
+        data = response.json()
+        raw_models = data.get("models", [])
+        if not isinstance(raw_models, list):
+            return False
+        base_name = model.split(":", 1)[0]
+        for item in raw_models:
+            if not isinstance(item, dict):
+                continue
+            name = str(item.get("name") or item.get("model") or "").strip()
+            if name == model or name.startswith(base_name + ":"):
+                return True
+        return False
 
     def _vision_model(self) -> str:
         configured = os.getenv("ADV_ARCHON_VISION_MODEL", "").strip()

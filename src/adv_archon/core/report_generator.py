@@ -669,6 +669,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     next_steps = analysis.get("next_steps") or []
     if not full_analysis and isinstance(next_steps, list) and next_steps:
         full_analysis = "Próximos pasos:\n" + "\n".join(f"- {step}" for step in next_steps)
+    from adv_archon.core.expediente_quality import evaluate_expediente_quality
     from adv_archon.core.studio import build_studio_payload, load_studio_client_config
 
     client_root = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
@@ -679,6 +680,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
         site_context=site_ctx,
         analysis=analysis,
     )
+    quality = evaluate_expediente_quality(expediente)
 
     # Default output path: Desktop
     if output_path is None:
@@ -813,12 +815,20 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     _studio_value_panel(pdf, studio, client_name=client_config.client_name)
     pdf.ln(4)
 
+    _section_title(pdf, "CALIDAD DEL EXPEDIENTE")
+    _quality_panel(pdf, quality)
+    pdf.ln(4)
+
     _section_title(pdf, "CHECKLIST POR TIPO DE EXPEDIENTE")
     _studio_checklist(pdf, studio)
     pdf.ln(4)
 
     _section_title(pdf, "FUENTES CONSULTADAS")
     _sources_table(pdf, site_ctx)
+    pdf.ln(5)
+
+    _section_title(pdf, "TRAZABILIDAD DE CONCLUSIONES")
+    _traceability_table(pdf, quality.source_traces)
     pdf.ln(5)
 
     # ── Parcel data from site_context ─────────────────────────────────────
@@ -871,6 +881,9 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     if full_analysis:
         _section_title(pdf, "ANALISIS DETALLADO")
         _full_analysis_block(pdf, full_analysis)
+
+    _section_title(pdf, "REVISION POR ARQUITECTO")
+    _architect_review_box(pdf, quality)
 
     pdf.ln(4)
     _legend(pdf)
@@ -931,6 +944,70 @@ def _studio_checklist(pdf: ArchonPDF, studio: dict[str, Any]) -> None:
         pdf.set_x(pdf.l_margin)
         width = pdf.w - pdf.l_margin - pdf.r_margin
         pdf.multi_cell(width, 5.5, f"  OK  {_clean_text(str(item))}", border=1)
+
+
+def _quality_panel(pdf: ArchonPDF, quality: Any) -> None:
+    missing = "; ".join(item.label for item in quality.missing_items[:5])
+    if not missing:
+        missing = "Sin faltas críticas detectadas."
+    pack = quality.normative_pack
+    pack_value = (
+        f"{pack.municipality} · {pack.status} · actualización {pack.last_updated}"
+        if pack
+        else "Municipio pendiente de paquete normativo"
+    )
+    rows = [
+        ("Estado", quality.completeness_label),
+        ("Riesgo jurídico", quality.risk_label),
+        (
+            "Fuentes oficiales",
+            "Consultadas correctamente"
+            if quality.sources_consulted_ok
+            else "Incompletas o pendientes",
+        ),
+        ("Base normativa", pack_value),
+        ("Faltas detectadas", missing),
+    ]
+    _simple_key_value_table(pdf, rows)
+
+
+def _traceability_table(pdf: ArchonPDF, traces: Sequence[Any]) -> None:
+    headers = ["Fuente", "Dato oficial", "Inferencia / validación pendiente"]
+    col_w = [34, 54, 86]
+    _draw_table_header(pdf, headers, col_w)
+    for idx, trace in enumerate(traces):
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        status = str(getattr(trace, "status", ""))
+        official = _clean_text(str(getattr(trace, "official_data", "")))[:46]
+        inference = _clean_text(str(getattr(trace, "archon_inference", "")))
+        pending = _clean_text(str(getattr(trace, "pending_validation", "")))
+        detail = f"{inference} Pendiente: {pending}"[:78]
+        _ensure_space(pdf, 9)
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "B", 7.5)
+        pdf.cell(col_w[0], 7, f"  {_clean_text(str(trace.name))[:22]}", border=1, fill=True)
+        pdf.set_font(pdf._fn, "", 7.2)
+        pdf.cell(col_w[1], 7, f"  {official}", border=1, fill=True)
+        pdf.cell(
+            col_w[2],
+            7,
+            f"  {status}: {detail}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
+
+
+def _architect_review_box(pdf: ArchonPDF, quality: Any) -> None:
+    review = quality.architect_review
+    include_label = "Sí" if review.include_in_report else "No"
+    rows = [
+        ("Estado revisión", review.label),
+        ("Incluir en informe", include_label),
+        ("Nota arquitecto", review.note or "Sin nota de revisión todavía."),
+    ]
+    _simple_key_value_table(pdf, rows)
 
 
 def _legal_checks_table(pdf: ArchonPDF, checks: list[dict[str, Any]]) -> None:

@@ -129,13 +129,21 @@ class WebTools:
 
             extracted = ""
             try:
-                extracted = _fetch_static_text(url, cancel_event=cancel_event)
+                extracted = _call_with_optional_cancel(
+                    _fetch_static_text,
+                    url,
+                    cancel_event=cancel_event,
+                )
             except Exception:
                 extracted = ""
 
             _raise_if_cancelled(cancel_event)
             if _should_fallback_to_browser(url, extracted):
-                browser_text = _fetch_browser_text(url, cancel_event=cancel_event)
+                browser_text = _call_with_optional_cancel(
+                    _fetch_browser_text,
+                    url,
+                    cancel_event=cancel_event,
+                )
                 if browser_text:
                     extracted = browser_text
 
@@ -211,6 +219,19 @@ def _fetch_browser_text(url: str, cancel_event: Event | None = None) -> str:
     if not extracted:
         return page_text[:6000]
     return extracted
+
+
+def _call_with_optional_cancel(
+    fn: Any,
+    *args: Any,
+    cancel_event: Event | None,
+) -> Any:
+    try:
+        return fn(*args, cancel_event=cancel_event)
+    except TypeError as exc:
+        if "cancel_event" not in str(exc):
+            raise
+        return fn(*args)
 
 
 def _run_cancellable(

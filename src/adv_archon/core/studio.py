@@ -23,6 +23,8 @@ class CityNormativePack:
     label: str
     sources: tuple[str, ...]
     note: str
+    last_updated: str
+    source_url: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +137,8 @@ CITY_PACKS: tuple[CityNormativePack, ...] = (
         label="Madrid Studio Pack",
         sources=("PGOU Madrid", "Catastro OVC", "SNCZI/CNIG", "IDE/IGN"),
         note="Paquete base validado para demos comerciales y expedientes preliminares.",
+        last_updated="2026-05-18",
+        source_url="https://www.madrid.es/",
     ),
     CityNormativePack(
         municipality="Zaragoza",
@@ -142,6 +146,8 @@ CITY_PACKS: tuple[CityNormativePack, ...] = (
         label="Zaragoza Studio Pack",
         sources=("PGOU Zaragoza", "Catastro OVC", "SNCZI/CNIG"),
         note="Paquete operativo pendiente de revisión fina de ordenanzas.",
+        last_updated="2026-05-18",
+        source_url="https://www.zaragoza.es/",
     ),
     CityNormativePack(
         municipality="Barcelona",
@@ -149,6 +155,8 @@ CITY_PACKS: tuple[CityNormativePack, ...] = (
         label="Barcelona Studio Pack",
         sources=("Planeamiento municipal", "Catastro OVC", "fuentes sectoriales"),
         note="Paquete previsto para validación por despacho colaborador.",
+        last_updated="2026-05-18",
+        source_url="https://ajuntament.barcelona.cat/",
     ),
     CityNormativePack(
         municipality="Valencia",
@@ -156,6 +164,8 @@ CITY_PACKS: tuple[CityNormativePack, ...] = (
         label="Valencia Studio Pack",
         sources=("Planeamiento municipal", "Catastro OVC"),
         note="Pendiente de curación normativa antes de venta como paquete validado.",
+        last_updated="2026-05-18",
+        source_url="https://www.valencia.es/",
     ),
     CityNormativePack(
         municipality="Sevilla",
@@ -163,6 +173,8 @@ CITY_PACKS: tuple[CityNormativePack, ...] = (
         label="Sevilla Studio Pack",
         sources=("Planeamiento municipal", "Catastro OVC"),
         note="Pendiente de curación normativa antes de venta como paquete validado.",
+        last_updated="2026-05-18",
+        source_url="https://www.sevilla.org/",
     ),
 )
 
@@ -232,6 +244,8 @@ def build_studio_payload(
             "note": pack.note
             if pack
             else "Municipio pendiente de curación normativa para Studio Edition.",
+            "last_updated": pack.last_updated if pack else "",
+            "source_url": pack.source_url if pack else "",
         },
     }
 

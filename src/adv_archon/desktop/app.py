@@ -2629,7 +2629,8 @@ def launch_desktop_app(
 
                 pack = QLabel(
                     f"{city.get('label', 'Paquete municipal')} · "
-                    f"estado {city.get('status', 'pendiente')}"
+                    f"estado {city.get('status', 'pendiente')} · "
+                    f"act. {city.get('last_updated', '—')}"
                 )
                 pack.setObjectName("Faint")
                 pack.setWordWrap(True)
@@ -2911,6 +2912,7 @@ def launch_desktop_app(
             from PySide6.QtWidgets import (
                 QDialog,
                 QFrame,
+                QInputDialog,
             )
             from PySide6.QtWidgets import (
                 QHBoxLayout as _QHBoxLayout,
@@ -3344,11 +3346,49 @@ def launch_desktop_app(
                 dlg.accept()
                 QTimer.singleShot(80, lambda: self._submit_live_prompt("/live"))
 
+            def _on_review(eid: str, action: str) -> None:
+                exp = store.get(eid)
+                if not exp:
+                    return
+                from adv_archon.core.expediente_quality import review_state_json
+
+                note: str | None = None
+                resolved_action: str | None = action
+                if action == "note":
+                    current = ""
+                    try:
+                        current_state = json.loads(exp.review_state or "{}")
+                        current = str(current_state.get("note") or "")
+                    except (TypeError, ValueError):
+                        current = ""
+                    note, ok = QInputDialog.getMultiLineText(
+                        dlg,
+                        "Nota de revisión",
+                        "Añade una nota del arquitecto para este expediente:",
+                        current,
+                    )
+                    if not ok:
+                        return
+                    resolved_action = None
+                updated = dataclasses.replace(
+                    exp,
+                    review_state=review_state_json(
+                        exp.review_state,
+                        action=resolved_action,
+                        note=note,
+                    ),
+                )
+                store.update(updated)
+                detail_panel.load_expediente(updated)
+                list_panel.populate(store.list_all())
+                self.statusBar().showMessage("Revisión de arquitecto guardada.", 4000)
+
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),
                 on_analyze=_on_analyze,
                 on_export=_on_export,
                 on_talk=_on_talk,
+                on_review=_on_review,
             )
 
             def _attach_plan(eid: str) -> None:

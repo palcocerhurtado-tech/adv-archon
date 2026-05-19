@@ -329,12 +329,14 @@ if PYSIDE6_AVAILABLE:
             on_analyze: Any = None,
             on_export: Any = None,
             on_talk: Any = None,
+            on_review: Any = None,
         ) -> None:
             super().__init__()
             self._on_attach_plan = on_attach_plan
             self._on_analyze = on_analyze
             self._on_export = on_export
             self._on_talk = on_talk
+            self._on_review = on_review
             self._expediente_id: str | None = None
             self._expediente: Any = None
             self._operation_busy = False
@@ -436,6 +438,32 @@ if PYSIDE6_AVAILABLE:
             btn_row.addStretch()
             layout.addLayout(btn_row)
 
+            review_row = QHBoxLayout()
+            review_label = QLabel("Revisión arquitecto")
+            review_label.setStyleSheet(f"color:{TEXT_FAINT};font-size:10px;font-weight:700;")
+            review_row.addWidget(review_label)
+            self._review_confirm_btn = QPushButton("Confirmar")
+            self._review_correct_btn = QPushButton("Corregir")
+            self._review_note_btn = QPushButton("Añadir nota")
+            self._review_exclude_btn = QPushButton("Excluir informe")
+            for button, action in (
+                (self._review_confirm_btn, "confirmed"),
+                (self._review_correct_btn, "needs_correction"),
+                (self._review_exclude_btn, "excluded"),
+            ):
+                button.setObjectName("Ghost")
+                button.clicked.connect(
+                    lambda _checked=False, act=action: self._on_review_clicked(act)
+                )
+                review_row.addWidget(button)
+            self._review_note_btn.setObjectName("Ghost")
+            self._review_note_btn.clicked.connect(
+                lambda _checked=False: self._on_review_clicked("note")
+            )
+            review_row.addWidget(self._review_note_btn)
+            review_row.addStretch(1)
+            layout.addLayout(review_row)
+
         def _set_brand_icon(self, button: Any) -> None:
             try:
                 from adv_archon.desktop.branding import logo_path
@@ -477,6 +505,13 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setEnabled(has_report and not self._operation_busy)
             self._open_report_btn.setVisible(has_report)
             self._talk_btn.setEnabled(not self._operation_busy)
+            for button in (
+                self._review_confirm_btn,
+                self._review_correct_btn,
+                self._review_note_btn,
+                self._review_exclude_btn,
+            ):
+                button.setEnabled(not self._operation_busy)
 
         def set_operation_busy(self, busy: bool, label: str = "") -> None:
             self._operation_busy = busy
@@ -487,6 +522,13 @@ if PYSIDE6_AVAILABLE:
             self._export_btn.setEnabled(False)
             self._open_report_btn.setEnabled(False)
             self._talk_btn.setEnabled(False)
+            for button in (
+                self._review_confirm_btn,
+                self._review_correct_btn,
+                self._review_note_btn,
+                self._review_exclude_btn,
+            ):
+                button.setEnabled(False)
             if not busy and self._expediente is not None:
                 self.load_expediente(self._expediente)
 
@@ -509,6 +551,47 @@ if PYSIDE6_AVAILABLE:
                     f"<p><b>{escape(template.label)}</b></p>"
                     f"<p style='font-size:11px;color:#555;'>{escape(template.decision_focus)}</p>"
                 )
+            except Exception:
+                pass
+
+            try:
+                from adv_archon.core.expediente_quality import evaluate_expediente_quality
+
+                quality = evaluate_expediente_quality(exp)
+                missing = ", ".join(item.label for item in quality.missing_items[:4])
+                if not missing:
+                    missing = "Sin faltas críticas detectadas."
+                review = quality.architect_review
+                pack = quality.normative_pack
+                pack_label = (
+                    f"{pack.municipality} · {pack.status} · {pack.last_updated}"
+                    if pack
+                    else "Municipio pendiente de paquete normativo"
+                )
+                risk_color = {
+                    "alto": "#B24A3C",
+                    "medio": "#C9A227",
+                    "bajo": "#4B915B",
+                }.get(quality.risk_level, "#5C5C58")
+                lines.append(
+                    "<h4>Calidad del expediente</h4>"
+                    "<table>"
+                    f"<tr><td>Estado</td><td><b>{escape(quality.completeness_label)}</b></td></tr>"
+                    f"<tr><td>Riesgo jurídico</td><td style='color:{risk_color};'><b>"
+                    f"{escape(quality.risk_label)}</b></td></tr>"
+                    "<tr><td>Fuentes oficiales</td><td><b>"
+                    f"{'consultadas' if quality.sources_consulted_ok else 'incompletas'}"
+                    "</b></td></tr>"
+                    f"<tr><td>Base municipal</td><td>{escape(pack_label)}</td></tr>"
+                    f"<tr><td>Falta</td><td>{escape(missing)}</td></tr>"
+                    f"<tr><td>Revisión</td><td><b>{escape(review.label)}</b></td></tr>"
+                    "</table>"
+                )
+                if review.note:
+                    lines.append(
+                        "<p style='font-size:10px;color:#555;'>"
+                        f"Nota revisión: {escape(review.note)}</p>"
+                    )
             except Exception:
                 pass
 
@@ -676,6 +759,13 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setEnabled(False)
             self._open_report_btn.setVisible(False)
             self._talk_btn.setEnabled(False)
+            for button in (
+                self._review_confirm_btn,
+                self._review_correct_btn,
+                self._review_note_btn,
+                self._review_exclude_btn,
+            ):
+                button.setEnabled(False)
 
         def _on_attach_clicked(self) -> None:
             if not self._expediente_id:
@@ -698,6 +788,11 @@ if PYSIDE6_AVAILABLE:
         def _on_talk_clicked(self) -> None:
             if self._on_talk and self._expediente_id:
                 self._on_talk(self._expediente_id)
+
+        def _on_review_clicked(self, action: str) -> None:
+            if not self._on_review or not self._expediente_id:
+                return
+            self._on_review(self._expediente_id, action)
 
         def _on_open_report_clicked(self) -> None:
             if self._expediente and self._expediente.report_path:

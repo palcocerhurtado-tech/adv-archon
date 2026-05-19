@@ -26,6 +26,7 @@ class Expediente:
     updated_at: str
     notes: str
     case_type: str = "cambio_uso_vivienda"
+    review_state: str = ""
 
 
 class ExpedienteStore:
@@ -60,7 +61,8 @@ class ExpedienteStore:
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 notes TEXT NOT NULL DEFAULT '',
-                case_type TEXT NOT NULL DEFAULT 'cambio_uso_vivienda'
+                case_type TEXT NOT NULL DEFAULT 'cambio_uso_vivienda',
+                review_state TEXT NOT NULL DEFAULT ''
             );
         """)
         existing = {
@@ -83,6 +85,7 @@ class ExpedienteStore:
             "updated_at": "TEXT NOT NULL DEFAULT ''",
             "notes": "TEXT NOT NULL DEFAULT ''",
             "case_type": "TEXT NOT NULL DEFAULT 'cambio_uso_vivienda'",
+            "review_state": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in columns.items():
             if name not in existing:
@@ -129,6 +132,7 @@ class ExpedienteStore:
             updated_at=now,
             notes=notes,
             case_type=case_type,
+            review_state="",
         )
         self._conn.execute(
             """
@@ -136,8 +140,8 @@ class ExpedienteStore:
                 id, title, address, municipality, province,
                 latitude, longitude, cadastral_ref, status,
                 plan_path, site_context, analysis_result, report_path,
-                created_at, updated_at, notes, case_type
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, notes, case_type, review_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 expediente.id,
@@ -157,6 +161,7 @@ class ExpedienteStore:
                 expediente.updated_at,
                 expediente.notes,
                 expediente.case_type,
+                expediente.review_state,
             ),
         )
         self._conn.commit()
@@ -194,7 +199,8 @@ class ExpedienteStore:
                 report_path = ?,
                 updated_at = ?,
                 notes = ?,
-                case_type = ?
+                case_type = ?,
+                review_state = ?
             WHERE id = ?
             """,
             (
@@ -213,6 +219,7 @@ class ExpedienteStore:
                 expediente.updated_at,
                 expediente.notes,
                 expediente.case_type,
+                expediente.review_state,
                 expediente.id,
             ),
         )
@@ -249,6 +256,7 @@ class ExpedienteStore:
             updated_at=row["updated_at"],
             notes=row["notes"],
             case_type=row["case_type"],
+            review_state=row["review_state"],
         )
 
 

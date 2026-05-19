@@ -58,6 +58,7 @@ def test_expediente_store_persists_case_type_and_migrates_old_db(tmp_path: Path)
     old = store.get("old")
     assert old is not None
     assert old.case_type == "cambio_uso_vivienda"
+    assert old.review_state == ""
 
     exp = store.create(
         title="Parcela vivienda",
@@ -67,6 +68,7 @@ def test_expediente_store_persists_case_type_and_migrates_old_db(tmp_path: Path)
     saved = store.get(exp.id)
     assert saved is not None
     assert saved.case_type == "vivienda_unifamiliar"
+    assert saved.review_state == ""
 
 
 def test_create_studio_demo_expedientes_generates_three_reports(tmp_path: Path) -> None:

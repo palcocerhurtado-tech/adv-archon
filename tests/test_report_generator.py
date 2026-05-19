@@ -27,6 +27,8 @@ def _make_exp(**kwargs):
         created_at="2026-05-03T10:00:00+00:00",
         updated_at="2026-05-03T10:30:00+00:00",
         notes="",
+        case_type="cambio_uso_vivienda",
+        review_state="",
     )
     base.update(kwargs)
     obj = MagicMock()

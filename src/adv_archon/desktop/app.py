@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import time
 from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
@@ -219,6 +220,8 @@ def launch_desktop_app(
             self._studio_pack_dialog: Any = None
             self._qa_dialog: Any = None
             self._qa_runner_ref: tuple[Any, Any] | None = None
+            self._system_diag_ref: tuple[Any, Any] | None = None
+            self._last_performance_report: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
             self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
@@ -453,6 +456,10 @@ def launch_desktop_app(
             self._qa_button = self._make_nav_btn("  QA permisos")
             self._qa_button.clicked.connect(self._open_qa_panel)
             sl.addWidget(self._qa_button)
+
+            self._system_button = self._make_nav_btn("  Estado sistema")
+            self._system_button.clicked.connect(self._open_system_status)
+            sl.addWidget(self._system_button)
 
             sl.addSpacing(6)
             self._mode_status_lbl = QLabel("")
@@ -1248,6 +1255,7 @@ def launch_desktop_app(
             navs = {
                 "home": getattr(self, "_nav_home_btn", None),
                 "chat": getattr(self, "_nav_chat_btn", None),
+                "system": getattr(self, "_system_button", None),
             }
             for key, btn in navs.items():
                 if btn is not None:
@@ -1451,6 +1459,281 @@ def launch_desktop_app(
             self._status_label.setText("Inicio Studio listo.")
             self.statusBar().showMessage("Inicio Studio listo.", 2500)
 
+        def _open_system_status(self) -> None:
+            self._close_workspace_panels()
+            self._clear_message_area()
+            self._home_visible = False
+            self._set_nav_context("system")
+
+            page = QFrame()
+            page.setObjectName("HomeStudio")
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(6, 4, 6, 4)
+            lay.setSpacing(14)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(16)
+            hero_lay.addWidget(self._make_logo(52))
+            text_col = QVBoxLayout()
+            eyebrow = QLabel("ESTADO DEL SISTEMA")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Diagnóstico operativo antes de enseñar ADV ARCHON.")
+            title.setObjectName("StudioTitle")
+            title.setWordWrap(True)
+            subtitle = QLabel(
+                "Comprueba motor local, warmup, SQLite, fuentes oficiales y PDF. "
+                "El análisis corre en segundo plano para no congelar la app."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            text_col.addWidget(eyebrow)
+            text_col.addWidget(title)
+            text_col.addWidget(subtitle)
+            hero_lay.addLayout(text_col, 1)
+            self._system_run_btn = QPushButton("Diagnosticar rendimiento")
+            self._system_run_btn.setObjectName("Primary")
+            self._system_run_btn.clicked.connect(self._run_system_diagnostics)
+            hero_lay.addWidget(
+                self._system_run_btn,
+                alignment=Qt.AlignmentFlag.AlignVCenter,
+            )
+            lay.addWidget(hero)
+
+            cards = QHBoxLayout()
+            cards.setSpacing(10)
+            self._system_cards: dict[str, QLabel] = {}
+            for key, label, value in (
+                ("demo", "Demo", "Pendiente"),
+                ("ollama", "Ollama", self._ollama_state),
+                ("model", "Modelo", self._ollama_model),
+                ("sources", "Fuentes", "Sin medir"),
+                ("pdf", "PDF", "Sin medir"),
+            ):
+                card = QFrame()
+                card.setObjectName("StudioMetric")
+                card_lay = QVBoxLayout(card)
+                card_lay.setContentsMargins(12, 10, 12, 10)
+                value_lbl = QLabel(value)
+                value_lbl.setObjectName("StudioDecision")
+                value_lbl.setWordWrap(True)
+                label_lbl = QLabel(label)
+                label_lbl.setObjectName("Faint")
+                card_lay.addWidget(value_lbl)
+                card_lay.addWidget(label_lbl)
+                self._system_cards[key] = value_lbl
+                cards.addWidget(card)
+            lay.addLayout(cards)
+
+            report_panel = QFrame()
+            report_panel.setObjectName("Panel")
+            report_lay = QVBoxLayout(report_panel)
+            report_lay.setContentsMargins(14, 14, 14, 14)
+            report_lay.setSpacing(10)
+            report_header = QHBoxLayout()
+            report_title = QLabel("Informe accionable")
+            report_title.setObjectName("StudioCase")
+            report_header.addWidget(report_title, 1)
+            self._system_export_btn = QPushButton("Exportar diagnóstico")
+            self._system_export_btn.setObjectName("Ghost")
+            self._system_export_btn.setEnabled(self._last_performance_report is not None)
+            self._system_export_btn.clicked.connect(self._export_system_diagnostics)
+            report_header.addWidget(self._system_export_btn)
+            report_lay.addLayout(report_header)
+            self._system_report_view = QTextEdit()
+            self._system_report_view.setReadOnly(True)
+            self._system_report_view.setMinimumHeight(330)
+            self._system_report_view.setPlainText(
+                self._last_performance_report.render_markdown()
+                if self._last_performance_report is not None
+                else (
+                    "Pulsa “Diagnosticar rendimiento” para generar una lectura real "
+                    "del estado de ADV ARCHON en este Mac.\n\n"
+                    "El resultado indicará si está listo para demo, qué puede ir lento "
+                    "y qué conviene arreglar antes de enseñarlo a un despacho."
+                )
+            )
+            report_lay.addWidget(self._system_report_view, 1)
+            lay.addWidget(report_panel, 1)
+
+            idx = self._messages_layout.count() - 1
+            self._messages_layout.insertWidget(idx, page)
+            self._status_label.setText("Estado del sistema listo.")
+            self.statusBar().showMessage("Panel Estado del Sistema listo.", 2500)
+            if self._last_performance_report is not None:
+                self._render_system_report(self._last_performance_report)
+
+        def _run_system_diagnostics(self) -> None:
+            if self._system_diag_ref is not None:
+                self.statusBar().showMessage("Diagnóstico ya en curso.", 2500)
+                return
+
+            class _SystemDiagWorker(QObject):
+                completed = Signal(object)
+                failed = Signal(str)
+                finished = Signal()
+
+                def run(self) -> None:
+                    try:
+                        from adv_archon.core.performance_profiler import (
+                            PerformanceProfiler,
+                        )
+
+                        profiler = PerformanceProfiler(
+                            config=config,
+                            project_root=project_root,
+                        )
+                        self.completed.emit(
+                            profiler.run(
+                                include_ollama=True,
+                                include_qthread=False,
+                                include_official_sources=True,
+                            )
+                        )
+                    except Exception as exc:
+                        self.failed.emit(str(exc))
+                    finally:
+                        self.finished.emit()
+
+            self._system_run_btn.setEnabled(False)
+            self._system_run_btn.setText("Diagnosticando…")
+            self._system_export_btn.setEnabled(False)
+            self._system_report_view.setPlainText(
+                "Diagnosticando ADV ARCHON...\n\n"
+                "- Comprobando Ollama y modelo local.\n"
+                "- Midiendo SQLite y stores del producto.\n"
+                "- Consultando fuentes oficiales españolas.\n"
+                "- Generando PDF directo de prueba.\n\n"
+                "Puedes seguir usando la ventana; este proceso no corre en el hilo UI."
+            )
+            self._system_cards["demo"].setText("Midiendo")
+            self._status_label.setText("Diagnosticando rendimiento…")
+            self.statusBar().showMessage("Diagnóstico del sistema en curso…")
+            started = time.perf_counter()
+
+            thread = QThread(self)
+            worker = _SystemDiagWorker()
+            worker.moveToThread(thread)
+
+            def _complete(report: object) -> None:
+                from adv_archon.core.performance_profiler import (
+                    PerformanceProbe,
+                    PerformanceReport,
+                )
+
+                if isinstance(report, PerformanceReport):
+                    elapsed_ms = (time.perf_counter() - started) * 1000
+                    qthread_probe = PerformanceProbe(
+                        name="desktop_profiler_worker_roundtrip",
+                        category="desktop",
+                        elapsed_ms=round(elapsed_ms, 3),
+                        status="ok" if elapsed_ms < 1000 else "warning",
+                        detail="Profiler ejecutado desde QThread sin bloquear la UI",
+                    )
+                    report = PerformanceReport(
+                        generated_at=report.generated_at,
+                        project=report.project,
+                        active_model=report.active_model,
+                        fast_model=report.fast_model,
+                        probes=report.probes + (qthread_probe,),
+                        findings=report.findings,
+                    )
+                self._render_system_report(report)
+
+            worker.completed.connect(_complete)
+            worker.failed.connect(self._handle_system_diag_error)
+            worker.finished.connect(thread.quit)
+            worker.finished.connect(worker.deleteLater)
+            thread.finished.connect(thread.deleteLater)
+            thread.finished.connect(self._finish_system_diag)
+            thread.started.connect(worker.run)
+            self._system_diag_ref = (thread, worker)
+            thread.start()
+
+        def _render_system_report(self, report: object) -> None:
+            self._last_performance_report = report
+            with suppress(RuntimeError):
+                markdown = report.render_markdown()
+                self._system_report_view.setPlainText(markdown)
+                self._system_export_btn.setEnabled(True)
+
+            probes = {probe.name: probe for probe in report.probes}
+            official = [
+                probe for probe in report.probes if probe.category == "official_sources"
+            ]
+            official_errors = sum(1 for probe in official if probe.status == "error")
+            official_slow = sum(1 for probe in official if probe.status == "warning")
+            pdf = probes.get("generate_expediente_pdf")
+            model = probes.get("ollama_model_available")
+            ollama = probes.get("ollama_tags")
+            worst = report.worst_severity
+            ready_label = {
+                "critical": "No apto",
+                "warning": "Revisar",
+                "info": "Listo",
+            }.get(worst, "Revisar")
+            with suppress(RuntimeError):
+                self._system_cards["demo"].setText(ready_label)
+                self._system_cards["ollama"].setText(
+                    "OK" if ollama and ollama.status == "ok" else "Revisar"
+                )
+                self._system_cards["model"].setText(
+                    "Instalado" if model and model.status == "ok" else "Falta"
+                )
+                if official_errors:
+                    self._system_cards["sources"].setText(f"{official_errors} fallan")
+                elif official_slow:
+                    self._system_cards["sources"].setText(f"{official_slow} lentas")
+                else:
+                    self._system_cards["sources"].setText("OK")
+                self._system_cards["pdf"].setText(
+                    "OK" if pdf and pdf.status == "ok" else "Revisar"
+                )
+                self._status_label.setText(f"Estado del sistema: {ready_label}.")
+                self.statusBar().showMessage(
+                    f"Diagnóstico completado: {ready_label}.", 5000
+                )
+
+        def _handle_system_diag_error(self, message: str) -> None:
+            with suppress(RuntimeError):
+                self._system_report_view.setPlainText(
+                    "No se pudo completar el diagnóstico.\n\n"
+                    f"Detalle técnico: {message}\n\n"
+                    "La app sigue operativa; revisa Ollama, red local y permisos antes "
+                    "de una demo comercial."
+                )
+                self._system_cards["demo"].setText("Revisar")
+                self._status_label.setText("Diagnóstico fallido.")
+                self.statusBar().showMessage(
+                    "No se pudo completar el diagnóstico.", 5000
+                )
+
+        def _finish_system_diag(self) -> None:
+            self._system_diag_ref = None
+            if hasattr(self, "_system_run_btn"):
+                with suppress(RuntimeError):
+                    self._system_run_btn.setEnabled(True)
+                    self._system_run_btn.setText("Diagnosticar rendimiento")
+
+        def _export_system_diagnostics(self) -> None:
+            if self._last_performance_report is None:
+                QMessageBox.information(
+                    self,
+                    "Estado del Sistema",
+                    "Primero ejecuta un diagnóstico.",
+                )
+                return
+            desktop = Path.home() / "Desktop"
+            target = desktop / "ADV_ARCHON_diagnostico_sistema.md"
+            target.write_text(
+                self._last_performance_report.render_markdown(),
+                encoding="utf-8",
+            )
+            self.statusBar().showMessage(f"Diagnóstico exportado: {target}", 5000)
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(target)))
+
         def _send_daily_prompt(self) -> None:
             self._input.setPlainText(
                 "Dame un briefing ejecutivo del día. Antes de responder usa mis "
@@ -1631,6 +1914,7 @@ def launch_desktop_app(
             self._nav_client_btn.setEnabled(accepts)
             self._nav_pack_btn.setEnabled(accepts)
             self._settings_button.setEnabled(allows_cfg)
+            self._system_button.setEnabled(accepts)
             self._cancel_button.setVisible(state.cancellable)
 
             if state.busy:

@@ -262,6 +262,7 @@ def launch_desktop_app(
 
             # Worker
             self._backend_thread = QThread(self)
+            self._backend_thread.setObjectName("adv-archon-backend")
             self._backend_worker = DesktopRuntimeWorker(
                 config=config,
                 project_root=project_root,
@@ -319,6 +320,8 @@ def launch_desktop_app(
         def closeEvent(self, ev) -> None:
             if self._backend_thread is None or not self._backend_thread.isRunning():
                 ev.accept()
+                if self._close_requested:
+                    QTimer.singleShot(0, QApplication.quit)
                 return
             if self._close_requested:
                 # Second close attempt while thread is still blocked — force quit.
@@ -331,6 +334,39 @@ def launch_desktop_app(
             ev.ignore()
             # Safety net: if the worker thread doesn't stop in 4 s, force quit.
             QTimer.singleShot(4000, QApplication.quit)
+
+        def _stop_background_threads(self) -> None:
+            """Stop Qt workers before QApplication tears down Python wrappers."""
+            for ref_name in (
+                "_system_diag_ref",
+                "_model_loader_ref",
+                "_qa_runner_ref",
+                "_warmup_agent_ref",
+            ):
+                ref = getattr(self, ref_name, None)
+                if not ref:
+                    continue
+                thread = ref[0] if ref_name != "_warmup_agent_ref" else ref[1]
+                with suppress(Exception):
+                    if thread is not None and thread.isRunning():
+                        thread.quit()
+                        thread.wait(1500)
+                setattr(self, ref_name, None)
+
+            thread = self._backend_thread
+            if thread is None or not thread.isRunning():
+                return
+            with suppress(Exception):
+                self.cancel_requested.emit()
+                self.shutdown_requested.emit()
+            if thread.isRunning():
+                with suppress(Exception):
+                    thread.quit()
+                    thread.wait(3000)
+            if thread.isRunning():
+                with suppress(Exception):
+                    thread.terminate()
+                    thread.wait(1000)
 
         def showEvent(self, ev) -> None:
             super().showEvent(ev)
@@ -1063,6 +1099,7 @@ def launch_desktop_app(
             self._backend_worker = None
             if self._close_requested:
                 self.close()
+                QTimer.singleShot(0, QApplication.quit)
 
         def _show_confirmation_dialog(self, question: str) -> None:
             answer = QMessageBox.question(
@@ -1614,6 +1651,7 @@ def launch_desktop_app(
             started = time.perf_counter()
 
             thread = QThread(self)
+            thread.setObjectName("adv-archon-system-diagnostics")
             worker = _SystemDiagWorker()
             worker.moveToThread(thread)
 
@@ -2068,6 +2106,7 @@ def launch_desktop_app(
                 model_progress.setVisible(True)
                 refresh_btn.setEnabled(False)
                 thread = QThread(dlg)
+                thread.setObjectName("adv-archon-model-loader")
                 worker = _ModelListWorker()
                 bridge = _ModelListBridge(dlg)
                 worker.moveToThread(thread)
@@ -2231,6 +2270,7 @@ def launch_desktop_app(
                 clear_rows()
                 status.setText("Ejecutando comprobaciones…")
                 thread = QThread(dlg)
+                thread.setObjectName("adv-archon-qa")
                 worker = _QAWorker()
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
@@ -3444,6 +3484,7 @@ def launch_desktop_app(
                     "Resolviendo parcela y consultando fuentes oficiales…",
                 )
                 t = QThread(dlg)
+                t.setObjectName("adv-archon-expediente-geo")
                 w = _GeoWorker(exp, data_dir)
                 bridge = _ExpedienteThreadBridge(dlg)
                 w.moveToThread(t)
@@ -3578,6 +3619,7 @@ def launch_desktop_app(
                 detail_panel.set_operation_busy(True, "Generando informe PDF profesional…")
                 self.statusBar().showMessage("Generando informe PDF…")
                 t = QThread(dlg)
+                t.setObjectName("adv-archon-expediente-export")
                 w = _ExportWorker(exp, output_path)
                 bridge = _ExpedienteThreadBridge(dlg)
                 w.moveToThread(t)
@@ -3809,9 +3851,22 @@ def launch_desktop_app(
     # ── Launch ────────────────────────────────────────────────────────────────
     import sys
     app = QApplication.instance() or QApplication(sys.argv)
+    app.setQuitOnLastWindowClosed(False)
     resolved_logo = logo_path()
     if resolved_logo.exists():
         app.setWindowIcon(QIcon(str(resolved_logo)))
+    global _DESKTOP_WINDOW_REF
     window = DesktopWindow()
+    _DESKTOP_WINDOW_REF = window
+    app._adv_archon_window = window  # keep a strong Python reference for Finder launches
+    app.aboutToQuit.connect(window._stop_background_threads)
     window.show()
+    window.raise_()
+    window.activateWindow()
+    QTimer.singleShot(250, window.showNormal)
+    QTimer.singleShot(300, window.raise_)
+    QTimer.singleShot(350, window.activateWindow)
+    QTimer.singleShot(1200, window.showNormal)
+    QTimer.singleShot(1250, window.raise_)
+    QTimer.singleShot(1300, window.activateWindow)
     return app.exec()

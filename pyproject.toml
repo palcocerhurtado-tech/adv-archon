@@ -19,6 +19,7 @@ dependencies = [
   "python-multipart>=0.0.20",
   "passlib[bcrypt]>=1.7.4",
   "ddgs>=9.6.1",
+  "fonttools<4.62",
   "fpdf2>=2.8.0",
   "faster-whisper>=1.1.1",
   "google-api-python-client>=2.169.0",

@@ -9,6 +9,7 @@ from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage
 from adv_archon.core.pgou_store import PGOUChunk, PGOUStore
 from adv_archon.core.report_generator import generate_compliance_pdf
+from adv_archon.core.token_budget import TokenBudget
 from adv_archon.tools.pgou_scraper import PGOUScraper
 from adv_archon.tools.urban_plan import PlanData, plan_to_summary, read_plan
 
@@ -32,6 +33,8 @@ class ComplianceReport:
     annotations: list[ComplianceAnnotation]
     summary: str
     raw_analysis: str
+    token_budget_utilization: float = 0.0
+    token_budget_used: int = 0
 
 
 @dataclass(slots=True)
@@ -206,6 +209,10 @@ class UrbanComplianceTools:
                 "municipality": municipality,
                 "generated_at": report.generated_at,
                 "summary": report.summary,
+                "token_budget": {
+                    "utilization": report.token_budget_utilization,
+                    "used_tokens_estimate": report.token_budget_used,
+                },
                 "annotations": [
                     {
                         "article_ref": a.article_ref,
@@ -420,12 +427,7 @@ class UrbanComplianceTools:
             "Responde en español."
         )
 
-        user_message = (
-            f"MUNICIPIO: {municipality}\n\n"
-            + (f"=== DATOS OFICIALES DE PARCELA Y ZONA ===\n{site_block}\n\n" if site_block else "")
-            + f"=== DATOS EXTRAÍDOS DEL PLANO ===\n{plan_summary}\n\n"
-            f"=== FRAGMENTOS RELEVANTES DEL PGOU DE {municipality.upper()} ===\n"
-            f"{normativa_block}\n\n"
+        instructions = (
             "Por favor, proporciona:\n"
             "1. RESUMEN EJECUTIVO: 3-5 líneas con el veredicto general.\n"
             "2. ANOTACIONES DETALLADAS: Para cada aspecto relevante del plano "
@@ -434,6 +436,40 @@ class UrbanComplianceTools:
             "citando el artículo o norma aplicable.\n"
             "3. RECOMENDACIONES: Qué debe revisar o corregir el arquitecto.\n"
         )
+        budget = TokenBudget(max_tokens=_ollama_num_ctx(self._llm), reserved_output=768)
+        budget.add("system_prompt", system_prompt, priority=10)
+        if site_block:
+            budget.add("site_context", site_block, priority=9)
+        budget.add("plan_summary", plan_summary, priority=8)
+        budget.add("pgou_chunks", normativa_block, priority=7)
+        budget.add("notas", instructions, priority=3)
+        budgeted = budget.build()
+
+        system_prompt = budgeted.get("system_prompt", system_prompt)
+        user_parts = [f"MUNICIPIO: {municipality}"]
+        if budgeted.get("site_context"):
+            user_parts.append(
+                "=== DATOS OFICIALES DE PARCELA Y ZONA ===\n"
+                f"{budgeted['site_context']}"
+            )
+        if budgeted.get("plan_summary"):
+            user_parts.append(
+                "=== DATOS EXTRAÍDOS DEL PLANO ===\n"
+                f"{budgeted['plan_summary']}"
+            )
+        if budgeted.get("pgou_chunks"):
+            user_parts.append(
+                f"=== FRAGMENTOS RELEVANTES DEL PGOU DE {municipality.upper()} ===\n"
+                f"{budgeted['pgou_chunks']}"
+            )
+        if budgeted.get("notas"):
+            user_parts.append(budgeted["notas"])
+        if budget.utilization > 0.9:
+            user_parts.append(
+                "AVISO INTERNO: el contexto se ha ajustado al presupuesto disponible; "
+                "prioriza conclusiones trazables y señala cualquier laguna normativa."
+            )
+        user_message = "\n\n".join(user_parts)
 
         response = self._llm.complete(
             [LLMMessage(role="user", content=user_message)],
@@ -452,6 +488,8 @@ class UrbanComplianceTools:
             annotations=annotations,
             summary=summary,
             raw_analysis=response.text,
+            token_budget_utilization=round(budget.utilization, 3),
+            token_budget_used=budget.last_used_tokens,
         )
 
 
@@ -608,6 +646,13 @@ def _build_search_query(plan: PlanData) -> str:
         parts.append("número plantas alturas")
     parts.extend(["ocupación edificabilidad", "usos permitidos"])
     return " ".join(parts)
+
+
+def _ollama_num_ctx(llm: LLMRouter) -> int:
+    try:
+        return int(llm._config.ollama_num_ctx)
+    except Exception:
+        return 4096
 
 
 def _format_normativa(chunks: list[PGOUChunk]) -> str:

@@ -729,6 +729,25 @@ if PYSIDE6_AVAILABLE:
                             f"<p style='font-size:11px;'>"
                             f"{escape(str(summary)[:400])}</p>"
                         )
+                    judge_quality = ar.get("quality") if isinstance(ar, dict) else None
+                    score = getattr(exp, "quality_score", None)
+                    flags: list[str] = []
+                    if isinstance(judge_quality, dict):
+                        score = judge_quality.get("score", score)
+                        raw_flags = judge_quality.get("flags")
+                        if isinstance(raw_flags, list):
+                            flags = [str(flag) for flag in raw_flags[:3]]
+                    if score is not None:
+                        score_int = int(score)
+                        colour = OK if score_int >= 70 else WARN if score_int >= 40 else ERR
+                        flags_text = escape(", ".join(flags) or "Sin flags")
+                        lines.append(
+                            "<h4>Calidad IA local</h4><table>"
+                            f"<tr><td>Juez local</td><td style='color:{colour};'>"
+                            f"<b>{score_int}/100</b></td></tr>"
+                            f"<tr><td>Flags</td><td>{flags_text}</td></tr>"
+                            "</table>"
+                        )
                 except (json.JSONDecodeError, TypeError):
                     if isinstance(exp.analysis_result, str) and exp.analysis_result:
                         lines.append(

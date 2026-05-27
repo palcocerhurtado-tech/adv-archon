@@ -93,3 +93,5 @@ def test_expediente_store_migrates_existing_minimal_table(tmp_path: Path) -> Non
     assert exp.title == "Expediente antiguo"
     assert exp.status == "borrador"
     assert exp.site_context == ""
+    assert exp.quality_score is None
+    assert exp.quality_result == ""

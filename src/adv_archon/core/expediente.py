@@ -27,6 +27,8 @@ class Expediente:
     notes: str
     case_type: str = "cambio_uso_vivienda"
     review_state: str = ""
+    quality_score: int | None = None
+    quality_result: str = ""
 
 
 class ExpedienteStore:
@@ -62,7 +64,9 @@ class ExpedienteStore:
                 updated_at TEXT NOT NULL,
                 notes TEXT NOT NULL DEFAULT '',
                 case_type TEXT NOT NULL DEFAULT 'cambio_uso_vivienda',
-                review_state TEXT NOT NULL DEFAULT ''
+                review_state TEXT NOT NULL DEFAULT '',
+                quality_score INTEGER,
+                quality_result TEXT NOT NULL DEFAULT ''
             );
         """)
         existing = {
@@ -86,6 +90,8 @@ class ExpedienteStore:
             "notes": "TEXT NOT NULL DEFAULT ''",
             "case_type": "TEXT NOT NULL DEFAULT 'cambio_uso_vivienda'",
             "review_state": "TEXT NOT NULL DEFAULT ''",
+            "quality_score": "INTEGER",
+            "quality_result": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in columns.items():
             if name not in existing:
@@ -133,6 +139,8 @@ class ExpedienteStore:
             notes=notes,
             case_type=case_type,
             review_state="",
+            quality_score=None,
+            quality_result="",
         )
         self._conn.execute(
             """
@@ -140,8 +148,9 @@ class ExpedienteStore:
                 id, title, address, municipality, province,
                 latitude, longitude, cadastral_ref, status,
                 plan_path, site_context, analysis_result, report_path,
-                created_at, updated_at, notes, case_type, review_state
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                created_at, updated_at, notes, case_type, review_state,
+                quality_score, quality_result
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 expediente.id,
@@ -162,6 +171,8 @@ class ExpedienteStore:
                 expediente.notes,
                 expediente.case_type,
                 expediente.review_state,
+                expediente.quality_score,
+                expediente.quality_result,
             ),
         )
         self._conn.commit()
@@ -200,7 +211,9 @@ class ExpedienteStore:
                 updated_at = ?,
                 notes = ?,
                 case_type = ?,
-                review_state = ?
+                review_state = ?,
+                quality_score = ?,
+                quality_result = ?
             WHERE id = ?
             """,
             (
@@ -220,6 +233,8 @@ class ExpedienteStore:
                 expediente.notes,
                 expediente.case_type,
                 expediente.review_state,
+                expediente.quality_score,
+                expediente.quality_result,
                 expediente.id,
             ),
         )
@@ -257,6 +272,8 @@ class ExpedienteStore:
             notes=row["notes"],
             case_type=row["case_type"],
             review_state=row["review_state"],
+            quality_score=row["quality_score"],
+            quality_result=row["quality_result"],
         )
 
 

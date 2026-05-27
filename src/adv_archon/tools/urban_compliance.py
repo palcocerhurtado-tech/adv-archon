@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from adv_archon.core.compliance_judge import ComplianceJudge
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage
 from adv_archon.core.pgou_store import PGOUChunk, PGOUStore
@@ -39,6 +40,9 @@ class ComplianceReport:
     token_budget_used: int = 0
     llm_num_ctx: int = 4096
     context_hash: str = ""
+    quality_score: int | None = None
+    quality_flags: list[str] | None = None
+    quality_verdict: str = "REVISAR"
 
 
 @dataclass(slots=True)
@@ -218,6 +222,11 @@ class UrbanComplianceTools:
                     "used_tokens_estimate": report.token_budget_used,
                     "llm_num_ctx": report.llm_num_ctx,
                     "context_hash": report.context_hash,
+                },
+                "quality": {
+                    "score": report.quality_score,
+                    "flags": report.quality_flags or [],
+                    "verdict": report.quality_verdict,
                 },
                 "annotations": [
                     {
@@ -510,6 +519,19 @@ class UrbanComplianceTools:
 
         annotations = _parse_annotations(response.text)
         summary = _extract_summary(response.text)
+        judge_result = ComplianceJudge(self._llm).evaluate(
+            municipality=municipality,
+            plan_summary=plan_summary,
+            analysis=response.text,
+        )
+        raw_quality_score = judge_result.get("score")
+        quality_score = raw_quality_score if isinstance(raw_quality_score, int) else None
+        raw_quality_flags = judge_result.get("flags")
+        quality_flags = (
+            [str(flag) for flag in raw_quality_flags]
+            if isinstance(raw_quality_flags, list)
+            else []
+        )
 
         return ComplianceReport(
             plan_path=plan.path,
@@ -522,6 +544,9 @@ class UrbanComplianceTools:
             token_budget_used=budget.last_used_tokens,
             llm_num_ctx=llm_num_ctx,
             context_hash=context_hash,
+            quality_score=quality_score,
+            quality_flags=quality_flags,
+            quality_verdict=str(judge_result.get("verdict") or "REVISAR"),
         )
 
 

@@ -3133,9 +3133,19 @@ def launch_desktop_app(
                         import json as _json
                         exp = self._active_exp_store.get(self._active_exp_id)
                         if exp:
+                            quality = result.get("quality")
+                            quality_score = None
+                            quality_result = ""
+                            if isinstance(quality, dict):
+                                raw_score = quality.get("score")
+                                if isinstance(raw_score, int):
+                                    quality_score = raw_score
+                                quality_result = _json.dumps(quality, ensure_ascii=False)
                             updated = _dc.replace(
                                 exp,
                                 analysis_result=_json.dumps(result, ensure_ascii=False),
+                                quality_score=quality_score,
+                                quality_result=quality_result,
                                 status="analizado",
                             )
                             self._active_exp_store.update(updated)

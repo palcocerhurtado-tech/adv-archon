@@ -33,10 +33,11 @@ class OllamaClient:
     def _keep_alive_value(self) -> int | str:
         return -1 if self.keep_alive.strip() == "-1" else self.keep_alive
 
-    def _options(self) -> dict[str, object]:
+    def _options(self, *, num_ctx_override: int | None = None) -> dict[str, object]:
+        num_ctx = num_ctx_override if num_ctx_override is not None else self.num_ctx
         opts: dict[str, object] = {
             "temperature": self.temperature,
-            "num_ctx": self.num_ctx,
+            "num_ctx": num_ctx,
             "num_predict": self.num_predict,
             "num_batch": self.num_batch,
             "top_k": 20,          # narrow sampling → faster + more focused
@@ -53,13 +54,20 @@ class OllamaClient:
         *,
         system_prompt: str,
         response_mime_type: str | None = None,
+        num_ctx_override: int | None = None,
+        keep_context_hash: str | None = None,
     ) -> tuple[str, LLMUsage]:
+        # The Ollama /api/chat API does not expose a portable session id for
+        # explicit KV-cache reuse. Keep the hash in the public client contract
+        # so callers can use stable context identity without sending invented
+        # parameters to the local server.
+        _ = keep_context_hash
         payload: dict[str, object] = {
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": False,
             "keep_alive": self._keep_alive_value(),
-            "options": self._options(),
+            "options": self._options(num_ctx_override=num_ctx_override),
         }
         if response_mime_type == "application/json":
             payload["format"] = "json"
@@ -79,13 +87,16 @@ class OllamaClient:
         on_chunk: Callable[[str], None] | None = None,
         response_mime_type: str | None = None,
         cancel_event: Event | None = None,
+        num_ctx_override: int | None = None,
+        keep_context_hash: str | None = None,
     ) -> tuple[str, LLMUsage]:
+        _ = keep_context_hash
         payload: dict[str, object] = {
             "model": self.model,
             "messages": self._build_messages(messages, system_prompt=system_prompt),
             "stream": True,
             "keep_alive": self._keep_alive_value(),
-            "options": self._options(),
+            "options": self._options(num_ctx_override=num_ctx_override),
         }
         if response_mime_type == "application/json":
             payload["format"] = "json"

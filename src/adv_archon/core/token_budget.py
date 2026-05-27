@@ -55,12 +55,15 @@ class TokenBudget:
     @property
     def utilization(self) -> float:
         available = max(1, self.max_tokens - self.reserved)
-        total = sum(self.estimate(slot.text) for slot in self._slots)
-        return total / available
+        return self.requested_input_tokens / available
 
     @property
     def last_used_tokens(self) -> int:
         return self._last_used_tokens
+
+    @property
+    def requested_input_tokens(self) -> int:
+        return sum(self.estimate(slot.text) for slot in self._slots)
 
 
 __all__ = ["CHARS_PER_TOKEN", "TRUNCATION_MARKER", "TokenBudget", "TokenSlot"]

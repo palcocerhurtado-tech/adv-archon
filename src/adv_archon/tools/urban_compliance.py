@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import hashlib
+import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,6 +37,8 @@ class ComplianceReport:
     raw_analysis: str
     token_budget_utilization: float = 0.0
     token_budget_used: int = 0
+    llm_num_ctx: int = 4096
+    context_hash: str = ""
 
 
 @dataclass(slots=True)
@@ -212,6 +216,8 @@ class UrbanComplianceTools:
                 "token_budget": {
                     "utilization": report.token_budget_utilization,
                     "used_tokens_estimate": report.token_budget_used,
+                    "llm_num_ctx": report.llm_num_ctx,
+                    "context_hash": report.context_hash,
                 },
                 "annotations": [
                     {
@@ -436,13 +442,35 @@ class UrbanComplianceTools:
             "citando el artículo o norma aplicable.\n"
             "3. RECOMENDACIONES: Qué debe revisar o corregir el arquitecto.\n"
         )
-        budget = TokenBudget(max_tokens=_ollama_num_ctx(self._llm), reserved_output=768)
-        budget.add("system_prompt", system_prompt, priority=10)
-        if site_block:
-            budget.add("site_context", site_block, priority=9)
-        budget.add("plan_summary", plan_summary, priority=8)
-        budget.add("pgou_chunks", normativa_block, priority=7)
-        budget.add("notas", instructions, priority=3)
+        context_hash = _static_context_hash(
+            pgou_chunks_text=normativa_block,
+            site_context_text=site_block,
+        )
+        probe_budget = TokenBudget(
+            max_tokens=_ollama_num_ctx_max(self._llm),
+            reserved_output=768,
+        )
+        _add_compliance_budget_slots(
+            probe_budget,
+            system_prompt=system_prompt,
+            site_block=site_block,
+            plan_summary=plan_summary,
+            normativa_block=normativa_block,
+            instructions=instructions,
+        )
+        llm_num_ctx = _dynamic_num_ctx(
+            self._llm,
+            requested_input_tokens=probe_budget.requested_input_tokens,
+        )
+        budget = TokenBudget(max_tokens=llm_num_ctx, reserved_output=768)
+        _add_compliance_budget_slots(
+            budget,
+            system_prompt=system_prompt,
+            site_block=site_block,
+            plan_summary=plan_summary,
+            normativa_block=normativa_block,
+            instructions=instructions,
+        )
         budgeted = budget.build()
 
         system_prompt = budgeted.get("system_prompt", system_prompt)
@@ -476,6 +504,8 @@ class UrbanComplianceTools:
             system_prompt=system_prompt,
             task="documents",
             prefer_local=True,
+            num_ctx_override=llm_num_ctx,
+            keep_context_hash=context_hash,
         )
 
         annotations = _parse_annotations(response.text)
@@ -490,6 +520,8 @@ class UrbanComplianceTools:
             raw_analysis=response.text,
             token_budget_utilization=round(budget.utilization, 3),
             token_budget_used=budget.last_used_tokens,
+            llm_num_ctx=llm_num_ctx,
+            context_hash=context_hash,
         )
 
 
@@ -653,6 +685,64 @@ def _ollama_num_ctx(llm: LLMRouter) -> int:
         return int(llm._config.ollama_num_ctx)
     except Exception:
         return 4096
+
+
+def _ollama_num_ctx_max(llm: LLMRouter) -> int:
+    try:
+        return int(llm._config.ollama_num_ctx_max)
+    except Exception:
+        return max(_ollama_num_ctx(llm), 8192)
+
+
+def _dynamic_num_ctx(llm: LLMRouter, *, requested_input_tokens: int) -> int:
+    try:
+        config = llm._config
+        if not bool(config.ollama_num_ctx_auto):
+            return int(config.ollama_num_ctx)
+        min_ctx = int(config.ollama_num_ctx_min)
+        max_ctx = int(config.ollama_num_ctx_max)
+    except Exception:
+        min_ctx = 2048
+        max_ctx = max(_ollama_num_ctx(llm), 8192)
+
+    desired = requested_input_tokens + 768
+    if desired > 3500:
+        target = 8192
+    elif desired > 1800:
+        target = 4096
+    else:
+        target = 2048
+    return max(min_ctx, min(max_ctx, target))
+
+
+def _add_compliance_budget_slots(
+    budget: TokenBudget,
+    *,
+    system_prompt: str,
+    site_block: str,
+    plan_summary: str,
+    normativa_block: str,
+    instructions: str,
+) -> None:
+    budget.add("system_prompt", system_prompt, priority=10)
+    if site_block:
+        budget.add("site_context", site_block, priority=9)
+    budget.add("plan_summary", plan_summary, priority=8)
+    budget.add("pgou_chunks", normativa_block, priority=7)
+    budget.add("notas", instructions, priority=3)
+
+
+def _static_context_hash(*, pgou_chunks_text: str, site_context_text: str) -> str:
+    payload = json.dumps(
+        {
+            "pgou_chunks": pgou_chunks_text,
+            "site_context": site_context_text,
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
 
 
 def _format_normativa(chunks: list[PGOUChunk]) -> str:

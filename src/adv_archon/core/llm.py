@@ -95,13 +95,22 @@ class LLMRouter:
         response_mime_type: str | None = None,
         task: TaskKind | None = None,
         prefer_local: bool | None = None,
+        num_ctx_override: int | None = None,
+        keep_context_hash: str | None = None,
     ) -> LLMResponse:
         prepared = self._prepare_request(messages, system_prompt=system_prompt)
         route = self._resolve_route(task=task, prefer_local=prefer_local)
+        extra: dict[str, object] = {}
+        if route.provider_name == "ollama":
+            if num_ctx_override is not None:
+                extra["num_ctx_override"] = num_ctx_override
+            if keep_context_hash is not None:
+                extra["keep_context_hash"] = keep_context_hash
         text, usage = route.client.complete(
             prepared.messages,
             system_prompt=prepared.system_prompt,
             response_mime_type=response_mime_type,
+            **extra,
         )
         usage = self._estimate_cost(usage)
         return LLMResponse(
@@ -123,18 +132,27 @@ class LLMRouter:
         task: TaskKind | None = None,
         prefer_local: bool | None = None,
         cancel_event: Event | None = None,
+        num_ctx_override: int | None = None,
+        keep_context_hash: str | None = None,
     ) -> LLMResponse:
         prepared = self._prepare_request(messages, system_prompt=system_prompt)
         route = self._resolve_route(task=task, prefer_local=prefer_local)
         stream_callback = on_chunk
         if prepared.applied and on_chunk is not None:
             stream_callback = None
+        extra: dict[str, object] = {}
+        if route.provider_name == "ollama":
+            if num_ctx_override is not None:
+                extra["num_ctx_override"] = num_ctx_override
+            if keep_context_hash is not None:
+                extra["keep_context_hash"] = keep_context_hash
         text, usage = route.client.stream_complete(
             prepared.messages,
             system_prompt=prepared.system_prompt,
             on_chunk=stream_callback,
             response_mime_type=response_mime_type,
             cancel_event=cancel_event,
+            **extra,
         )
         usage = self._estimate_cost(usage)
         restored_text = prepared.restore(text)

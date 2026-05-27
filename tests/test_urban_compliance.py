@@ -5,12 +5,24 @@ from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.tools.urban_compliance import (
     ToolResult,
     UrbanComplianceTools,
+    _dynamic_num_ctx,
     _format_site_context,
+    _static_context_hash,
 )
 
 
 class _FakeLLM:
     pass
+
+
+class _FakeConfigLLM:
+    def __init__(self, *, auto: bool = True) -> None:
+        self._config = SimpleNamespace(
+            ollama_num_ctx=4096,
+            ollama_num_ctx_min=2048,
+            ollama_num_ctx_max=8192,
+            ollama_num_ctx_auto=auto,
+        )
 
 
 class _FakeGeoTools:
@@ -117,3 +129,27 @@ def test_format_site_context_includes_preliminary_parcel_zoning() -> None:
     assert "Zonificación PGOU preliminar" in text
     assert "Z-1 Residencial" in text
     assert "Requiere confirmar en planos/visor municipal" in text
+
+
+def test_static_context_hash_is_stable_and_content_sensitive() -> None:
+    first = _static_context_hash(pgou_chunks_text="PGOU Madrid", site_context_text="Catastro A")
+    second = _static_context_hash(pgou_chunks_text="PGOU Madrid", site_context_text="Catastro A")
+    changed = _static_context_hash(pgou_chunks_text="PGOU Zaragoza", site_context_text="Catastro A")
+
+    assert first == second
+    assert first != changed
+    assert len(first) == 16
+
+
+def test_dynamic_num_ctx_scales_with_requested_tokens() -> None:
+    llm = _FakeConfigLLM()
+
+    assert _dynamic_num_ctx(llm, requested_input_tokens=500) == 2048  # type: ignore[arg-type]
+    assert _dynamic_num_ctx(llm, requested_input_tokens=2000) == 4096  # type: ignore[arg-type]
+    assert _dynamic_num_ctx(llm, requested_input_tokens=4000) == 8192  # type: ignore[arg-type]
+
+
+def test_dynamic_num_ctx_respects_auto_disabled() -> None:
+    llm = _FakeConfigLLM(auto=False)
+
+    assert _dynamic_num_ctx(llm, requested_input_tokens=4000) == 4096  # type: ignore[arg-type]

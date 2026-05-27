@@ -120,6 +120,9 @@ class LLMConfig:
     ollama_base_url: str = "http://127.0.0.1:11434"
     ollama_timeout_seconds: int = 180
     ollama_num_ctx: int = 4096       # 4096: balance quality/speed for llama 7-8B
+    ollama_num_ctx_min: int = 2048
+    ollama_num_ctx_max: int = 8192
+    ollama_num_ctx_auto: bool = True
     ollama_keep_alive: str = "-1"
     gemini_api_key: str | None = None
     gemini_timeout_seconds: int = 300
@@ -415,6 +418,11 @@ def load_app_config(
             or _lookup(data, "llm", "ollama_timeout_seconds", default=180)
         ),
         ollama_num_ctx=int(_lookup(data, "llm", "ollama_num_ctx", default=4096)),
+        ollama_num_ctx_min=int(_lookup(data, "llm", "ollama_num_ctx_min", default=2048)),
+        ollama_num_ctx_max=int(_lookup(data, "llm", "ollama_num_ctx_max", default=8192)),
+        ollama_num_ctx_auto=bool(
+            _lookup(data, "llm", "ollama_num_ctx_auto", default=True)
+        ),
         ollama_keep_alive=str(_lookup(data, "llm", "ollama_keep_alive", default="-1")),
         gemini_api_key=os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"),
         gemini_timeout_seconds=int(

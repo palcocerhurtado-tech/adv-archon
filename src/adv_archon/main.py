@@ -121,6 +121,28 @@ def _handle_desktop_bundle(
     return 0
 
 
+def _handle_export_training_data(
+    *,
+    config: Any,
+    renderer: Any,
+    export_args: list[str],
+) -> int:
+    if not export_args:
+        renderer.show_error("Uso: adv-archon export-training-data <salida.jsonl>")
+        return 1
+    from adv_archon.core.feedback_store import FeedbackStore
+
+    output_path = Path(export_args[0]).expanduser()
+    store = FeedbackStore(config.paths.feedback_db)
+    result = store.export_alpaca(output_path)
+    renderer.show_info(
+        "Dataset de entrenamiento exportado.\n"
+        f"- ejemplos: {result.examples_exported}\n"
+        f"- salida: {result.output_path}"
+    )
+    return 0
+
+
 def _build_logger(config_root: Path, *, prefix: str, persist: bool) -> Any:
     from adv_archon.core.logging import AppLogger
 
@@ -956,6 +978,13 @@ def main() -> int:
         return _handle_desktop_bundle(
             renderer=renderer,
             bundle_args=args.paths,
+        )
+
+    if args.prompt == "export-training-data":
+        return _handle_export_training_data(
+            config=config,
+            renderer=renderer,
+            export_args=args.paths,
         )
 
     system_prompt = load_system_prompt(config.system_prompt_path)

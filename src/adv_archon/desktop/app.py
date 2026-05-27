@@ -3643,6 +3643,12 @@ def launch_desktop_app(
                         status="informe_listo",
                     )
                     store.update(updated)
+                    try:
+                        from adv_archon.core.feedback_store import FeedbackStore
+
+                        FeedbackStore(data_dir / "feedback.db").add_from_expediente(updated)
+                    except Exception:
+                        pass
                     list_panel.populate(store.list_all())
                     detail_panel.load_expediente(updated)
                     detail_panel.set_operation_busy(False)

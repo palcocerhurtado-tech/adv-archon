@@ -72,6 +72,7 @@ class PathsConfig:
     knowledge_db: Path = field(init=False)
     web_library_db: Path = field(init=False)
     tasks_db: Path = field(init=False)
+    feedback_db: Path = field(init=False)
     benchmark_cases_file: Path = field(init=False)
     browser_profile_dir: Path = field(init=False)
     profile_state_file: Path = field(init=False)
@@ -91,6 +92,7 @@ class PathsConfig:
         self.knowledge_db = self.root / "knowledge.db"
         self.web_library_db = self.root / "web-library.db"
         self.tasks_db = self.root / "tasks.db"
+        self.feedback_db = self.root / "feedback.db"
         self.benchmark_cases_file = self.root / "benchmark-cases.json"
         self.browser_profile_dir = self.root / "browser-profile"
         self.profile_state_file = self.root / "active-profile.txt"

@@ -2,6 +2,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import adv_archon.main as main_module
+from adv_archon.core.feedback_store import FeedbackStore
 
 
 def test_desktop_main_launches_desktop_app(monkeypatch) -> None:
@@ -85,3 +86,47 @@ def test_main_handles_desktop_bundle_prompt(monkeypatch, tmp_path: Path) -> None
 
     assert result == 0
     assert bundle_calls["destination_dir"] == tmp_path
+
+
+def test_main_handles_export_training_data_prompt(monkeypatch, tmp_path: Path) -> None:
+    config = SimpleNamespace(
+        llm=SimpleNamespace(mode="local"),
+        system_prompt_path=Path("/tmp/system.md"),
+        ui=SimpleNamespace(show_tool_input=False),
+        paths=SimpleNamespace(feedback_db=tmp_path / "feedback.db"),
+    )
+    store = FeedbackStore(config.paths.feedback_db)
+    exp = SimpleNamespace(
+        id="exp-1",
+        title="Cambio de uso",
+        address="Calle Mayor 1",
+        municipality="Madrid",
+        province="Madrid",
+        cadastral_ref="7537903VK4873N0001OU",
+        plan_path="/tmp/plano.pdf",
+        notes="",
+        case_type="cambio_uso_vivienda",
+        site_context="{}",
+    )
+    store.add_example(
+        exp,
+        {"summary": "Apto con condiciones"},
+        {"score": 90, "flags": [], "verdict": "APTO"},
+    )
+    output_path = tmp_path / "dataset.jsonl"
+
+    monkeypatch.setattr(main_module, "load_app_config", lambda **_kwargs: config)
+    monkeypatch.setattr(main_module, "LLMRouter", lambda llm_config: ("router", llm_config))
+
+    import sys
+
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["adv-archon", "export-training-data", str(output_path)],
+    )
+
+    result = main_module.main()
+
+    assert result == 0
+    assert "Apto con condiciones" in output_path.read_text(encoding="utf-8")

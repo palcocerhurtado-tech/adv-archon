@@ -143,6 +143,73 @@ def _handle_export_training_data(
     return 0
 
 
+def _handle_training_lab(
+    *,
+    config: Any,
+    renderer: Any,
+    project_root: Path,
+    lab_args: list[str],
+) -> int:
+    from adv_archon.core.training_lab import (
+        build_ollama_client,
+        build_training_lab_status,
+        default_export_path,
+        default_synthetic_dataset_path,
+        default_templates_path,
+        export_feedback_dataset,
+        generate_synthetic_dataset,
+        render_training_lab_status,
+    )
+
+    command = lab_args[0] if lab_args else "status"
+    templates_path = default_templates_path(project_root)
+    synthetic_path = default_synthetic_dataset_path(config.paths.root)
+
+    if command == "status":
+        status = build_training_lab_status(
+            feedback_db=config.paths.feedback_db,
+            templates_path=templates_path,
+            synthetic_dataset_path=synthetic_path,
+        )
+        renderer.show_info(render_training_lab_status(status))
+        return 0
+
+    if command == "export":
+        output = Path(lab_args[1]).expanduser() if len(lab_args) > 1 else default_export_path()
+        export_result = export_feedback_dataset(
+            feedback_db=config.paths.feedback_db,
+            output_path=output,
+        )
+        renderer.show_info(
+            "Dataset real exportado.\n"
+            f"- ejemplos: {export_result.examples_exported}\n"
+            f"- salida: {export_result.output_path}"
+        )
+        return 0
+
+    if command == "generate-synthetic":
+        count = int(lab_args[1]) if len(lab_args) > 1 else 20
+        output = Path(lab_args[2]).expanduser() if len(lab_args) > 2 else synthetic_path
+        synthetic_result = generate_synthetic_dataset(
+            templates_path=templates_path,
+            output_path=output,
+            client=build_ollama_client(config),
+            count=count,
+        )
+        renderer.show_info(
+            "Dataset sintético generado.\n"
+            f"- ejemplos: {synthetic_result.generated}/{synthetic_result.requested}\n"
+            f"- salida: {synthetic_result.output_path}"
+        )
+        return 0
+
+    renderer.show_error(
+        "Uso: adv-archon training-lab "
+        "[status|export [salida.jsonl]|generate-synthetic [n] [salida.jsonl]]"
+    )
+    return 1
+
+
 def _build_logger(config_root: Path, *, prefix: str, persist: bool) -> Any:
     from adv_archon.core.logging import AppLogger
 
@@ -985,6 +1052,14 @@ def main() -> int:
             config=config,
             renderer=renderer,
             export_args=args.paths,
+        )
+
+    if args.prompt == "training-lab":
+        return _handle_training_lab(
+            config=config,
+            renderer=renderer,
+            project_root=project_root,
+            lab_args=args.paths,
         )
 
     system_prompt = load_system_prompt(config.system_prompt_path)

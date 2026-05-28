@@ -130,3 +130,38 @@ def test_main_handles_export_training_data_prompt(monkeypatch, tmp_path: Path) -
 
     assert result == 0
     assert "Apto con condiciones" in output_path.read_text(encoding="utf-8")
+
+
+def test_main_handles_training_lab_status(monkeypatch, tmp_path: Path) -> None:
+    config = SimpleNamespace(
+        llm=SimpleNamespace(mode="local"),
+        system_prompt_path=Path("/tmp/system.md"),
+        ui=SimpleNamespace(show_tool_input=False),
+        paths=SimpleNamespace(feedback_db=tmp_path / "feedback.db", root=tmp_path),
+    )
+    messages: list[str] = []
+
+    monkeypatch.setattr(main_module, "load_app_config", lambda **_kwargs: config)
+    monkeypatch.setattr(main_module, "LLMRouter", lambda llm_config: ("router", llm_config))
+
+    class FakeRenderer:
+        def __init__(self, *_args, **_kwargs) -> None:
+            pass
+
+        def show_info(self, message: str) -> None:
+            messages.append(message)
+
+        def show_error(self, message: str) -> None:
+            raise AssertionError(message)
+
+    monkeypatch.setattr(main_module, "Renderer", FakeRenderer)
+
+    import sys
+
+    monkeypatch.setattr(sys, "argv", ["adv-archon", "training-lab", "status"])
+
+    result = main_module.main()
+
+    assert result == 0
+    assert messages
+    assert "Training Lab ADV ARCHON" in messages[0]

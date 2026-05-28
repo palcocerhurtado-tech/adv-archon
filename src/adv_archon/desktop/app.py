@@ -221,6 +221,7 @@ def launch_desktop_app(
             self._qa_dialog: Any = None
             self._qa_runner_ref: tuple[Any, Any] | None = None
             self._system_diag_ref: tuple[Any, Any] | None = None
+            self._training_lab_ref: tuple[Any, Any] | None = None
             self._last_performance_report: Any = None
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
@@ -455,6 +456,10 @@ def launch_desktop_app(
             self._nav_pack_btn = self._make_nav_btn("  Pack")
             self._nav_pack_btn.clicked.connect(self._open_studio_pack)
             sl.addWidget(self._nav_pack_btn)
+
+            self._nav_training_btn = self._make_nav_btn("  Training Lab")
+            self._nav_training_btn.clicked.connect(self._open_training_lab)
+            sl.addWidget(self._nav_training_btn)
 
             self._nav_beta_btn = self._make_nav_btn("  Guía beta")
             self._nav_beta_btn.clicked.connect(self._show_beta_guide)
@@ -1293,6 +1298,7 @@ def launch_desktop_app(
                 "home": getattr(self, "_nav_home_btn", None),
                 "chat": getattr(self, "_nav_chat_btn", None),
                 "system": getattr(self, "_system_button", None),
+                "training": getattr(self, "_nav_training_btn", None),
             }
             for key, btn in navs.items():
                 if btn is not None:
@@ -1377,6 +1383,12 @@ def launch_desktop_app(
                     "Cliente / Licencia",
                     f"{client_cfg.client_name} · {client_cfg.license_label}",
                     self._open_client_license,
+                    "Ghost",
+                ),
+                (
+                    "Training Lab",
+                    "Dataset real, sintético y preparación de fine-tuning local.",
+                    self._open_training_lab,
                     "Ghost",
                 ),
                 (
@@ -1601,6 +1613,220 @@ def launch_desktop_app(
             self.statusBar().showMessage("Panel Estado del Sistema listo.", 2500)
             if self._last_performance_report is not None:
                 self._render_system_report(self._last_performance_report)
+
+        def _open_training_lab(self) -> None:
+            from adv_archon.core.training_lab import (
+                build_training_lab_status,
+                default_synthetic_dataset_path,
+                default_templates_path,
+                render_training_lab_status,
+            )
+
+            self._close_workspace_panels()
+            self._clear_message_area()
+            self._home_visible = False
+            self._set_nav_context("training")
+
+            data_dir = self._studio_data_dir()
+            status = build_training_lab_status(
+                feedback_db=config.paths.feedback_db,
+                templates_path=default_templates_path(project_root),
+                synthetic_dataset_path=default_synthetic_dataset_path(data_dir),
+            )
+
+            page = QFrame()
+            page.setObjectName("HomeStudio")
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(6, 4, 6, 4)
+            lay.setSpacing(14)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(16)
+            hero_lay.addWidget(self._make_logo(52))
+            text_col = QVBoxLayout()
+            eyebrow = QLabel("TRAINING LAB LOCAL")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Dataset, feedback y fine-tuning sin tocar scripts.")
+            title.setObjectName("StudioTitle")
+            title.setWordWrap(True)
+            subtitle = QLabel(
+                "Revisa ejemplos reales aprobados por el juez local, exporta dataset "
+                "y genera sintéticos con Ollama para preparar experimentos LoRA offline."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            text_col.addWidget(eyebrow)
+            text_col.addWidget(title)
+            text_col.addWidget(subtitle)
+            hero_lay.addLayout(text_col, 1)
+            lay.addWidget(hero)
+
+            cards = QHBoxLayout()
+            cards.setSpacing(10)
+            metrics = (
+                ("Reales", str(status.feedback.total)),
+                ("Aprobados", str(status.feedback.approved)),
+                ("Sintéticos", str(status.synthetic_examples)),
+                ("Plantillas", str(status.templates_count)),
+                ("Estado", status.readiness_label),
+            )
+            for label, value in metrics:
+                card = QFrame()
+                card.setObjectName("StudioMetric")
+                card_lay = QVBoxLayout(card)
+                card_lay.setContentsMargins(12, 10, 12, 10)
+                value_lbl = QLabel(value)
+                value_lbl.setObjectName("StudioDecision")
+                value_lbl.setWordWrap(True)
+                label_lbl = QLabel(label)
+                label_lbl.setObjectName("Faint")
+                card_lay.addWidget(value_lbl)
+                card_lay.addWidget(label_lbl)
+                cards.addWidget(card)
+            lay.addLayout(cards)
+
+            body_row = QHBoxLayout()
+            body_row.setSpacing(12)
+
+            report_panel = QFrame()
+            report_panel.setObjectName("Panel")
+            report_lay = QVBoxLayout(report_panel)
+            report_lay.setContentsMargins(14, 14, 14, 14)
+            report_lay.setSpacing(10)
+            report_title = QLabel("Preparación del dataset")
+            report_title.setObjectName("StudioCase")
+            report_lay.addWidget(report_title)
+            self._training_lab_view = QTextEdit()
+            self._training_lab_view.setReadOnly(True)
+            self._training_lab_view.setMinimumHeight(300)
+            self._training_lab_view.setPlainText(render_training_lab_status(status))
+            report_lay.addWidget(self._training_lab_view, 1)
+            body_row.addWidget(report_panel, 2)
+
+            actions_panel = QFrame()
+            actions_panel.setObjectName("Panel")
+            actions_lay = QVBoxLayout(actions_panel)
+            actions_lay.setContentsMargins(14, 14, 14, 14)
+            actions_lay.setSpacing(10)
+            actions_title = QLabel("Acciones")
+            actions_title.setObjectName("StudioCase")
+            actions_lay.addWidget(actions_title)
+            export_btn = QPushButton("Exportar dataset real")
+            export_btn.setObjectName("Primary")
+            export_btn.clicked.connect(self._export_training_feedback_dataset)
+            synth_btn = QPushButton("Generar 20 sintéticos")
+            synth_btn.setObjectName("Ghost")
+            synth_btn.clicked.connect(self._generate_training_synthetic_dataset)
+            refresh_btn = QPushButton("Actualizar estado")
+            refresh_btn.setObjectName("Ghost")
+            refresh_btn.clicked.connect(self._open_training_lab)
+            note = QLabel(
+                "Fine-tuning sigue siendo offline y opcional. No se activa dentro "
+                "del flujo normal de expedientes."
+            )
+            note.setObjectName("Sub")
+            note.setWordWrap(True)
+            actions_lay.addWidget(export_btn)
+            actions_lay.addWidget(synth_btn)
+            actions_lay.addWidget(refresh_btn)
+            actions_lay.addSpacing(8)
+            actions_lay.addWidget(note)
+            actions_lay.addStretch(1)
+            body_row.addWidget(actions_panel, 1)
+            lay.addLayout(body_row, 1)
+
+            idx = self._messages_layout.count() - 1
+            self._messages_layout.insertWidget(idx, page)
+            self._status_label.setText("Training Lab listo.")
+            self.statusBar().showMessage("Training Lab listo.", 2500)
+
+        def _export_training_feedback_dataset(self) -> None:
+            from adv_archon.core.training_lab import (
+                default_export_path,
+                export_feedback_dataset,
+            )
+
+            result = export_feedback_dataset(
+                feedback_db=config.paths.feedback_db,
+                output_path=default_export_path(),
+            )
+            self.statusBar().showMessage(
+                f"Dataset real exportado: {result.examples_exported} ejemplos.",
+                5000,
+            )
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(result.output_path.parent)))
+            self._open_training_lab()
+
+        def _generate_training_synthetic_dataset(self) -> None:
+            if self._training_lab_ref is not None:
+                self.statusBar().showMessage("Generación sintética ya en curso.", 2500)
+                return
+
+            class _SyntheticWorker(QObject):
+                completed = Signal(object)
+                failed = Signal(str)
+                finished = Signal()
+
+                def run(self) -> None:
+                    try:
+                        from adv_archon.core.training_lab import (
+                            build_ollama_client,
+                            default_synthetic_dataset_path,
+                            default_templates_path,
+                            generate_synthetic_dataset,
+                        )
+
+                        self.completed.emit(
+                            generate_synthetic_dataset(
+                                templates_path=default_templates_path(project_root),
+                                output_path=default_synthetic_dataset_path(
+                                    self_ref._studio_data_dir()
+                                ),
+                                client=build_ollama_client(config),
+                                count=20,
+                            )
+                        )
+                    except Exception as exc:
+                        self.failed.emit(str(exc))
+                    finally:
+                        self.finished.emit()
+
+            self_ref = self
+            thread = QThread(self)
+            worker = _SyntheticWorker()
+            worker.moveToThread(thread)
+            thread.started.connect(worker.run)
+
+            def _done(result: object) -> None:
+                generated = getattr(result, "generated", 0)
+                requested = getattr(result, "requested", 0)
+                self.statusBar().showMessage(
+                    f"Dataset sintético generado: {generated}/{requested}.",
+                    7000,
+                )
+                self._open_training_lab()
+
+            def _failed(message: str) -> None:
+                self.statusBar().showMessage(
+                    f"No se pudo generar dataset sintético: {message}",
+                    9000,
+                )
+
+            def _cleanup() -> None:
+                self._training_lab_ref = None
+
+            worker.completed.connect(_done)
+            worker.failed.connect(_failed)
+            worker.finished.connect(worker.deleteLater)
+            worker.finished.connect(thread.quit)
+            thread.finished.connect(_cleanup)
+            thread.finished.connect(thread.deleteLater)
+            self._training_lab_ref = (thread, worker)
+            self.statusBar().showMessage("Generando dataset sintético con Ollama…", 5000)
+            thread.start()
 
         def _run_system_diagnostics(self) -> None:
             if self._system_diag_ref is not None:
@@ -1951,6 +2177,7 @@ def launch_desktop_app(
             self._nav_demo_btn.setEnabled(accepts)
             self._nav_client_btn.setEnabled(accepts)
             self._nav_pack_btn.setEnabled(accepts)
+            self._nav_training_btn.setEnabled(accepts)
             self._settings_button.setEnabled(allows_cfg)
             self._system_button.setEnabled(accepts)
             self._cancel_button.setVisible(state.cancellable)

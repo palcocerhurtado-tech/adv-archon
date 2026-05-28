@@ -15,6 +15,14 @@ class ExportResult:
     examples_exported: int
 
 
+@dataclass(frozen=True, slots=True)
+class FeedbackStats:
+    total: int
+    approved: int
+    review: int
+    average_score: float | None
+
+
 class FeedbackStore:
     """SQLite store for compliance examples that can feed future local fine-tuning."""
 
@@ -175,6 +183,27 @@ class FeedbackStore:
         ).fetchone()
         return int(row["total"] or 0) if row else 0
 
+    def stats(self) -> FeedbackStats:
+        row = self._conn.execute(
+            """
+            SELECT
+                COUNT(*) AS total,
+                SUM(CASE WHEN approved_by_user = 1 THEN 1 ELSE 0 END) AS approved,
+                AVG(judge_score) AS average_score
+            FROM compliance_examples
+            """
+        ).fetchone()
+        total = int(row["total"] or 0) if row else 0
+        approved = int(row["approved"] or 0) if row else 0
+        raw_average = row["average_score"] if row else None
+        average = float(raw_average) if raw_average is not None else None
+        return FeedbackStats(
+            total=total,
+            approved=approved,
+            review=max(0, total - approved),
+            average_score=average,
+        )
+
 
 def _build_plan_summary(expediente: Any) -> str:
     lines = [
@@ -256,4 +285,4 @@ def _alpaca_input(row: sqlite3.Row) -> str:
     )
 
 
-__all__ = ["ExportResult", "FeedbackStore"]
+__all__ = ["ExportResult", "FeedbackStats", "FeedbackStore"]

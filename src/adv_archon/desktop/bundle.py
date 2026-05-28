@@ -175,6 +175,7 @@ def _project_copy_ignore(directory: str, names: list[str]) -> set[str]:
         ".mypy_cache",
         ".pytest_cache",
         ".ruff_cache",
+        ".uv-cache",
         ".venv",
         "__pycache__",
         "dist",

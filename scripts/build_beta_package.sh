@@ -70,6 +70,7 @@ rsync -a \
   --exclude ".mypy_cache" \
   --exclude ".pytest_cache" \
   --exclude ".ruff_cache" \
+  --exclude ".uv-cache" \
   --exclude ".venv" \
   --exclude "__pycache__*" \
   --exclude "dist" \
@@ -589,7 +590,7 @@ if grep -E '(^|/)\.env($|\.)' "${ZIP_LIST}" | grep -v '/\.env\.example$'; then
   echo "ERROR: El ZIP contiene archivos .env. No se puede distribuir esta beta."
   exit 1
 fi
-if grep -E '(^|/)(\.git|\.venv|__pycache__[^/]*|\.pytest_cache|\.ruff_cache|\.mypy_cache)(/|$)' "${ZIP_LIST}"; then
+if grep -E '(^|/)(\.git|\.venv|__pycache__[^/]*|\.pytest_cache|\.ruff_cache|\.mypy_cache|\.uv-cache)(/|$)' "${ZIP_LIST}"; then
   echo "ERROR: El ZIP contiene carpetas internas o caches. No se puede distribuir esta beta."
   exit 1
 fi

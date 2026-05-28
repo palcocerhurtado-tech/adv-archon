@@ -78,6 +78,8 @@ def test_create_macos_app_bundle_can_embed_project_source(
     (project_root / "src" / "adv_archon").mkdir(parents=True)
     (project_root / "src" / "adv_archon" / "__init__.py").write_text("", encoding="utf-8")
     (project_root / ".venv").mkdir()
+    (project_root / ".uv-cache").mkdir()
+    (project_root / ".uv-cache" / "build-cache").write_text("", encoding="utf-8")
     (project_root / ".git").mkdir()
     (project_root / ".env").write_text("TOKEN=secret\n", encoding="utf-8")
     (project_root / ".env.local").write_text("TOKEN=secret\n", encoding="utf-8")
@@ -104,6 +106,7 @@ def test_create_macos_app_bundle_can_embed_project_source(
     assert result.embedded_project_path is not None
     assert (result.embedded_project_path / "src" / "adv_archon").exists()
     assert not (result.embedded_project_path / ".venv").exists()
+    assert not (result.embedded_project_path / ".uv-cache").exists()
     assert not (result.embedded_project_path / ".git").exists()
     assert not (result.embedded_project_path / ".env").exists()
     assert not (result.embedded_project_path / ".env.local").exists()

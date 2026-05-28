@@ -1,0 +1,272 @@
+[
+  {
+    "id": "vivienda-unifamiliar-altura",
+    "title": "Vivienda unifamiliar con altura ajustada",
+    "case_type": "vivienda_unifamiliar",
+    "municipality": ["Madrid", "Zaragoza", "Valencia"],
+    "variables": {
+      "plot_m2": {"min": 180, "max": 650},
+      "height_m": {"min": 7.0, "max": 11.5, "decimals": 1},
+      "max_height_m": {"choices": [7.5, 9.0, 10.5]},
+      "floors": {"choices": [2, 3]}
+    },
+    "scenario": "Proyecto de vivienda unifamiliar en parcela de {plot_m2} m2 con {floors} plantas y altura propuesta de {height_m} m.",
+    "official_context": "La ordenanza residencial preliminar fija altura máxima de {max_height_m} m y exige confirmar alineaciones en plano municipal.",
+    "risk_hint": "Comparar altura propuesta con altura máxima y pedir validación de ordenanza."
+  },
+  {
+    "id": "vivienda-unifamiliar-ocupacion",
+    "title": "Vivienda unifamiliar con ocupación elevada",
+    "case_type": "vivienda_unifamiliar",
+    "municipality": ["Madrid", "Sevilla", "Barcelona"],
+    "variables": {
+      "plot_m2": {"min": 220, "max": 900},
+      "built_footprint_m2": {"min": 140, "max": 520},
+      "max_occupancy_pct": {"choices": [35, 40, 50, 60]}
+    },
+    "scenario": "La huella proyectada ocupa {built_footprint_m2} m2 sobre una parcela de {plot_m2} m2.",
+    "official_context": "La ocupación máxima preliminar de la zona es {max_occupancy_pct}%.",
+    "risk_hint": "Calcular ocupación y señalar si supera el porcentaje máximo."
+  },
+  {
+    "id": "vivienda-unifamiliar-retranqueos",
+    "title": "Vivienda unifamiliar con retranqueo lateral dudoso",
+    "case_type": "vivienda_unifamiliar",
+    "municipality": ["Zaragoza", "Valencia", "Sevilla"],
+    "variables": {
+      "side_setback_m": {"min": 1.0, "max": 4.0, "decimals": 1},
+      "required_setback_m": {"choices": [2.0, 3.0, 5.0]},
+      "front_setback_m": {"min": 3.0, "max": 8.0, "decimals": 1}
+    },
+    "scenario": "El plano declara retranqueo lateral de {side_setback_m} m y retranqueo frontal de {front_setback_m} m.",
+    "official_context": "La ficha de zona exige retranqueo lateral mínimo de {required_setback_m} m.",
+    "risk_hint": "Revisar retranqueo lateral y advertir que la medición exacta depende del plano acotado."
+  },
+  {
+    "id": "local-cambio-uso-residencial",
+    "title": "Cambio de uso de local a vivienda",
+    "case_type": "cambio_uso_vivienda",
+    "municipality": ["Madrid", "Barcelona", "Valencia"],
+    "variables": {
+      "surface_m2": {"min": 38, "max": 145},
+      "facade_m": {"min": 3.0, "max": 9.0, "decimals": 1},
+      "patio": {"choices": ["sin patio", "con patio interior", "con ventilación a fachada"]}
+    },
+    "scenario": "Local comercial de {surface_m2} m2 y fachada de {facade_m} m, propuesto para cambio a vivienda, {patio}.",
+    "official_context": "Debe comprobarse compatibilidad de uso residencial, condiciones de habitabilidad, ventilación, accesibilidad y estatutos/comunidad.",
+    "risk_hint": "Normalmente condicionado hasta confirmar uso permitido y habitabilidad."
+  },
+  {
+    "id": "local-comercial-accesibilidad",
+    "title": "Local comercial con ajuste de accesibilidad",
+    "case_type": "local_comercial",
+    "municipality": ["Madrid", "Sevilla", "Zaragoza"],
+    "variables": {
+      "surface_m2": {"min": 55, "max": 320},
+      "door_width_cm": {"min": 70, "max": 105},
+      "step_cm": {"choices": [0, 5, 12, 18]}
+    },
+    "scenario": "Adecuación de local comercial de {surface_m2} m2 con puerta de {door_width_cm} cm y desnivel de acceso de {step_cm} cm.",
+    "official_context": "Debe revisarse accesibilidad, evacuación, uso compatible y licencia de actividad.",
+    "risk_hint": "Condicionar si hay desnivel o ancho insuficiente."
+  },
+  {
+    "id": "reforma-interior-estructura",
+    "title": "Reforma interior con posible afección estructural",
+    "case_type": "reforma_interior",
+    "municipality": ["Madrid", "Barcelona", "Sevilla"],
+    "variables": {
+      "surface_m2": {"min": 60, "max": 180},
+      "wall_type": {"choices": ["tabique", "muro de carga", "elemento sin identificar"]},
+      "building_year": {"min": 1930, "max": 1995}
+    },
+    "scenario": "Reforma de vivienda de {surface_m2} m2 en edificio de {building_year}; se demuele un {wall_type}.",
+    "official_context": "Debe distinguirse obra menor/mayor, afección estructural, patrimonio y CTE aplicable.",
+    "risk_hint": "Si hay muro de carga o duda estructural, requiere revisión técnica."
+  },
+  {
+    "id": "obra-nueva-edificabilidad",
+    "title": "Obra nueva con edificabilidad próxima al límite",
+    "case_type": "obra_nueva",
+    "municipality": ["Valencia", "Zaragoza", "Madrid"],
+    "variables": {
+      "plot_m2": {"min": 300, "max": 1200},
+      "buildability": {"min": 0.6, "max": 1.8, "decimals": 2},
+      "project_area_m2": {"min": 280, "max": 1600}
+    },
+    "scenario": "Obra nueva con superficie computable de {project_area_m2} m2 sobre parcela de {plot_m2} m2.",
+    "official_context": "La edificabilidad preliminar aplicable es {buildability} m2/m2.",
+    "risk_hint": "Calcular techo máximo aproximado y pedir confirmación de cómputos."
+  },
+  {
+    "id": "zona-inundable-t100",
+    "title": "Parcela con afección de inundabilidad T100",
+    "case_type": "vivienda_unifamiliar",
+    "municipality": ["Zaragoza", "Valencia", "Sevilla"],
+    "variables": {
+      "surface_m2": {"min": 200, "max": 800},
+      "flood_zone": {"choices": ["T100", "T500"]}
+    },
+    "scenario": "Proyecto residencial en parcela de {surface_m2} m2 con afección detectada en zona inundable {flood_zone}.",
+    "official_context": "El cribado SNCZI/CNIG detecta inundabilidad; debe revisarse dominio público hidráulico y autorización sectorial.",
+    "risk_hint": "Marcar condicionado y exigir informe hidráulico/consulta a organismo de cuenca."
+  },
+  {
+    "id": "zona-costera-servidumbre",
+    "title": "Actuación afectada por servidumbre de Costas",
+    "case_type": "reforma_interior",
+    "municipality": ["Valencia", "Barcelona", "Cádiz"],
+    "variables": {
+      "distance_m": {"min": 20, "max": 480},
+      "zone": {"choices": ["DPMT", "servidumbre de protección", "zona de influencia"]}
+    },
+    "scenario": "Intervención próxima al litoral, a {distance_m} m de la línea costera estimada, con posible afección de {zone}.",
+    "official_context": "SIGCOSTAS/MITECO exige revisar DPMT, servidumbre de protección y autorizaciones.",
+    "risk_hint": "No presentar como delimitación jurídica exacta; condicionar a informe sectorial."
+  },
+  {
+    "id": "red-natura-afeccion",
+    "title": "Parcela próxima a Red Natura 2000",
+    "case_type": "obra_nueva",
+    "municipality": ["Sevilla", "Valencia", "Zaragoza"],
+    "variables": {
+      "protected_type": {"choices": ["ZEC", "ZEPA", "ZEC y ZEPA"]},
+      "distance_m": {"min": 0, "max": 800}
+    },
+    "scenario": "Obra nueva a {distance_m} m de ámbito {protected_type} de Red Natura 2000.",
+    "official_context": "CNIG/MITECO identifica proximidad ambiental; puede requerir evaluación ambiental o informe autonómico.",
+    "risk_hint": "Condicionar a comprobación ambiental y autoridad competente."
+  },
+  {
+    "id": "carreteras-proximidad",
+    "title": "Parcela próxima a viario oficial",
+    "case_type": "obra_nueva",
+    "municipality": ["Madrid", "Zaragoza", "Valencia"],
+    "variables": {
+      "distance_m": {"min": 5, "max": 120},
+      "road_type": {"choices": ["carretera estatal", "autovía", "carretera autonómica"]}
+    },
+    "scenario": "Parcela con edificación prevista a {distance_m} m de una {road_type}.",
+    "official_context": "El WFS de transportes publica geometría viaria oficial, pero no delimita por sí mismo dominio/servidumbre/afección.",
+    "risk_hint": "Usar lenguaje de cribado geométrico y no afirmar delimitación jurídica exacta."
+  },
+  {
+    "id": "pgou-pendiente",
+    "title": "Municipio con PGOU pendiente de validar",
+    "case_type": "obra_nueva",
+    "municipality": ["Barcelona", "Sevilla", "Madrid"],
+    "variables": {
+      "surface_m2": {"min": 80, "max": 600},
+      "use": {"choices": ["residencial", "terciario", "dotacional"]}
+    },
+    "scenario": "Expediente de {use} con {surface_m2} m2 construidos, pero la biblioteca PGOU local está en estado preliminar.",
+    "official_context": "Hay contexto catastral y afecciones sectoriales, pero falta validar ordenanza exacta.",
+    "risk_hint": "Veredicto REVISAR por falta de base municipal validada."
+  },
+  {
+    "id": "uso-catastral-discrepante",
+    "title": "Uso catastral no coincidente con uso proyectado",
+    "case_type": "cambio_uso_vivienda",
+    "municipality": ["Madrid", "Zaragoza", "Sevilla"],
+    "variables": {
+      "current_use": {"choices": ["comercial", "almacén", "industrial"]},
+      "target_use": {"choices": ["residencial", "oficina", "turístico"]}
+    },
+    "scenario": "Catastro indica uso {current_use}, mientras el proyecto propone uso {target_use}.",
+    "official_context": "La discrepancia catastral no determina por sí sola la legalidad urbanística, pero exige revisión de licencia y PGOU.",
+    "risk_hint": "Separar dato catastral de compatibilidad urbanística."
+  },
+  {
+    "id": "patrimonio-centro-historico",
+    "title": "Reforma en entorno patrimonial",
+    "case_type": "reforma_interior",
+    "municipality": ["Madrid", "Barcelona", "Sevilla"],
+    "variables": {
+      "building_year": {"min": 1880, "max": 1950},
+      "catalog_level": {"choices": ["ambiental", "estructural", "integral", "sin confirmar"]}
+    },
+    "scenario": "Reforma en edificio de {building_year} situado en centro histórico, con posible protección {catalog_level}.",
+    "official_context": "Debe revisarse catálogo municipal, comisión de patrimonio y alcance de elementos protegidos.",
+    "risk_hint": "Condicionar a ficha de catálogo y autorización patrimonial."
+  },
+  {
+    "id": "actividad-hosteleria-ruido",
+    "title": "Implantación de actividad de hostelería",
+    "case_type": "local_comercial",
+    "municipality": ["Madrid", "Valencia", "Sevilla"],
+    "variables": {
+      "surface_m2": {"min": 45, "max": 250},
+      "terrace": {"choices": ["sin terraza", "con terraza exterior", "con veladores"]}
+    },
+    "scenario": "Local de hostelería de {surface_m2} m2, {terrace}, en planta baja de edificio residencial.",
+    "official_context": "Debe revisarse compatibilidad de uso, ordenanza acústica, evacuación, accesibilidad y licencia de actividad.",
+    "risk_hint": "Condicionado por actividad, ruido y compatibilidad con residencial."
+  },
+  {
+    "id": "aparcamiento-dotacion",
+    "title": "Cambio de uso con dotación de aparcamiento",
+    "case_type": "cambio_uso_vivienda",
+    "municipality": ["Madrid", "Zaragoza", "Barcelona"],
+    "variables": {
+      "new_units": {"min": 1, "max": 8},
+      "parking_spaces": {"min": 0, "max": 5}
+    },
+    "scenario": "Transformación a {new_units} viviendas con {parking_spaces} plazas de aparcamiento disponibles.",
+    "official_context": "La ordenanza puede exigir dotación mínima de aparcamiento o justificar exención.",
+    "risk_hint": "Comprobar estándar de aparcamiento y posibles exenciones."
+  },
+  {
+    "id": "atico-ampliacion-volumen",
+    "title": "Ampliación de ático con incremento de volumen",
+    "case_type": "reforma_interior",
+    "municipality": ["Madrid", "Barcelona", "Valencia"],
+    "variables": {
+      "added_m2": {"min": 8, "max": 55},
+      "current_floors": {"choices": [4, 5, 6, 7]},
+      "allowed_floors": {"choices": [4, 5, 6]}
+    },
+    "scenario": "Ampliación de ático de {added_m2} m2 sobre edificio de {current_floors} plantas.",
+    "official_context": "La ordenanza preliminar permite {allowed_floors} plantas y exige revisar aprovechamiento, volumen y condiciones de cubierta.",
+    "risk_hint": "Alto riesgo si supera plantas o modifica envolvente protegida."
+  },
+  {
+    "id": "segregacion-parcela-minima",
+    "title": "Segregación con parcela mínima",
+    "case_type": "obra_nueva",
+    "municipality": ["Zaragoza", "Sevilla", "Valencia"],
+    "variables": {
+      "original_m2": {"min": 500, "max": 3000},
+      "resulting_m2": {"min": 120, "max": 900},
+      "minimum_m2": {"choices": [200, 300, 500, 800]}
+    },
+    "scenario": "Segregación de parcela de {original_m2} m2 en parcelas resultantes de {resulting_m2} m2.",
+    "official_context": "La parcela mínima preliminar de la zona es {minimum_m2} m2.",
+    "risk_hint": "Revisar si la parcela resultante cumple superficie mínima y frente mínimo."
+  },
+  {
+    "id": "frente-minimo-parcela",
+    "title": "Parcela con frente mínimo insuficiente",
+    "case_type": "vivienda_unifamiliar",
+    "municipality": ["Madrid", "Valencia", "Sevilla"],
+    "variables": {
+      "front_m": {"min": 4.0, "max": 18.0, "decimals": 1},
+      "minimum_front_m": {"choices": [6.0, 8.0, 10.0, 12.0]}
+    },
+    "scenario": "Parcela residencial con frente de fachada de {front_m} m.",
+    "official_context": "La ordenanza preliminar exige frente mínimo de {minimum_front_m} m.",
+    "risk_hint": "Condicionar si el frente no cumple o falta plano de alineaciones."
+  },
+  {
+    "id": "vivienda-turistica",
+    "title": "Implantación de vivienda turística",
+    "case_type": "cambio_uso_vivienda",
+    "municipality": ["Madrid", "Barcelona", "Valencia", "Sevilla"],
+    "variables": {
+      "surface_m2": {"min": 35, "max": 160},
+      "access": {"choices": ["acceso común", "acceso independiente", "acceso sin confirmar"]}
+    },
+    "scenario": "Vivienda de {surface_m2} m2 que se pretende destinar a uso turístico con {access}.",
+    "official_context": "Debe comprobarse planeamiento municipal, normativa turística autonómica, comunidad de propietarios y licencia/declaración responsable.",
+    "risk_hint": "Condicionado por compatibilidad urbanística y normativa autonómica."
+  }
+]

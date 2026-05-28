@@ -61,6 +61,11 @@ desktop = [
 wakeword = [
   "pvporcupine>=3.0.5",
 ]
+finetune = [
+  "torch>=2.2",
+  "transformers>=4.40",
+  "tqdm>=4.66",
+]
 
 [project.scripts]
 adv-archon = "adv_archon.main:main"

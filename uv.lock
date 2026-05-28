@@ -63,6 +63,11 @@ dev = [
     { name = "pytest-asyncio" },
     { name = "ruff" },
 ]
+finetune = [
+    { name = "torch" },
+    { name = "tqdm" },
+    { name = "transformers" },
+]
 wakeword = [
     { name = "pvporcupine" },
 ]
@@ -111,11 +116,14 @@ requires-dist = [
     { name = "sentence-transformers", specifier = ">=4.1.0" },
     { name = "sounddevice", specifier = ">=0.5.2" },
     { name = "structlog", specifier = ">=25.3.0" },
+    { name = "torch", marker = "extra == 'finetune'", specifier = ">=2.2" },
+    { name = "tqdm", marker = "extra == 'finetune'", specifier = ">=4.66" },
     { name = "trafilatura", specifier = ">=2.0.0" },
+    { name = "transformers", marker = "extra == 'finetune'", specifier = ">=4.40" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.34.0" },
     { name = "yfinance", specifier = ">=0.2.55" },
 ]
-provides-extras = ["dev", "desktop", "wakeword"]
+provides-extras = ["dev", "desktop", "wakeword", "finetune"]
 
 [package.metadata.requires-dev]
 dev = [

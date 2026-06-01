@@ -14,7 +14,12 @@ get_header();
     </a>
     <?php
     $categories = get_the_category();
-    $cat_name = !empty($categories) ? esc_html($categories[0]->name) : 'Blog';
+    $cat_name = 'Blog';
+    if (!empty($categories)) {
+        $raw = $categories[0]->name;
+        $tr = ['Uncategorized'=>'Blog','Uncategorised'=>'Blog','Sin categoría'=>'Blog','News'=>'Noticias','Tips'=>'Consejos','Results'=>'Resultados','Techniques'=>'Técnicas','Trends'=>'Tendencias'];
+        $cat_name = isset($tr[$raw]) ? $tr[$raw] : esc_html($raw);
+    }
     ?>
     <span class="label"><?php echo $cat_name; ?> · <?php echo virginia_fecha_es(); ?></span>
     <h1 style="margin:12px 0 32px"><?php the_title(); ?></h1>

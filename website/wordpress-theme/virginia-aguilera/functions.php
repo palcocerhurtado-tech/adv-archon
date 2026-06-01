@@ -7,12 +7,33 @@ function virginia_theme_setup() {
     add_theme_support('custom-logo');
     add_theme_support('automatic-feed-links');
 
+    // Cargar dominio de texto en español
+    load_theme_textdomain('virginia-aguilera', get_template_directory() . '/languages');
+
     register_nav_menus([
         'primary' => 'Menú principal',
         'footer'  => 'Menú pie de página',
     ]);
 }
 add_action('after_setup_theme', 'virginia_theme_setup');
+
+// Forzar idioma español en WordPress
+function virginia_set_spanish() {
+    if (get_option('WPLANG') !== 'es_ES') {
+        update_option('WPLANG', 'es_ES');
+    }
+    // Renombrar "Uncategorized" a "Blog" en español
+    $cat = get_term_by('name', 'Uncategorized', 'category');
+    if ($cat) {
+        wp_update_term($cat->term_id, 'category', ['name' => 'Blog', 'slug' => 'blog-general']);
+    }
+    // Renombrar "Sin categoría" si ya está en español pero con ese nombre
+    $cat2 = get_term_by('name', 'Sin categoría', 'category');
+    if ($cat2) {
+        wp_update_term($cat2->term_id, 'category', ['name' => 'Blog', 'slug' => 'blog-general']);
+    }
+}
+add_action('admin_init', 'virginia_set_spanish');
 
 // Enqueue
 function virginia_scripts() {

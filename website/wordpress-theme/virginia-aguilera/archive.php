@@ -36,7 +36,12 @@ get_header();
             <div class="blog-card-body">
               <?php
               $categories = get_the_category();
-              $cat_name = !empty($categories) ? esc_html($categories[0]->name) : 'Blog';
+              $cat_name = 'Blog';
+              if (!empty($categories)) {
+                  $raw = $categories[0]->name;
+                  $tr = ['Uncategorized'=>'Blog','Uncategorised'=>'Blog','Sin categoría'=>'Blog','News'=>'Noticias','Tips'=>'Consejos','Results'=>'Resultados','Techniques'=>'Técnicas','Trends'=>'Tendencias'];
+                  $cat_name = isset($tr[$raw]) ? $tr[$raw] : esc_html($raw);
+              }
               ?>
               <div class="blog-card-meta"><?php echo $cat_name; ?> · <?php echo virginia_fecha_es(); ?></div>
               <h3><?php the_title(); ?></h3>

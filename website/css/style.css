@@ -262,10 +262,10 @@ p { font-size: 1rem; color: var(--text-mid); max-width: 68ch; }
 .hero-bg {
   position: absolute;
   inset: 0;
-  background-image: url('../img/banner-cejas-lateral.jpg');
+  background-image: url('../img/hero-micropigmentacion-premium.jpg');
   background-size: cover;
-  background-position: center 30%;
-  opacity: 0.55;
+  background-position: center 25%;
+  opacity: 0.65;
   transform: scale(1.04);
   transition: transform 6s ease;
 }
@@ -274,10 +274,10 @@ p { font-size: 1rem; color: var(--text-mid); max-width: 68ch; }
   position: absolute;
   inset: 0;
   background: linear-gradient(
-    105deg,
-    rgba(44, 31, 20, 0.72) 0%,
-    rgba(44, 31, 20, 0.3) 60%,
-    transparent 100%
+    115deg,
+    rgba(28, 18, 8, 0.82) 0%,
+    rgba(44, 31, 20, 0.45) 50%,
+    rgba(44, 31, 20, 0.15) 100%
   );
 }
 .hero-content {

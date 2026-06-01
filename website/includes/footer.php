@@ -29,7 +29,6 @@
           <li><a href="/micropigmentacion-cejas.php">Micropigmentación de cejas</a></li>
           <li><a href="/micropigmentacion-ojos.php">Micropigmentación de ojos</a></li>
           <li><a href="/micropigmentacion-labios.php">Micropigmentación de labios</a></li>
-          <li><a href="/microblading-zaragoza.php">Microblading en Zaragoza</a></li>
         </ul>
       </div>
 

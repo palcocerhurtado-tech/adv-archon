@@ -106,6 +106,43 @@ function virginia_fecha_es($timestamp = null) {
     return date('j', $ts) . ' de ' . $meses[(int)date('n', $ts) - 1] . ' de ' . date('Y', $ts);
 }
 
+// ─── Auto-crear páginas requeridas ─────────────────────────────
+// Crea las páginas del tema si aún no existen (se ejecuta en admin_init)
+function virginia_create_required_pages() {
+    if (!is_admin() || get_transient('virginia_pages_created')) return;
+    $pages = [
+        ['title' => 'Contacto',                    'slug' => 'contacto',                  'template' => 'page-templates/template-contacto.php'],
+        ['title' => 'Micropigmentación de Cejas',  'slug' => 'micropigmentacion-cejas',   'template' => 'page-templates/template-cejas.php'],
+        ['title' => 'Micropigmentación de Ojos',   'slug' => 'micropigmentacion-ojos',    'template' => 'page-templates/template-ojos.php'],
+        ['title' => 'Micropigmentación de Labios', 'slug' => 'micropigmentacion-labios',  'template' => 'page-templates/template-labios.php'],
+        ['title' => 'Galería de Trabajos',         'slug' => 'trabajos',                  'template' => 'page-templates/template-trabajos.php'],
+        ['title' => 'Virginia Aguilera',           'slug' => 'virginia',                  'template' => 'page-templates/template-quienes-somos.php'],
+    ];
+    foreach ($pages as $p) {
+        if (!get_page_by_path($p['slug'])) {
+            $id = wp_insert_post([
+                'post_title'   => $p['title'],
+                'post_name'    => $p['slug'],
+                'post_status'  => 'publish',
+                'post_type'    => 'page',
+                'post_content' => '',
+            ]);
+            if ($id && !is_wp_error($id)) {
+                update_post_meta($id, '_wp_page_template', $p['template']);
+            }
+        }
+    }
+    set_transient('virginia_pages_created', 1, DAY_IN_SECONDS);
+}
+add_action('admin_init', 'virginia_create_required_pages');
+
+// Admin notice si falta la página de contacto
+function virginia_missing_pages_notice() {
+    if (get_page_by_path('contacto')) return;
+    echo '<div class="notice notice-warning"><p><strong>Virginia Aguilera:</strong> Haz clic en <a href="' . admin_url() . '">cualquier enlace del panel</a> para crear las páginas del tema automáticamente, o créalas manualmente con los slugs: <code>contacto</code>, <code>micropigmentacion-cejas</code>, <code>micropigmentacion-ojos</code>, <code>micropigmentacion-labios</code>, <code>trabajos</code>, <code>virginia</code>.</p></div>';
+}
+add_action('admin_notices', 'virginia_missing_pages_notice');
+
 // ─── WooCommerce ───────────────────────────────────────────────
 function virginia_woocommerce_setup() {
     add_theme_support('woocommerce', [

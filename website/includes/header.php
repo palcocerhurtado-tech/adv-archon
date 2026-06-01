@@ -69,7 +69,6 @@ $canonicalUrl = $canonicalUrl ?? 'https://micropigmentacionzgz.es/' . basename($
               <a href="/micropigmentacion-cejas.php">Cejas</a>
               <a href="/micropigmentacion-ojos.php">Ojos</a>
               <a href="/micropigmentacion-labios.php">Labios</a>
-              <a href="/microblading-zaragoza.php">Microblading</a>
             </div>
           </li>
           <li><a href="/trabajos-cejas.php">Trabajos</a></li>
@@ -97,7 +96,6 @@ $canonicalUrl = $canonicalUrl ?? 'https://micropigmentacionzgz.es/' . basename($
   <a href="/micropigmentacion-cejas.php">Cejas</a>
   <a href="/micropigmentacion-ojos.php">Ojos</a>
   <a href="/micropigmentacion-labios.php">Labios</a>
-  <a href="/microblading-zaragoza.php">Microblading</a>
   <a href="/trabajos-cejas.php">Trabajos</a>
   <a href="/quienes-somos.php">Virginia</a>
   <a href="/blog.php">Blog</a>

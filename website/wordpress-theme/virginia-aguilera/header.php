@@ -39,7 +39,6 @@ $logo_url = get_template_directory_uri() . '/img/logotipo-micropigmentacion-virg
               <a href="<?php echo home_url('/micropigmentacion-cejas/'); ?>">Cejas</a>
               <a href="<?php echo home_url('/micropigmentacion-ojos/'); ?>">Ojos</a>
               <a href="<?php echo home_url('/micropigmentacion-labios/'); ?>">Labios</a>
-              <a href="<?php echo home_url('/microblading-zaragoza/'); ?>">Microblading</a>
             </div>
           </li>
           <li><a href="<?php echo home_url('/trabajos/'); ?>">Trabajos</a></li>
@@ -76,7 +75,6 @@ $logo_url = get_template_directory_uri() . '/img/logotipo-micropigmentacion-virg
   <a href="<?php echo home_url('/micropigmentacion-cejas/'); ?>">Cejas</a>
   <a href="<?php echo home_url('/micropigmentacion-ojos/'); ?>">Ojos</a>
   <a href="<?php echo home_url('/micropigmentacion-labios/'); ?>">Labios</a>
-  <a href="<?php echo home_url('/microblading-zaragoza/'); ?>">Microblading</a>
   <a href="<?php echo home_url('/trabajos/'); ?>">Trabajos</a>
   <a href="<?php echo home_url('/virginia/'); ?>">Virginia</a>
   <a href="<?php echo home_url('/blog/'); ?>">Blog</a>

@@ -1,11 +1,19 @@
 <?php
 $pageTitle    = 'Blog Micropigmentación Zaragoza — Virginia Aguilera | Consejos y Tendencias';
 $pageDesc     = 'Todo sobre micropigmentación: consejos, tendencias, preguntas frecuentes y más. Blog de Virginia Aguilera, especialista en micropigmentación en Zaragoza.';
-$pageKeywords = 'blog micropigmentación Zaragoza, consejos micropigmentación, microblading blog, tendencias maquillaje permanente';
+$pageKeywords = 'blog micropigmentación Zaragoza, consejos micropigmentación, comparativa micropigmentación microblading, tendencias maquillaje permanente';
 $canonicalUrl = 'https://micropigmentacionzgz.es/blog.php';
 include 'includes/header.php';
 
 $posts = [
+  [
+    'slug'    => 'micropigmentacion-vs-microblading',
+    'titulo'  => 'Micropigmentación vs Microblading: la comparativa definitiva.',
+    'extracto'=> 'Las diferencias reales entre ambas técnicas, por qué elegiría siempre la micropigmentación y lo que nadie te cuenta sobre el papel de los pigmentos en el resultado final.',
+    'fecha'   => '1 junio 2025',
+    'cat'     => 'Técnicas',
+    'img'     => 'micropigmentacion-cejas.jpg',
+  ],
   [
     'slug'    => 'micropigmentacion-o-tatuaje',
     'titulo'  => '¿La micropigmentación es un tatuaje? Te cuento la verdad.',

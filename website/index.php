@@ -103,7 +103,7 @@ include 'includes/header.php';
           <circle cx="20" cy="20" r="19" stroke="#c9a96e" stroke-width="1.5"/>
           <path d="M20 10v10l6 4" stroke="#c9a96e" stroke-width="2" stroke-linecap="round"/>
         </svg>
-        <span>+10 años de experiencia</span>
+        <span>+20 años de experiencia</span>
       </div>
       <div class="badge-item" style="text-align:center">
         <svg width="40" height="40" viewBox="0 0 40 40" fill="none" style="margin:0 auto 8px">
@@ -242,8 +242,8 @@ include 'includes/header.php';
       </p>
       <span class="quote-author">Virginia Aguilera · Micropigmentación Zaragoza</span>
       <div class="quote-stat">
-        <strong>+500</strong>
-        personas atendidas en Zaragoza con resultados que hablan por sí solos
+        <strong>+350</strong>
+        clientas satisfechas · 98% repetiría · 20+ años de experiencia
       </div>
     </div>
   </div>
@@ -263,7 +263,7 @@ include 'includes/header.php';
         <span class="label">Quién soy</span>
         <h2>Hola, soy Virginia.</h2>
         <p>
-          Llevo más de diez años dedicándome en exclusiva a la micropigmentación facial.
+          Llevo más de veinte años dedicándome en exclusiva a la micropigmentación facial.
           No porque no pudiera hacer otra cosa, sino porque me enamoré de este oficio y
           decidí hacerlo bien, muy bien.
         </p>
@@ -277,6 +277,59 @@ include 'includes/header.php';
           y yo diciéndote con honestidad si puedo dártelo y cómo.
         </p>
         <a href="/quienes-somos.php" class="btn btn--primary" style="margin-top:8px">Conoce mi historia</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ========== TESTIMONIOS ========== -->
+<section class="section" style="background:var(--cream)">
+  <div class="container">
+    <div class="text-center reveal">
+      <span class="label">Lo que dicen ellas</span>
+      <h2>Resultados que hablan por sí solos.</h2>
+    </div>
+    <div class="services-grid" style="margin-top:48px">
+      <div class="reveal reveal-delay-1" style="background:var(--white);border-radius:var(--radius-lg);padding:36px;box-shadow:var(--shadow)">
+        <svg viewBox="0 0 24 24" fill="var(--gold)" width="32" height="32" style="margin-bottom:16px"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/></svg>
+        <p style="font-size:1.05rem;line-height:1.7;color:var(--text-dark);font-style:italic">
+          "Llevaba años pensando en hacerme las cejas y lo fui posponiendo. Por fin me decidí y me alegro muchísimo. Virginia te escucha, te explica todo, y el resultado es exactamente lo que quería. Natural, discreto y precioso."
+        </p>
+        <div style="margin-top:24px;display:flex;align-items:center;gap:12px">
+          <div style="width:44px;height:44px;border-radius:50%;background:var(--champagne);display:flex;align-items:center;justify-content:center;font-family:var(--font-serif);font-size:1.1rem;color:var(--gold-dark)">JM</div>
+          <div>
+            <strong style="display:block;font-size:0.95rem">José Martínez</strong>
+            <span style="font-size:0.82rem;color:var(--text-light)">Micropigmentación de cejas · Zaragoza</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal reveal-delay-2" style="background:var(--white);border-radius:var(--radius-lg);padding:36px;box-shadow:var(--shadow)">
+        <svg viewBox="0 0 24 24" fill="var(--gold)" width="32" height="32" style="margin-bottom:16px"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/></svg>
+        <p style="font-size:1.05rem;line-height:1.7;color:var(--text-dark);font-style:italic">
+          "Me hice los labios con Virginia y el cambio ha sido increíble. El color es súper natural y ya no tengo que preocuparme por el maquillaje. Su trato es cálido y profesional, te hace sentir cómoda desde el primer momento."
+        </p>
+        <div style="margin-top:24px;display:flex;align-items:center;gap:12px">
+          <div style="width:44px;height:44px;border-radius:50%;background:var(--champagne);display:flex;align-items:center;justify-content:center;font-family:var(--font-serif);font-size:1.1rem;color:var(--gold-dark)">AG</div>
+          <div>
+            <strong style="display:block;font-size:0.95rem">Ana Gómez</strong>
+            <span style="font-size:0.82rem;color:var(--text-light)">Micropigmentación de labios · Zaragoza</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="reveal reveal-delay-3" style="background:var(--white);border-radius:var(--radius-lg);padding:36px;box-shadow:var(--shadow)">
+        <svg viewBox="0 0 24 24" fill="var(--gold)" width="32" height="32" style="margin-bottom:16px"><path d="M14.017 21v-7.391c0-5.704 3.731-9.57 8.983-10.609l.995 2.151c-2.432.917-3.995 3.638-3.995 5.849h4v10h-9.983zm-14.017 0v-7.391c0-5.704 3.748-9.57 9-10.609l.996 2.151c-2.433.917-3.996 3.638-3.996 5.849h3.983v10h-9.983z"/></svg>
+        <p style="font-size:1.05rem;line-height:1.7;color:var(--text-dark);font-style:italic">
+          "Primera vez que me hago algo así y fue una experiencia genial. Virginia no te presiona, te aconseja con honestidad y el resultado supera cualquier expectativa. Ya tengo cita para el retoque."
+        </p>
+        <div style="margin-top:24px;display:flex;align-items:center;gap:12px">
+          <div style="width:44px;height:44px;border-radius:50%;background:var(--champagne);display:flex;align-items:center;justify-content:center;font-family:var(--font-serif);font-size:1.1rem;color:var(--gold-dark)">CR</div>
+          <div>
+            <strong style="display:block;font-size:0.95rem">Carmen R.</strong>
+            <span style="font-size:0.82rem;color:var(--text-light)">Eyeliner permanente · Zaragoza</span>
+          </div>
+        </div>
       </div>
     </div>
   </div>

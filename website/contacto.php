@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   } elseif (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
     $error = 'El email no parece válido.';
   } else {
-    $to      = 'info@micropigmentacionzgz.es';
+    $to      = 'virginiamicropigmentacion@gmail.com';
     $subject = 'Nueva consulta web — ' . htmlspecialchars($nombre);
     $body    = "Nombre: $nombre\nEmail: $email\nTeléfono: $telefono\nServicio: $servicio\n\n$mensaje";
     $headers = "From: noreply@micropigmentacionzgz.es\r\nReply-To: $email\r\nContent-Type: text/plain; charset=UTF-8";

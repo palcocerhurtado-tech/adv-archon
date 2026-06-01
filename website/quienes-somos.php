@@ -1,6 +1,6 @@
 <?php
 $pageTitle    = 'Virginia Aguilera — Especialista en Micropigmentación Zaragoza | Quiénes Somos';
-$pageDesc     = 'Soy Virginia Aguilera, especialista en micropigmentación en Zaragoza desde hace más de 10 años. Instructora, certificada AMME, sello Perfecta Micro. Ven a conocerme.';
+$pageDesc     = 'Soy Virginia Aguilera, especialista en micropigmentación en Zaragoza desde hace más de 20 años. Instructora, certificada AMME, sello Perfecta Micro. Ven a conocerme.';
 $pageKeywords = 'Virginia Aguilera micropigmentación Zaragoza, especialista micropigmentación Zaragoza, microblading Zaragoza experta, certificada AMME Zaragoza';
 $pageImage    = 'https://micropigmentacionzgz.es/img/virginia-aguilera-micropigmentacion.jpg';
 $canonicalUrl = 'https://micropigmentacionzgz.es/quienes-somos.php';
@@ -17,7 +17,7 @@ include 'includes/header.php';
              alt="Virginia Aguilera — Especialista en micropigmentación Zaragoza"
              loading="eager">
         <div class="about-photo-badge">
-          <strong>+10</strong>
+          <strong>+20</strong>
           <span>años de experiencia</span>
         </div>
       </div>
@@ -27,7 +27,7 @@ include 'includes/header.php';
         <h1>Hola, soy Virginia.<br><em style="font-style:italic;color:var(--gold)">Encantada de conocerte.</em></h1>
 
         <p>
-          Llevo más de diez años dedicándome en exclusiva a la micropigmentación facial.
+          Llevo más de veinte años dedicándome en exclusiva a la micropigmentación facial.
           No fue casualidad: fue una elección deliberada. Quería hacer algo con las manos,
           con precisión, con un resultado que la persona pudiera ver y sentir.
           Y cuando me formé por primera vez en micropigmentación, supe que era eso.

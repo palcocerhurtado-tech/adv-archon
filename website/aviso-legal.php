@@ -10,10 +10,12 @@ include 'includes/header.php';
 
     <h2>Titular del sitio web</h2>
     <p>Virginia Aguilera Fernández<br>
-    Actividad: Micropigmentación facial<br>
+    Razón social: VIRLAJA SOCIEDAD LIMITADA<br>
+    CIF: B56175797<br>
+    Domicilio social: Paseo Constitución 8, 50008 Zaragoza<br>
     Domicilio profesional: Pº Independencia 24-26, Planta -1, Local 72, Zaragoza<br>
     Teléfono: 620 834 002<br>
-    Email: info@micropigmentacionzgz.es</p>
+    Email: virginiamicropigmentacion@gmail.com</p>
 
     <h2>Objeto y condiciones de uso</h2>
     <p>

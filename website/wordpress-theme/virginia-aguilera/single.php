@@ -16,7 +16,7 @@ get_header();
     $categories = get_the_category();
     $cat_name = !empty($categories) ? esc_html($categories[0]->name) : 'Blog';
     ?>
-    <span class="label"><?php echo $cat_name; ?> · <?php echo get_the_date('j F Y'); ?></span>
+    <span class="label"><?php echo $cat_name; ?> · <?php echo virginia_fecha_es(); ?></span>
     <h1 style="margin:12px 0 32px"><?php the_title(); ?></h1>
     <?php if (has_post_thumbnail()) : ?>
       <img src="<?php the_post_thumbnail_url('large'); ?>"

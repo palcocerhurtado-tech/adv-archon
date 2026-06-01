@@ -98,3 +98,35 @@ add_filter('excerpt_length', fn() => 25);
 // Remove WP emoji (performance)
 remove_action('wp_head', 'print_emoji_detection_script', 7);
 remove_action('wp_print_styles', 'print_emoji_styles');
+
+// Spanish date helper — returns "3 de junio de 2025"
+function virginia_fecha_es($timestamp = null) {
+    $ts = $timestamp ?: get_the_time('U');
+    $meses = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+    return date('j', $ts) . ' de ' . $meses[(int)date('n', $ts) - 1] . ' de ' . date('Y', $ts);
+}
+
+// ─── WooCommerce ───────────────────────────────────────────────
+function virginia_woocommerce_setup() {
+    add_theme_support('woocommerce', [
+        'thumbnail_image_width' => 600,
+        'single_image_width'    => 900,
+        'product_grid'          => ['default_rows' => 3, 'default_columns' => 3],
+    ]);
+    add_theme_support('wc-product-gallery-zoom');
+    add_theme_support('wc-product-gallery-lightbox');
+    add_theme_support('wc-product-gallery-slider');
+}
+add_action('after_setup_theme', 'virginia_woocommerce_setup');
+
+// Cart count in header via JS data attribute (used by header.php)
+function virginia_cart_count() {
+    if (!function_exists('WC')) return 0;
+    return WC()->cart ? WC()->cart->get_cart_contents_count() : 0;
+}
+
+// Refresh cart fragments
+add_filter('woocommerce_add_to_cart_fragments', function($fragments) {
+    $fragments['.cart-count'] = '<span class="cart-count">' . virginia_cart_count() . '</span>';
+    return $fragments;
+});

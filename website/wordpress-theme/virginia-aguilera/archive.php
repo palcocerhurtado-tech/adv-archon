@@ -38,7 +38,7 @@ get_header();
               $categories = get_the_category();
               $cat_name = !empty($categories) ? esc_html($categories[0]->name) : 'Blog';
               ?>
-              <div class="blog-card-meta"><?php echo $cat_name; ?> · <?php echo get_the_date('j F Y'); ?></div>
+              <div class="blog-card-meta"><?php echo $cat_name; ?> · <?php echo virginia_fecha_es(); ?></div>
               <h3><?php the_title(); ?></h3>
               <p><?php echo wp_trim_words(get_the_excerpt(), 20, '...'); ?></p>
               <a href="<?php the_permalink(); ?>">

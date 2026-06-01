@@ -46,10 +46,19 @@ $logo_url = get_template_directory_uri() . '/img/logotipo-micropigmentacion-virg
           <li><a href="<?php echo home_url('/virginia/'); ?>">Virginia</a></li>
           <li><a href="<?php echo home_url('/blog/'); ?>">Blog</a></li>
           <li><a href="<?php echo home_url('/contacto/'); ?>">Contacto</a></li>
+          <?php if (function_exists('WC')): ?>
+          <li><a href="<?php echo wc_get_page_permalink('shop'); ?>">Tienda</a></li>
+          <?php endif; ?>
         </ul>
       </nav>
 
-      <div class="nav-cta">
+      <div class="nav-cta" style="display:flex;align-items:center;gap:14px">
+        <?php if (function_exists('WC')): ?>
+        <a href="<?php echo wc_get_cart_url(); ?>" class="nav-cart" aria-label="Carrito de compra">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="22" height="22"><circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 002 1.61h9.72a2 2 0 002-1.61L23 6H6"/></svg>
+          <span class="cart-count"><?php echo virginia_cart_count(); ?></span>
+        </a>
+        <?php endif; ?>
         <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary">Pide tu cita</a>
       </div>
 
@@ -72,6 +81,9 @@ $logo_url = get_template_directory_uri() . '/img/logotipo-micropigmentacion-virg
   <a href="<?php echo home_url('/virginia/'); ?>">Virginia</a>
   <a href="<?php echo home_url('/blog/'); ?>">Blog</a>
   <a href="<?php echo home_url('/contacto/'); ?>">Contacto</a>
+  <?php if (function_exists('WC')): ?>
+  <a href="<?php echo wc_get_page_permalink('shop'); ?>">Tienda</a>
+  <?php endif; ?>
   <div class="mobile-nav-cta">
     <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary">Pide tu cita</a>
   </div>

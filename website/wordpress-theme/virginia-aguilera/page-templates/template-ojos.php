@@ -162,6 +162,39 @@ $img = get_template_directory_uri() . '/img/';
   </div>
 </section>
 
+<!-- GALERÍA OJOS -->
+<section class="section" style="background:var(--white)">
+  <div class="container">
+    <div class="text-center reveal">
+      <span class="label">Trabajos realizados</span>
+      <h2>Resultados reales de eyeliner permanente.</h2>
+      <p style="margin:14px auto 0;max-width:520px">
+        Cada mirada es única. Estos son algunos de los trabajos de micropigmentación de ojos que he realizado.
+      </p>
+    </div>
+    <div class="gallery-grid" style="margin-top:40px;grid-template-columns:repeat(2,1fr)">
+      <?php
+      $ojos_imgs = [
+        ['1.jpg',                                      'Eyeliner permanente micropigmentación ojos'],
+        ['2.jpg',                                      'Micropigmentación de ojos resultado Zaragoza'],
+        ['3.jpg',                                      'Eyeliner permanente sombreado Zaragoza'],
+        ['micropigmentacion-ojos-antes-y-despues.jpg', 'Antes y después eyeliner permanente Zaragoza'],
+      ];
+      foreach ($ojos_imgs as $oi) : ?>
+        <div class="gallery-item reveal">
+          <img src="<?php echo $img; ?>trabajos/ojos/<?php echo esc_attr($oi[0]); ?>"
+               alt="<?php echo esc_attr($oi[1]); ?>"
+               loading="lazy">
+          <div class="gallery-item-overlay"><span>Ojos</span></div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <div class="gallery-cta reveal">
+      <a href="<?php echo home_url('/trabajos/'); ?>" class="btn btn--outline">Ver todos los trabajos</a>
+    </div>
+  </div>
+</section>
+
 <!-- CTA -->
 <section class="cta-block">
   <div class="container">

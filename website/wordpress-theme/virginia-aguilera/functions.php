@@ -310,9 +310,9 @@ function virginia_create_blog_posts() {
 add_action('admin_init', 'virginia_create_blog_posts');
 
 // ─── Auto-crear páginas requeridas ─────────────────────────────
-// Crea las páginas del tema si aún no existen (se ejecuta en admin_init)
+// Crea o corrige las páginas del tema en cada admin_init (solo toca algo si hay cambios)
 function virginia_create_required_pages() {
-    if (!is_admin() || get_transient('virginia_pages_created')) return;
+    if (!is_admin()) return;
     $pages = [
         ['title' => 'Contacto',                    'slug' => 'contacto',                  'template' => 'page-templates/template-contacto.php'],
         ['title' => 'Micropigmentación de Cejas',  'slug' => 'micropigmentacion-cejas',   'template' => 'page-templates/template-cejas.php'],
@@ -321,8 +321,10 @@ function virginia_create_required_pages() {
         ['title' => 'Galería de Trabajos',         'slug' => 'trabajos',                  'template' => 'page-templates/template-trabajos.php'],
         ['title' => 'Virginia Aguilera',           'slug' => 'virginia',                  'template' => 'page-templates/template-quienes-somos.php'],
     ];
+    $changed = false;
     foreach ($pages as $p) {
-        if (!get_page_by_path($p['slug'])) {
+        $existing = get_page_by_path($p['slug']);
+        if (!$existing) {
             $id = wp_insert_post([
                 'post_title'   => $p['title'],
                 'post_name'    => $p['slug'],
@@ -332,10 +334,20 @@ function virginia_create_required_pages() {
             ]);
             if ($id && !is_wp_error($id)) {
                 update_post_meta($id, '_wp_page_template', $p['template']);
+                $changed = true;
+            }
+        } else {
+            // Asegurar que la plantilla correcta está asignada aunque la página ya exista
+            $current = get_post_meta($existing->ID, '_wp_page_template', true);
+            if ($current !== $p['template']) {
+                update_post_meta($existing->ID, '_wp_page_template', $p['template']);
+                $changed = true;
             }
         }
     }
-    set_transient('virginia_pages_created', 1, DAY_IN_SECONDS);
+    if ($changed) {
+        flush_rewrite_rules(false);
+    }
 }
 add_action('admin_init', 'virginia_create_required_pages');
 

@@ -77,11 +77,11 @@ $img = get_template_directory_uri() . '/img/';
         </p>
       </div>
       <div class="tecnica-card reveal reveal-delay-3">
-        <h4>Microblading</h4>
+        <h4>Efecto polvo / pixelado</h4>
         <p>
-          Técnica manual, pelo a pelo, con un resultado ultra-natural. A diferencia de la
-          máquina, el trazo es más suave y orgánico. Duración variable según el tipo de piel
-          (entre 1 y 3 años). Te cuento si es la más adecuada para ti en la primera visita.
+          Un acabado suave y difuminado que imita el efecto de una sombra de cejas.
+          Sin trazos individuales, con un relleno homogéneo y natural. Ideal para pieles
+          grasas o para quien prefiere un resultado más lleno y definido.
         </p>
       </div>
     </div>
@@ -201,8 +201,46 @@ $img = get_template_directory_uri() . '/img/';
   </div>
 </section>
 
-<!-- FAQ -->
+<!-- GALERÍA CEJAS -->
 <section class="section" style="background:var(--white)">
+  <div class="container">
+    <div class="text-center reveal">
+      <span class="label">Trabajos realizados</span>
+      <h2>Resultados reales de cejas.</h2>
+      <p style="margin:14px auto 0;max-width:520px">
+        Cada ceja es diferente, cada rostro es diferente.
+        Estos son algunos de los trabajos que he realizado.
+      </p>
+    </div>
+    <div class="gallery-grid" style="margin-top:40px">
+      <?php
+      $cejas_imgs = [
+        ['cejas1.jpg',                          'Micropigmentación cejas Zaragoza resultado natural'],
+        ['cejas2.jpg',                          'Cejas pelo a pelo micropigmentación'],
+        ['micropigmentacion-cejas-zaragoza25.jpg', 'Cejas micropigmentadas antes y después'],
+        ['micropigmentacion-cejas-zaragoza26.jpg', 'Resultado cejas micropigmentación Zaragoza'],
+        ['micropigmentacion-ceja-antes-y-despues.jpg', 'Antes y después micropigmentación de cejas'],
+        ['tecnica-cejas-pixeladas.jpg',         'Técnica pixelada cejas Zaragoza'],
+        ['cejas-noviembre-2021-1.jpg',          'Cejas micropigmentadas resultado natural'],
+        ['cejas3.jpg',                          'Micropigmentación cejas combinada Zaragoza'],
+      ];
+      foreach ($cejas_imgs as $ci) : ?>
+        <div class="gallery-item reveal">
+          <img src="<?php echo $img; ?>trabajos/cejas/<?php echo esc_attr($ci[0]); ?>"
+               alt="<?php echo esc_attr($ci[1]); ?>"
+               loading="lazy">
+          <div class="gallery-item-overlay"><span>Cejas</span></div>
+        </div>
+      <?php endforeach; ?>
+    </div>
+    <div class="gallery-cta reveal">
+      <a href="<?php echo home_url('/trabajos/'); ?>" class="btn btn--outline">Ver todos los trabajos</a>
+    </div>
+  </div>
+</section>
+
+<!-- FAQ -->
+<section class="section" style="background:var(--cream)">
   <div class="container" style="max-width:740px">
     <div class="text-center reveal">
       <span class="label">Dudas frecuentes</span>

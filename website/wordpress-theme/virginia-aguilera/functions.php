@@ -346,6 +346,27 @@ function virginia_create_required_pages() {
 }
 add_action('admin_init', 'virginia_create_required_pages');
 
+// ─── Forzar plantilla correcta por slug ────────────────────────
+// Garantiza que la plantilla se carga aunque WordPress no tenga
+// el _wp_page_template meta asignado en la base de datos.
+add_filter('template_include', function($template) {
+    if (!is_page()) return $template;
+    $slug_map = [
+        'micropigmentacion-cejas'   => 'template-cejas.php',
+        'micropigmentacion-ojos'    => 'template-ojos.php',
+        'micropigmentacion-labios'  => 'template-labios.php',
+        'trabajos'                  => 'template-trabajos.php',
+        'contacto'                  => 'template-contacto.php',
+        'virginia'                  => 'template-quienes-somos.php',
+    ];
+    $slug = get_post_field('post_name', get_the_ID());
+    if (isset($slug_map[$slug])) {
+        $tpl = get_template_directory() . '/page-templates/' . $slug_map[$slug];
+        if (file_exists($tpl)) return $tpl;
+    }
+    return $template;
+}, 99);
+
 // Admin notice si falta la página de contacto
 function virginia_missing_pages_notice() {
     if (get_page_by_path('contacto')) return;

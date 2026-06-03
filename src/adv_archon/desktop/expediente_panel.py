@@ -80,6 +80,8 @@ _STATUS_COLOUR = {
     "geocodificado":     OK,
     "analizando":        ACCENT,
     "analizado":         ACCENT,
+    "autopilot_en_curso": ACCENT,
+    "autopilot_bloqueado": ERR,
     "informe_generado":  OK,
     "informe_listo":     OK,
     "requiere_revision": WARN,
@@ -92,6 +94,8 @@ _STATUS_LABEL = {
     "geocodificado":     "Ubicación resuelta",
     "analizando":        "Analizando…",
     "analizado":         "Analizado",
+    "autopilot_en_curso": "Autopilot en curso",
+    "autopilot_bloqueado": "Autopilot bloqueado",
     "informe_generado":  "Informe generado",
     "informe_listo":     "Informe listo",
     "requiere_revision": "Requiere revisión",
@@ -387,12 +391,12 @@ if PYSIDE6_AVAILABLE:
 
             # Agent Mode row
             agent_row = QHBoxLayout()
-            self._agent_btn = QPushButton("Ejecutar revisión completa")
+            self._agent_btn = QPushButton("Ejecutar Autopilot")
             self._set_brand_icon(self._agent_btn)
             self._agent_btn.setEnabled(False)
             self._agent_btn.setToolTip(
-                "ARCHON recorre el expediente como copiloto: parcela, fuentes, PGOU, "
-                "dictamen y revisión humana."
+                "ARCHON gestiona el expediente: detecta faltas, ejecuta pasos, "
+                "pide confirmación y deja trazabilidad."
             )
             self._agent_btn.setStyleSheet(
                 f"background:{ACCENT};color:{BG};"
@@ -400,7 +404,7 @@ if PYSIDE6_AVAILABLE:
             )
             self._agent_btn.clicked.connect(self._on_agent_clicked)
             agent_row.addWidget(self._agent_btn)
-            agent_hint = QLabel("Plan guiado del agente")
+            agent_hint = QLabel("Expediente Autopilot v1")
             agent_hint.setStyleSheet(f"color:{TEXT_FAINT};font-size:10px;font-weight:700;")
             agent_row.addWidget(agent_hint)
             agent_row.addStretch(1)
@@ -619,6 +623,100 @@ if PYSIDE6_AVAILABLE:
                     lines.append(
                         "<p style='font-size:10px;color:#555;'>"
                         f"Nota revisión: {escape(review.note)}</p>"
+                    )
+            except Exception:
+                pass
+
+            try:
+                from adv_archon.core.expediente_autopilot import (
+                    PERMISSION_AUTOMATIC,
+                    PERMISSION_BLOCKED,
+                    PERMISSION_CONFIRM,
+                    build_expediente_autopilot,
+                )
+
+                autopilot = build_expediente_autopilot(exp)
+                verdict_color = {
+                    "viable": OK,
+                    "conditional": WARN,
+                    "review": ERR,
+                    "blocked": ERR,
+                }.get(autopilot.verdict, TEXT_SUB)
+                lines.append(
+                    "<h4>Expediente Autopilot v1</h4>"
+                    "<table>"
+                    f"<tr><td>Resultado</td><td style='color:{verdict_color};'>"
+                    f"<b>{escape(autopilot.verdict_label)}</b></td></tr>"
+                    f"<tr><td>Progreso</td><td><b>{autopilot.progress_percent}%</b></td></tr>"
+                    f"<tr><td>Paso actual</td><td>{escape(autopilot.current_step)}</td></tr>"
+                    f"<tr><td>Resumen</td><td>{escape(autopilot.summary)}</td></tr>"
+                    "</table>"
+                )
+
+                signal_color = {
+                    "ok": OK,
+                    "pending": TEXT_FAINT,
+                    "missing": ERR,
+                    "needs_review": WARN,
+                }
+                lines.append("<table>")
+                for signal in autopilot.signals:
+                    colour = signal_color.get(signal.status, TEXT_SUB)
+                    lines.append(
+                        f"<tr><td style='width:26%;'><b>{escape(signal.label)}</b></td>"
+                        f"<td style='width:16%;color:{colour};'>"
+                        f"{escape(signal.status)}</td>"
+                        f"<td style='font-size:10px;color:#555;'>"
+                        f"{escape(signal.detail[:120])}</td></tr>"
+                    )
+                lines.append("</table>")
+
+                if autopilot.inbox:
+                    lines.append("<h4>Bandeja del arquitecto</h4><table>")
+                    severity_color = {"high": ERR, "medium": WARN, "low": OK}
+                    for item in autopilot.inbox[:6]:
+                        colour = severity_color.get(item.severity, TEXT_SUB)
+                        lines.append(
+                            f"<tr><td style='width:30%;color:{colour};'>"
+                            f"<b>{escape(item.title[:45])}</b></td>"
+                            f"<td style='font-size:10px;color:#555;'>"
+                            f"{escape(item.action[:135])}</td></tr>"
+                        )
+                    lines.append("</table>")
+
+                permission_color = {
+                    PERMISSION_AUTOMATIC: OK,
+                    PERMISSION_CONFIRM: WARN,
+                    PERMISSION_BLOCKED: ERR,
+                }
+                task_status_color = {
+                    "pending": TEXT_FAINT,
+                    "in_progress": ACCENT,
+                    "completed": OK,
+                    "needs_review": WARN,
+                    "blocked": ERR,
+                }
+                lines.append("<h4>Plan de actuación con permisos</h4><table>")
+                for task in autopilot.tasks[:9]:
+                    colour = task_status_color.get(task.status, TEXT_SUB)
+                    perm_colour = permission_color.get(task.permission, TEXT_SUB)
+                    lines.append(
+                        f"<tr><td style='width:25%;'><b>{escape(task.title)}</b></td>"
+                        f"<td style='width:15%;color:{colour};'>"
+                        f"{escape(task.status_label)}</td>"
+                        f"<td style='width:22%;color:{perm_colour};font-size:10px;'>"
+                        f"{escape(task.permission_label)}</td>"
+                        f"<td style='font-size:10px;color:#555;'>"
+                        f"{escape(task.next_action[:120])}</td></tr>"
+                    )
+                lines.append("</table>")
+
+                if autopilot.office_memory.municipalities:
+                    lines.append(
+                        "<p style='font-size:10px;color:#555;'><b>Memoria despacho:</b> "
+                        "municipios habituales: "
+                        f"{escape(', '.join(autopilot.office_memory.municipalities))}"
+                        "</p>"
                     )
             except Exception:
                 pass

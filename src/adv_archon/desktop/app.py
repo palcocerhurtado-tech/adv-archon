@@ -4160,12 +4160,33 @@ def launch_desktop_app(
                 def run(self) -> None:
                     try:
                         from adv_archon.core.agent_plan import build_expediente_agent_plan
+                        from adv_archon.core.expediente_autopilot import (
+                            AutopilotStore,
+                            append_autopilot_checkpoint,
+                            build_expediente_autopilot,
+                        )
+
+                        initial_autopilot = build_expediente_autopilot(self._exp)
+                        AutopilotStore(self._data_root / "autopilot.db").save_run(
+                            initial_autopilot,
+                            run_id=self._run_id,
+                        )
+                        self._exp = dataclasses.replace(
+                            self._exp,
+                            status="autopilot_en_curso",
+                            agent_history=append_autopilot_checkpoint(
+                                getattr(self._exp, "agent_history", ""),
+                                initial_autopilot,
+                                run_id=self._run_id,
+                            ),
+                        )
+                        self.progress.emit(self._exp, initial_autopilot.summary)
 
                         self._emit_event(
                             "resolve-location",
                             "Resolver parcela",
                             "in_progress",
-                            "Resolviendo parcela y coordenadas del expediente…",
+                            "Autopilot está resolviendo parcela y coordenadas del expediente…",
                         )
                         if not self._ensure_site_context():
                             self._finish_with_current_plan()
@@ -4250,6 +4271,10 @@ def launch_desktop_app(
                         )
                         self.completed.emit(self._exp)
                     except Exception as exc:
+                        self._exp = dataclasses.replace(
+                            self._exp,
+                            status="autopilot_bloqueado",
+                        )
                         self._emit_event(
                             "agent-error",
                             "Revisión completa",
@@ -4416,7 +4441,10 @@ def launch_desktop_app(
                     )
 
                 def _finish_with_current_plan(self) -> None:
-                    self._exp = dataclasses.replace(self._exp, status="requiere_revision")
+                    self._exp = dataclasses.replace(
+                        self._exp,
+                        status="autopilot_bloqueado",
+                    )
                     self._emit_event(
                         "agent-finish",
                         "Revisión completa",
@@ -4533,9 +4561,9 @@ def launch_desktop_app(
                     return
                 detail_panel.set_operation_busy(
                     True,
-                    "ARCHON ejecutando revisión guiada del expediente…",
+                    "ARCHON ejecutando Autopilot del expediente…",
                 )
-                self.statusBar().showMessage("ARCHON inicia revisión guiada…")
+                self.statusBar().showMessage("ARCHON inicia Expediente Autopilot…")
                 t = QThread(dlg)
                 t.setObjectName("adv-archon-expediente-agent")
                 w = _AgentReviewWorker(exp, data_dir)
@@ -4559,7 +4587,7 @@ def launch_desktop_app(
                     self._last_exp_label = updated.title
                     self._refresh_status_bar()
                     self.statusBar().showMessage(
-                        "Revisión guiada completada por ARCHON.",
+                        "Expediente Autopilot completado por ARCHON.",
                         5000,
                     )
                     t.quit()
@@ -4570,7 +4598,7 @@ def launch_desktop_app(
                     detail_panel.load_expediente(updated)
                     detail_panel.set_operation_busy(False)
                     self.statusBar().showMessage(
-                        f"No se pudo completar la revisión guiada: {message}",
+                        f"No se pudo completar Autopilot: {message}",
                         6000,
                     )
                     t.quit()

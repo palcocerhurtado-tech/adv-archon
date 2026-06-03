@@ -58,6 +58,8 @@ _STATUS_COLOUR = {
     "geocodificado":     OK,
     "analizando":        ACCENT,
     "analizado":         ACCENT,
+    "autopilot_en_curso": ACCENT,
+    "autopilot_bloqueado": ERR,
     "informe_generado":  OK,
     "informe_listo":     OK,
     "requiere_revision": WARN,
@@ -70,6 +72,8 @@ _STATUS_LABEL = {
     "geocodificado":     "Ubicación resuelta",
     "analizando":        "Analizando…",
     "analizado":         "Analizado",
+    "autopilot_en_curso": "Autopilot en curso",
+    "autopilot_bloqueado": "Autopilot bloqueado",
     "informe_generado":  "Informe generado",
     "informe_listo":     "Informe listo",
     "requiere_revision": "Requiere revisión",
@@ -78,8 +82,8 @@ _STATUS_LABEL = {
 
 _STATUS_GROUPS = {
     "Activos": {"analizado", "informe_generado", "informe_listo"},
-    "En curso": {"geocodificando", "geocodificado", "analizando"},
-    "Revisión": {"requiere_revision", "error"},
+    "En curso": {"geocodificando", "geocodificado", "analizando", "autopilot_en_curso"},
+    "Revisión": {"requiere_revision", "autopilot_bloqueado", "error"},
     "Borrador": {"borrador"},
 }
 

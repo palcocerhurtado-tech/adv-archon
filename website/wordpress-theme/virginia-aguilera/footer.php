@@ -78,7 +78,7 @@
   "@context": "https://schema.org",
   "@type": "BeautySalon",
   "name": "Virginia Aguilera — Micropigmentación Zaragoza",
-  "description": "Especialista en micropigmentación de cejas, ojos y labios en Zaragoza. Microblading, eyeliner permanente y micropigmentación de labios con la máxima calidad.",
+  "description": "Especialista en micropigmentación de cejas, ojos y labios en Zaragoza. Eyeliner permanente y micropigmentación de labios con la máxima calidad.",
   "url": "https://micropigmentacionzgz.es",
   "telephone": "+34620834002",
   "email": "virginiamicropigmentacion@gmail.com",
@@ -110,8 +110,7 @@
     "itemListElement": [
       { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Micropigmentación de cejas" } },
       { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Micropigmentación de ojos — Eyeliner permanente" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Micropigmentación de labios" } },
-      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Microblading Zaragoza" } }
+      { "@type": "Offer", "itemOffered": { "@type": "Service", "name": "Micropigmentación de labios" } }
     ]
   }
 }

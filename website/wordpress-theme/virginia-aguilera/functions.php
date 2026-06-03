@@ -166,32 +166,27 @@ function virginia_create_blog_posts() {
 
     $posts = [
         [
-            'title'   => 'Micropigmentación vs Microblading: la comparativa definitiva.',
-            'slug'    => 'micropigmentacion-vs-microblading',
+            'title'   => 'Qué esperar de tu primera sesión de micropigmentación.',
+            'slug'    => 'primera-sesion-micropigmentacion',
             'cat'     => 'Técnicas',
             'date'    => '2025-06-01 10:00:00',
-            'excerpt' => 'Las diferencias reales entre ambas técnicas, por qué elegiría siempre la micropigmentación y lo que nadie te cuenta sobre el papel de los pigmentos en el resultado final.',
-            'content' => '<p>Cuando alguien me pregunta la diferencia entre micropigmentación y microblading, noto que espera una respuesta técnica. Y sí, voy a dártela. Pero antes quiero que sepas algo: no todas las técnicas sirven para todas las pieles, y no todos los resultados son iguales aunque se llamen igual.</p>
+            'excerpt' => 'Dudas, nervios, expectativas. Te cuento exactamente qué pasa desde que entras por la puerta hasta que ves el resultado final.',
+            'content' => '<p>Es normal llegar con nervios a la primera sesión. Lo veo cada día. Por eso quiero contarte, con total honestidad, qué va a pasar exactamente.</p>
 
-<h2>¿Qué es el microblading?</h2>
-<p>El microblading es una técnica manual de pigmentación superficial. Se utiliza una herramienta con microcuchillas que hace pequeños cortes en la epidermis y deposita pigmento en ellos, imitando el trazo de un pelo. El resultado inmediato puede ser muy bonito, pero viene con importantes limitaciones.</p>
-<ul>
-<li>Actúa en la capa más superficial de la piel — se desvanece más rápido.</li>
-<li>En pieles grasas o maduras el trazo se "abre" con el tiempo.</li>
-<li>Requiere retoques cada 12-18 meses, a veces antes.</li>
-<li>No recomendable para pieles sensibles o con cicatrización irregular.</li>
-</ul>
+<h2>Antes de empezar: la consulta</h2>
+<p>Antes de tocar nada, hablamos. Me cuentas lo que quieres, yo miro tu tipo de piel, la forma de tu rostro, el tono que mejor te va. No hay prisas. Es la parte más importante de todo el proceso porque un buen resultado empieza por un buen diseño.</p>
 
-<h2>¿Qué es la micropigmentación de cejas?</h2>
-<p>La micropigmentación usa una máquina de precisión que deposita el pigmento en la dermis — una capa más profunda y estable. Las consecuencias son muy concretas: mayor duración (2-4 años), resultados más uniformes en todo tipo de pieles, y una gama mucho más amplia de técnicas disponibles.</p>
+<h2>El diseño: tú lo apruebas antes de empezar</h2>
+<p>Dibujamos la forma sobre tu piel con lápiz. La ves en el espejo, la ajustamos si hace falta. Solo empiezo cuando estás completamente segura de que es exactamente lo que quieres. Nunca avanzo sin tu aprobación.</p>
 
-<h2>Por qué elegiría siempre la micropigmentación</h2>
-<p>Llevo más de veinte años en micropigmentación facial y he visto de todo. He visto microblading muy bien ejecutado que daba resultados preciosos el primer mes — y ese mismo resultado convertido en un problema al año y medio. La micropigmentación me da lo que necesito: control, versatilidad y resultados predecibles en el tiempo.</p>
+<h2>La aplicación: más cómoda de lo que imaginas</h2>
+<p>Aplicamos anestesia tópica antes de empezar. La mayoría de las clientas me dicen que la sensación es mucho más suave de lo que esperaban. La sesión dura entre 90 y 120 minutos.</p>
 
-<h2>Lo que nadie te cuenta: el papel del pigmento</h2>
-<p>La calidad del pigmento lo es casi todo. Un pigmento de baja calidad puede virar de color, migrar fuera del trazo o generar reacciones en pieles sensibles. Yo trabajo exclusivamente con pigmentos de alta calidad con <strong>registro sanitario europeo</strong>. Los distribuyo, los conozco a fondo, y no uso nada que no pondría en mi propia piel.</p>
+<h2>Los primeros días: el color se ve más intenso</h2>
+<p>Es completamente normal. La piel está cicatrizando y el pigmento está asentándose. En 4-6 semanas el color baja a su tono definitivo y el resultado es exactamente lo que diseñamos juntas.</p>
 
-<p>Este detalle es la diferencia entre un resultado que sigue siendo bonito a los tres años y uno que hay que corregir al primero.</p>',
+<h2>La revisión: incluida siempre</h2>
+<p>A las 6-8 semanas revisamos el resultado y hacemos los ajustes necesarios. Esta sesión de repaso está incluida en el precio. Porque para mí, el trabajo no termina hasta que el resultado es perfecto.</p>',
         ],
         [
             'title'   => '¿La micropigmentación es un tatuaje? Te cuento la verdad.',
@@ -296,7 +291,7 @@ function virginia_create_blog_posts() {
 
         // Asignar imagen destacada si existe en el tema
         $img_map = [
-            'micropigmentacion-vs-microblading'   => 'micropigmentacion-cejas.jpg',
+            'primera-sesion-micropigmentacion'     => 'micropigmentacion-cejas.jpg',
             'micropigmentacion-o-tatuaje'          => 'micropigmentacion-cejas.jpg',
             'cuando-hacerse-micropigmentacion-cejas' => 'consejos-antes-micropigmentacion.jpg',
             'micropigmentacion-mejora-aspecto-rostro' => 'micropigmentacion-virginia.jpg',

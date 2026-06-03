@@ -136,7 +136,6 @@ if ($form_status === 'error') {
               <option value="cejas">Micropigmentación de cejas</option>
               <option value="ojos">Micropigmentación de ojos</option>
               <option value="labios">Micropigmentación de labios</option>
-              <option value="microblading">Microblading</option>
               <option value="otro">Otra consulta</option>
             </select>
           </div>

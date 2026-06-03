@@ -7,20 +7,20 @@ $img = get_template_directory_uri() . '/img/';
 
 /* Image data arrays */
 $trabajos_cejas = [
-  ['microblading-cejas-zaragoza2.jpg', 'Microblading cejas Zaragoza'],
-  ['microblading-cejas-zaragoza3.jpg', 'Cejas microblading — resultado natural'],
+  ['micropigmentacion-cejas-zaragoza25.jpg', 'Micropigmentación cejas Zaragoza resultado'],
+  ['micropigmentacion-cejas-zaragoza26.jpg', 'Cejas micropigmentadas — resultado natural'],
   ['cejas1.jpg', 'Micropigmentación cejas Zaragoza'],
   ['cejas2.jpg', 'Cejas permanentes diseño personalizado'],
   ['cejas3.jpg', 'Micropigmentación cejas antes y después'],
   ['cejas4.jpg', 'Diseño cejas Zaragoza'],
-  ['microblading-cejas-zaragoza4.jpg', 'Cejas microblading pelo a pelo'],
-  ['microblading-cejas-zaragoza5.jpg', 'Microblading natural Zaragoza'],
+  ['cejas5.jpg', 'Cejas micropigmentadas pelo a pelo'],
+  ['cejas8.jpg', 'Micropigmentación cejas resultado natural'],
   ['tecnica-ceja-pixelada.jpg', 'Técnica cejas pixeladas Zaragoza'],
   ['micropigmentacion-ceja-antes-y-despues.jpg', 'Antes y después cejas micropigmentación'],
   ['cejas6.jpg', 'Cejas naturales micropigmentadas'],
   ['cejas7.jpg', 'Micropigmentación cejas — resultado final'],
-  ['microblading-cejas-zaragoza8.jpg', 'Microblading Zaragoza — cejas 2023'],
-  ['microblading-cejas-zaragoza9.jpg', 'Cejas perfectas microblading'],
+  ['cejas9.jpg', 'Micropigmentación cejas Zaragoza 2023'],
+  ['cejas10.jpg', 'Cejas perfectas micropigmentación'],
   ['cejas-noviembre-2021-1.jpg', 'Cejas micropigmentación noviembre 2021'],
   ['cejas-noviembre-2021-2.jpg', 'Resultado cejas micropigmentación'],
 ];
@@ -44,7 +44,7 @@ $trabajos_labios = [
 
 <!-- PAGE HERO -->
 <section class="page-hero" aria-label="Galería de trabajos">
-  <div class="page-hero-bg" style="background-image:url('<?php echo $img; ?>trabajos/cejas/microblading-cejas-zaragoza2.jpg')"></div>
+  <div class="page-hero-bg" style="background-image:url('<?php echo $img; ?>trabajos/cejas/micropigmentacion-cejas-zaragoza25.jpg')"></div>
   <div class="container">
     <div class="page-hero-content">
       <span class="label">Trabajos reales</span>

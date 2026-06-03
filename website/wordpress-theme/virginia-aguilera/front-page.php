@@ -44,7 +44,7 @@ $img = get_template_directory_uri() . '/img/';
         <div class="service-card-overlay"></div>
         <div class="service-card-body">
           <h3>Cejas</h3>
-          <p>Pelo a pelo, sombreado o microblading. Diseñamos la ceja perfecta para tu cara.</p>
+          <p>Pelo a pelo, sombreado o técnica combinada. Diseñamos la ceja perfecta para tu cara.</p>
           <a href="<?php echo home_url('/micropigmentacion-cejas/'); ?>" class="btn btn--outline" style="border-color:rgba(255,255,255,0.5);color:#fff">Saber más</a>
         </div>
       </div>
@@ -198,9 +198,9 @@ $img = get_template_directory_uri() . '/img/';
 
     <div class="gallery-grid">
       <div class="gallery-item reveal reveal-delay-1">
-        <img src="<?php echo $img; ?>trabajos/cejas/microblading-cejas-zaragoza2.jpg"
-             alt="Microblading cejas Zaragoza" loading="lazy">
-        <div class="gallery-item-overlay"><span>Cejas · Microblading</span></div>
+        <img src="<?php echo $img; ?>trabajos/cejas/micropigmentacion-cejas-zaragoza25.jpg"
+             alt="Micropigmentación cejas Zaragoza" loading="lazy">
+        <div class="gallery-item-overlay"><span>Cejas · Pelo a pelo</span></div>
       </div>
       <div class="gallery-item reveal reveal-delay-2">
         <img src="<?php echo $img; ?>trabajos/labios/labios1.jpg"

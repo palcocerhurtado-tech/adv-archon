@@ -825,6 +825,10 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     _section_title(pdf, "PLAN DEL AGENTE")
     _agent_plan_panel(pdf, agent_plan)
     pdf.ln(4)
+    if _has_agent_step_decisions(agent_plan.steps):
+        _section_title(pdf, "DECISIONES DEL ARQUITECTO POR PASO")
+        _agent_review_decisions_table(pdf, agent_plan.steps)
+        pdf.ln(4)
 
     _section_title(pdf, "CHECKLIST POR TIPO DE EXPEDIENTE")
     _studio_checklist(pdf, studio)
@@ -994,14 +998,15 @@ def _agent_plan_panel(pdf: ArchonPDF, agent_plan: Any) -> None:
     ]
     _simple_key_value_table(pdf, rows)
     pdf.ln(2)
-    headers = ["Paso", "Estado", "Acción recomendada"]
-    col_w = [45, 30, 99]
+    headers = ["Paso", "Estado", "Revisión", "Acción recomendada"]
+    col_w = [42, 25, 35, 72]
     _draw_table_header(pdf, headers, col_w)
     steps = list(getattr(agent_plan, "steps", ()) or ())
     for idx, step in enumerate(steps):
         fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
         status = _clean_text(str(getattr(step, "status_label", "")))[:18]
-        action = _clean_text(str(getattr(step, "recommended_action", "")))[:75]
+        review = _clean_text(str(getattr(step, "review_label", "")))[:26]
+        action = _clean_text(str(getattr(step, "recommended_action", "")))[:54]
         _ensure_space(pdf, 8)
         pdf.set_fill_color(*fill)
         pdf.set_font(pdf._fn, "B", 7.5)
@@ -1014,8 +1019,9 @@ def _agent_plan_panel(pdf: ArchonPDF, agent_plan: Any) -> None:
         )
         pdf.set_font(pdf._fn, "", 7.4)
         pdf.cell(col_w[1], 7, f"  {status}", border=1, fill=True)
+        pdf.cell(col_w[2], 7, f"  {review}", border=1, fill=True)
         pdf.cell(
-            col_w[2],
+            col_w[3],
             7,
             f"  {action}",
             border=1,
@@ -1030,6 +1036,57 @@ def _agent_plan_panel(pdf: ArchonPDF, agent_plan: Any) -> None:
             _clean_text(str(getattr(question, "question", ""))) for question in questions[:3]
         )
         _summary_box(pdf, text)
+
+
+def _has_agent_step_decisions(steps: Sequence[Any]) -> bool:
+    for step in steps:
+        if str(getattr(step, "review_status", "pending")) != "pending":
+            return True
+        if getattr(step, "include_in_report", True) is False:
+            return True
+    return False
+
+
+def _agent_review_decisions_table(pdf: ArchonPDF, steps: Sequence[Any]) -> None:
+    headers = ["Paso", "Decisión", "Informe", "Nota"]
+    col_w = [42, 45, 25, 62]
+    _draw_table_header(pdf, headers, col_w)
+    rows = [
+        step for step in steps
+        if str(getattr(step, "review_status", "pending")) != "pending"
+        or getattr(step, "include_in_report", True) is False
+    ]
+    for idx, step in enumerate(rows):
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        include = "Incluido" if getattr(step, "include_in_report", True) else "Excluido"
+        _ensure_space(pdf, 8)
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "B", 7.2)
+        pdf.cell(
+            col_w[0],
+            7,
+            f"  {_clean_text(str(getattr(step, 'title', '')))[:26]}",
+            border=1,
+            fill=True,
+        )
+        pdf.set_font(pdf._fn, "", 7)
+        pdf.cell(
+            col_w[1],
+            7,
+            f"  {_clean_text(str(getattr(step, 'review_label', '')))[:32]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(col_w[2], 7, f"  {include}", border=1, fill=True)
+        pdf.cell(
+            col_w[3],
+            7,
+            f"  {_clean_text(str(getattr(step, 'review_note', '')))[:44]}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
 
 
 def _traceability_table(pdf: ArchonPDF, traces: Sequence[Any]) -> None:
@@ -1064,7 +1121,19 @@ def _agent_traceability_table(pdf: ArchonPDF, steps: Sequence[Any]) -> None:
     headers = ["Paso", "Dato oficial", "Inferencia ARCHON", "Conf."]
     col_w = [34, 49, 73, 18]
     _draw_table_header(pdf, headers, col_w)
-    for idx, step in enumerate(steps):
+    visible_steps = [step for step in steps if getattr(step, "include_in_report", True)]
+    if not visible_steps:
+        pdf.set_font(pdf._fn, "", 7.5)
+        pdf.cell(
+            sum(col_w),
+            7,
+            "  Todos los pasos del agente han sido excluidos del informe por arquitecto.",
+            border=1,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
+        return
+    for idx, step in enumerate(visible_steps):
         fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
         _ensure_space(pdf, 8)
         pdf.set_fill_color(*fill)

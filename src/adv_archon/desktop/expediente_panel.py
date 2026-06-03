@@ -331,6 +331,7 @@ if PYSIDE6_AVAILABLE:
             on_talk: Any = None,
             on_review: Any = None,
             on_run_agent: Any = None,
+            on_agent_step_action: Any = None,
         ) -> None:
             super().__init__()
             self._on_attach_plan = on_attach_plan
@@ -339,6 +340,7 @@ if PYSIDE6_AVAILABLE:
             self._on_talk = on_talk
             self._on_review = on_review
             self._on_run_agent = on_run_agent
+            self._on_agent_step_action = on_agent_step_action
             self._expediente_id: str | None = None
             self._expediente: Any = None
             self._operation_busy = False
@@ -379,6 +381,7 @@ if PYSIDE6_AVAILABLE:
             # Site context display
             self._context_browser = QTextBrowser()
             self._context_browser.setOpenExternalLinks(False)
+            self._context_browser.anchorClicked.connect(self._on_context_anchor_clicked)
             self._context_browser.setMinimumHeight(240)
             layout.addWidget(self._context_browser)
 
@@ -653,12 +656,34 @@ if PYSIDE6_AVAILABLE:
                 }
                 for step in agent_plan.steps:
                     colour = status_color.get(step.status, TEXT_SUB)
+                    review_colour = (
+                        ERR if not step.include_in_report
+                        else OK if step.review_status in {"validated", "accepted_warning"}
+                        else WARN if step.review_status == "requested_repeat"
+                        else TEXT_FAINT
+                    )
+                    actions = (
+                        f"<a href='agent-step:validate:{escape(step.code)}'>validar</a>"
+                        " · "
+                        f"<a href='agent-step:accept-warning:{escape(step.code)}'>"
+                        "aceptar advertencia</a>"
+                        " · "
+                        f"<a href='agent-step:repeat:{escape(step.code)}'>repetir</a>"
+                        " · "
+                        f"<a href='agent-step:include:{escape(step.code)}'>incluir</a>"
+                        " · "
+                        f"<a href='agent-step:exclude:{escape(step.code)}'>excluir</a>"
+                    )
                     lines.append(
                         f"<tr><td style='width:26%;'><b>{escape(step.title)}</b></td>"
                         f"<td style='color:{colour};width:20%;'>"
                         f"{escape(step.status_label)}</td>"
                         f"<td style='font-size:10px;color:#555;'>"
                         f"{escape(step.recommended_action[:100])}</td></tr>"
+                        "<tr><td></td>"
+                        f"<td style='font-size:10px;color:{review_colour};'>"
+                        f"{escape(step.review_label)}</td>"
+                        f"<td style='font-size:10px;color:#777;'>{actions}</td></tr>"
                     )
                 lines.append("</table>")
                 if agent_plan.questions:
@@ -914,6 +939,20 @@ if PYSIDE6_AVAILABLE:
                 self._on_run_agent(self._expediente_id)
             elif self._on_analyze and self._expediente_id:
                 self._on_analyze(self._expediente_id)
+
+        def _on_context_anchor_clicked(self, url: Any) -> None:
+            if not self._expediente_id or self._operation_busy:
+                return
+            raw = str(url.toString())
+            if not raw.startswith("agent-step:"):
+                return
+            parts = raw.split(":", 2)
+            if len(parts) != 3:
+                return
+            action = parts[1].strip()
+            step_code = parts[2].strip()
+            if self._on_agent_step_action and action and step_code:
+                self._on_agent_step_action(self._expediente_id, step_code, action)
 
         def _on_review_clicked(self, action: str) -> None:
             if not self._on_review or not self._expediente_id:

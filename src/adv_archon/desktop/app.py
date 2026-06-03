@@ -4332,6 +4332,47 @@ def launch_desktop_app(
                 list_panel.populate(store.list_all())
                 self.statusBar().showMessage("Revisión de arquitecto guardada.", 4000)
 
+            def _on_agent_step_action(eid: str, step_code: str, action: str) -> None:
+                exp = store.get(eid)
+                if not exp:
+                    return
+                from adv_archon.core.agent_plan import (
+                    append_agent_event,
+                    update_agent_step_review,
+                )
+
+                action_messages = {
+                    "validate": "Paso validado por arquitecto.",
+                    "accept-warning": "Advertencia aceptada por arquitecto.",
+                    "repeat": "Repetición solicitada por arquitecto.",
+                    "include": "Paso incluido expresamente en el informe.",
+                    "exclude": "Paso excluido del informe por arquitecto.",
+                }
+                message = action_messages.get(action, "Decisión de arquitecto registrada.")
+                updated = dataclasses.replace(
+                    exp,
+                    agent_step_reviews=update_agent_step_review(
+                        exp.agent_step_reviews,
+                        step_code=step_code,
+                        action=action,
+                    ),
+                    agent_history=append_agent_event(
+                        exp.agent_history,
+                        step_code=step_code,
+                        title="Decisión arquitecto",
+                        status="completed" if action != "repeat" else "pending",
+                        message=message,
+                    ),
+                )
+                store.update(updated)
+                list_panel.populate(store.list_all())
+                detail_panel.load_expediente(updated)
+                self._last_exp_label = updated.title
+                self._refresh_status_bar()
+                self.statusBar().showMessage(message, 4000)
+                if action == "repeat":
+                    QTimer.singleShot(120, lambda: _launch_agent_review(eid))
+
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),
                 on_analyze=_on_analyze,
@@ -4339,6 +4380,7 @@ def launch_desktop_app(
                 on_talk=_on_talk,
                 on_review=_on_review,
                 on_run_agent=_launch_agent_review,
+                on_agent_step_action=_on_agent_step_action,
             )
 
             def _attach_plan(eid: str) -> None:

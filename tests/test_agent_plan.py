@@ -8,6 +8,8 @@ from adv_archon.core.agent_plan import (
     append_agent_event,
     build_expediente_agent_plan,
     load_agent_history,
+    load_agent_step_reviews,
+    update_agent_step_review,
 )
 from adv_archon.core.expediente import ExpedienteStore
 from adv_archon.core.expediente_quality import review_state_json
@@ -52,6 +54,39 @@ def test_agent_history_appends_and_overlays_in_progress_step(tmp_path: Path) -> 
     assert loaded[0].status_label == "En curso"
     assert catastro.status == "in_progress"
     assert "Catastro OVC" in catastro.recommended_action
+
+
+def test_agent_step_review_validates_and_excludes_steps(tmp_path: Path) -> None:
+    store = ExpedienteStore(tmp_path / "expedientes.db")
+    reviews = update_agent_step_review(
+        "",
+        step_code="pgou-normativa",
+        action="validate",
+        updated_at="2026-06-03T10:10:00+00:00",
+    )
+    reviews = update_agent_step_review(
+        reviews,
+        step_code="plan-document",
+        action="exclude",
+        updated_at="2026-06-03T10:11:00+00:00",
+    )
+    exp = store.create(
+        title="Revisión por paso",
+        address="Calle Mayor 24, Zaragoza",
+        municipality="Zaragoza",
+    )
+    exp = replace(exp, agent_step_reviews=reviews)
+
+    loaded = load_agent_step_reviews(reviews)
+    plan = build_expediente_agent_plan(exp)
+    pgou = next(step for step in plan.steps if step.code == "pgou-normativa")
+    plan_document = next(step for step in plan.steps if step.code == "plan-document")
+
+    assert loaded["pgou-normativa"].status == "validated"
+    assert pgou.status == "completed"
+    assert pgou.review_label == "Validado por arquitecto"
+    assert plan_document.include_in_report is False
+    assert plan_document.review_label == "Excluido del informe"
 
 
 def test_agent_plan_guides_complete_validated_expediente(tmp_path: Path) -> None:

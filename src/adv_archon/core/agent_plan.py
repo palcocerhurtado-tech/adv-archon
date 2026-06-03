@@ -15,6 +15,15 @@ AGENT_STEP_STATUS_LABELS = {
     "blocked": "Bloqueado",
 }
 
+AGENT_STEP_REVIEW_LABELS = {
+    "pending": "Pendiente de arquitecto",
+    "validated": "Validado por arquitecto",
+    "accepted_warning": "Advertencia aceptada",
+    "included": "Incluido en informe",
+    "excluded": "Excluido del informe",
+    "requested_repeat": "Repetición solicitada",
+}
+
 
 @dataclass(frozen=True, slots=True)
 class AgentPlanStep:
@@ -26,6 +35,10 @@ class AgentPlanStep:
     archon_inference: str
     confidence: str
     recommended_action: str
+    review_status: str = "pending"
+    review_label: str = "Pendiente de arquitecto"
+    review_note: str = ""
+    include_in_report: bool = True
 
     @property
     def status_label(self) -> str:
@@ -42,6 +55,10 @@ class AgentPlanStep:
             "archon_inference": self.archon_inference,
             "confidence": self.confidence,
             "recommended_action": self.recommended_action,
+            "review_status": self.review_status,
+            "review_label": self.review_label,
+            "review_note": self.review_note,
+            "include_in_report": self.include_in_report,
         }
 
 
@@ -101,6 +118,26 @@ class AgentRunEvent:
             "message": self.message,
             "created_at": self.created_at,
             "run_id": self.run_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
+class AgentStepReview:
+    step_code: str
+    status: str
+    label: str
+    include_in_report: bool
+    note: str
+    updated_at: str
+
+    def as_payload(self) -> dict[str, Any]:
+        return {
+            "step_code": self.step_code,
+            "status": self.status,
+            "label": self.label,
+            "include_in_report": self.include_in_report,
+            "note": self.note,
+            "updated_at": self.updated_at,
         }
 
 
@@ -197,6 +234,68 @@ def load_agent_history(
     return tuple(events)
 
 
+def load_agent_step_reviews(
+    raw_reviews: str | dict[str, Any] | None,
+) -> dict[str, AgentStepReview]:
+    """Load architect decisions by agent step from JSON."""
+    if isinstance(raw_reviews, dict):
+        raw_items = raw_reviews
+    elif isinstance(raw_reviews, str) and raw_reviews.strip():
+        try:
+            parsed = json.loads(raw_reviews)
+        except (TypeError, ValueError):
+            return {}
+        raw_items = parsed if isinstance(parsed, dict) else {}
+    else:
+        raw_items = {}
+    reviews: dict[str, AgentStepReview] = {}
+    for step_code, raw in raw_items.items():
+        if not isinstance(raw, dict):
+            continue
+        code = str(raw.get("step_code") or step_code).strip()
+        if not code:
+            continue
+        status = str(raw.get("status") or "pending").strip()
+        label = str(raw.get("label") or AGENT_STEP_REVIEW_LABELS.get(status, status))
+        note = str(raw.get("note") or "").strip()
+        updated_at = str(raw.get("updated_at") or "").strip()
+        include_in_report = bool(raw.get("include_in_report", True))
+        reviews[code] = AgentStepReview(
+            step_code=code,
+            status=status,
+            label=label,
+            include_in_report=include_in_report,
+            note=note,
+            updated_at=updated_at,
+        )
+    return reviews
+
+
+def update_agent_step_review(
+    raw_reviews: str | dict[str, Any] | None,
+    *,
+    step_code: str,
+    action: str,
+    note: str = "",
+    updated_at: str | None = None,
+) -> str:
+    """Persist one architect action over an agent step."""
+    reviews = load_agent_step_reviews(raw_reviews)
+    status = _review_status_from_action(action)
+    include_in_report = _review_include_from_action(action, reviews.get(step_code))
+    review = AgentStepReview(
+        step_code=step_code,
+        status=status,
+        label=AGENT_STEP_REVIEW_LABELS.get(status, status),
+        include_in_report=include_in_report,
+        note=note.strip(),
+        updated_at=updated_at or datetime.now(UTC).isoformat(timespec="seconds"),
+    )
+    payload = {code: item.as_payload() for code, item in reviews.items()}
+    payload[step_code] = review.as_payload()
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def build_expediente_agent_plan(
     expediente: Any,
     *,
@@ -247,6 +346,10 @@ def build_expediente_agent_plan(
             steps,
             load_agent_history(getattr(expediente, "agent_history", "")),
         )
+    steps = _apply_step_reviews(
+        steps,
+        load_agent_step_reviews(getattr(expediente, "agent_step_reviews", "")),
+    )
     questions = tuple(
         _build_questions(
             has_plan=has_plan,
@@ -695,6 +798,77 @@ def _apply_history_overlay(
     return tuple(updated)
 
 
+def _apply_step_reviews(
+    steps: tuple[AgentPlanStep, ...],
+    reviews: dict[str, AgentStepReview],
+) -> tuple[AgentPlanStep, ...]:
+    if not reviews:
+        return steps
+    updated: list[AgentPlanStep] = []
+    for step in steps:
+        review = reviews.get(step.code)
+        if review is None:
+            updated.append(step)
+            continue
+        status = step.status
+        action = step.recommended_action
+        inference = step.archon_inference
+        if review.status in {"validated", "accepted_warning"} and step.status != "blocked":
+            status = "completed"
+            action = review.label
+            inference = f"{step.archon_inference} Decisión arquitecto: {review.label}."
+        elif review.status == "requested_repeat":
+            status = "pending" if step.status != "blocked" else step.status
+            action = "Repetir consulta o refrescar este paso del agente."
+        elif review.status == "excluded":
+            action = "Excluido del informe por decisión del arquitecto."
+        elif review.status == "included":
+            action = "Incluido expresamente en el informe."
+        updated.append(
+            replace(
+                step,
+                status=status,
+                archon_inference=inference,
+                recommended_action=action,
+                review_status=review.status,
+                review_label=review.label,
+                review_note=review.note,
+                include_in_report=review.include_in_report,
+            )
+        )
+    return tuple(updated)
+
+
+def _review_status_from_action(action: str) -> str:
+    normalized = action.strip().replace("-", "_")
+    return {
+        "validate": "validated",
+        "validated": "validated",
+        "accept_warning": "accepted_warning",
+        "accepted_warning": "accepted_warning",
+        "include": "included",
+        "included": "included",
+        "exclude": "excluded",
+        "excluded": "excluded",
+        "repeat": "requested_repeat",
+        "requested_repeat": "requested_repeat",
+    }.get(normalized, "pending")
+
+
+def _review_include_from_action(
+    action: str,
+    previous: AgentStepReview | None,
+) -> bool:
+    normalized = action.strip().replace("-", "_")
+    if normalized in {"exclude", "excluded"}:
+        return False
+    if normalized in {"include", "included"}:
+        return True
+    if previous is not None:
+        return previous.include_in_report
+    return True
+
+
 def _loads_dict(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return raw
@@ -716,12 +890,16 @@ def _first(*values: object) -> object:
 
 __all__ = [
     "AGENT_STEP_STATUS_LABELS",
+    "AGENT_STEP_REVIEW_LABELS",
     "AgentPlan",
     "AgentPlanStep",
     "AgentQuestion",
     "AgentRunEvent",
+    "AgentStepReview",
     "AgentSourceLog",
     "append_agent_event",
     "build_expediente_agent_plan",
     "load_agent_history",
+    "load_agent_step_reviews",
+    "update_agent_step_review",
 ]

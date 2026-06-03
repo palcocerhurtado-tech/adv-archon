@@ -81,8 +81,8 @@ def import_expediente(
                latitude, longitude, cadastral_ref, status,
                plan_path, site_context, analysis_result, report_path,
                created_at, updated_at, notes, case_type, review_state,
-               quality_score, quality_result, agent_history)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               quality_score, quality_result, agent_history, agent_step_reviews)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 exp.id, exp.title, exp.address, exp.municipality, exp.province,
@@ -90,7 +90,7 @@ def import_expediente(
                 exp.plan_path, exp.site_context, exp.analysis_result, exp.report_path,
                 exp.created_at, exp.updated_at, exp.notes, exp.case_type,
                 exp.review_state, exp.quality_score, exp.quality_result,
-                exp.agent_history,
+                exp.agent_history, exp.agent_step_reviews,
             ),
         )
         store._conn.commit()  # noqa: SLF001

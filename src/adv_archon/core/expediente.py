@@ -30,6 +30,7 @@ class Expediente:
     quality_score: int | None = None
     quality_result: str = ""
     agent_history: str = ""
+    agent_step_reviews: str = ""
 
 
 class ExpedienteStore:
@@ -68,7 +69,8 @@ class ExpedienteStore:
                 review_state TEXT NOT NULL DEFAULT '',
                 quality_score INTEGER,
                 quality_result TEXT NOT NULL DEFAULT '',
-                agent_history TEXT NOT NULL DEFAULT ''
+                agent_history TEXT NOT NULL DEFAULT '',
+                agent_step_reviews TEXT NOT NULL DEFAULT ''
             );
         """)
         existing = {
@@ -95,6 +97,7 @@ class ExpedienteStore:
             "quality_score": "INTEGER",
             "quality_result": "TEXT NOT NULL DEFAULT ''",
             "agent_history": "TEXT NOT NULL DEFAULT ''",
+            "agent_step_reviews": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in columns.items():
             if name not in existing:
@@ -145,6 +148,7 @@ class ExpedienteStore:
             quality_score=None,
             quality_result="",
             agent_history="",
+            agent_step_reviews="",
         )
         self._conn.execute(
             """
@@ -153,8 +157,8 @@ class ExpedienteStore:
                 latitude, longitude, cadastral_ref, status,
                 plan_path, site_context, analysis_result, report_path,
                 created_at, updated_at, notes, case_type, review_state,
-                quality_score, quality_result, agent_history
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                quality_score, quality_result, agent_history, agent_step_reviews
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 expediente.id,
@@ -178,6 +182,7 @@ class ExpedienteStore:
                 expediente.quality_score,
                 expediente.quality_result,
                 expediente.agent_history,
+                expediente.agent_step_reviews,
             ),
         )
         self._conn.commit()
@@ -219,7 +224,8 @@ class ExpedienteStore:
                 review_state = ?,
                 quality_score = ?,
                 quality_result = ?,
-                agent_history = ?
+                agent_history = ?,
+                agent_step_reviews = ?
             WHERE id = ?
             """,
             (
@@ -242,6 +248,7 @@ class ExpedienteStore:
                 expediente.quality_score,
                 expediente.quality_result,
                 expediente.agent_history,
+                expediente.agent_step_reviews,
                 expediente.id,
             ),
         )
@@ -282,6 +289,7 @@ class ExpedienteStore:
             quality_score=row["quality_score"],
             quality_result=row["quality_result"],
             agent_history=row["agent_history"],
+            agent_step_reviews=row["agent_step_reviews"],
         )
 
 

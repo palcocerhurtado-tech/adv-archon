@@ -79,6 +79,7 @@ def launch_desktop_app(
             QSizePolicy,
             QSplitter,
             QStatusBar,
+            QTextBrowser,
             QTextEdit,
             QVBoxLayout,
             QWidget,
@@ -223,6 +224,7 @@ def launch_desktop_app(
             self._system_diag_ref: tuple[Any, Any] | None = None
             self._training_lab_ref: tuple[Any, Any] | None = None
             self._last_performance_report: Any = None
+            self._professional_review_filter = "all"
             self._onboarding_config_path = config.paths.root / "config.json"
             initial_mode = config.llm.mode
             self._ollama_state = "Pendiente" if initial_mode == "local" else "Cloud"
@@ -427,6 +429,10 @@ def launch_desktop_app(
             self._nav_exp_btn = self._make_nav_btn("  Expedientes")
             self._nav_exp_btn.clicked.connect(lambda: self._open_expedientes())
             sl.addWidget(self._nav_exp_btn)
+
+            self._nav_review_btn = self._make_nav_btn("  Revisión Pro")
+            self._nav_review_btn.clicked.connect(self._show_professional_review)
+            sl.addWidget(self._nav_review_btn)
 
             self._nav_demo_btn = self._make_nav_btn("  Studio Demo")
             self._nav_demo_btn.setObjectName("NavBtnGold")
@@ -1296,6 +1302,7 @@ def launch_desktop_app(
         def _set_nav_context(self, active: str) -> None:
             navs = {
                 "home": getattr(self, "_nav_home_btn", None),
+                "review": getattr(self, "_nav_review_btn", None),
                 "chat": getattr(self, "_nav_chat_btn", None),
                 "system": getattr(self, "_system_button", None),
                 "training": getattr(self, "_nav_training_btn", None),
@@ -1378,6 +1385,12 @@ def launch_desktop_app(
                     "Tres casos guiados con semáforo, riesgos, fuentes e informe.",
                     self._open_studio_demo,
                     "Primary",
+                ),
+                (
+                    "Revisión Pro",
+                    "Decisiones por paso, advertencias aceptadas y trazabilidad del agente.",
+                    self._show_professional_review,
+                    "Ghost",
                 ),
                 (
                     "Cliente / Licencia",
@@ -1494,7 +1507,8 @@ def launch_desktop_app(
                 "2. Dirección, Catastro o coordenadas",
                 "3. Plano del expediente",
                 "4. Análisis PGOU y afecciones",
-                "5. Informe PDF profesional",
+                "5. Revisión profesional trazable",
+                "6. Informe PDF profesional",
             ):
                 lbl = QLabel(step)
                 lbl.setObjectName("Sub")
@@ -1507,6 +1521,421 @@ def launch_desktop_app(
             self._messages_layout.insertWidget(idx, page)
             self._status_label.setText("Inicio Studio listo.")
             self.statusBar().showMessage("Inicio Studio listo.", 2500)
+
+        def _show_professional_review(self, filter_key: str = "all") -> None:
+            import html as _html
+
+            from adv_archon.core.expediente import ExpedienteStore
+            from adv_archon.core.professional_review import (
+                REVIEW_FILTER_LABELS,
+                build_professional_review_dashboard,
+                normalize_review_filter,
+            )
+
+            self._close_workspace_panels()
+            self._clear_message_area()
+            self._home_visible = False
+            self._professional_review_filter = normalize_review_filter(filter_key)
+            self._set_nav_context("review")
+
+            store = ExpedienteStore(self._studio_data_dir() / "expedientes.db")
+            dashboard = build_professional_review_dashboard(store.list_all())
+            active_steps = dashboard.filtered(self._professional_review_filter)
+            summary = dashboard.summary
+
+            page = QFrame()
+            page.setObjectName("HomeStudio")
+            page_lay = QVBoxLayout(page)
+            page_lay.setContentsMargins(6, 4, 6, 4)
+            page_lay.setSpacing(12)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 14, 18, 14)
+            hero_lay.setSpacing(16)
+            hero_lay.addWidget(self._make_logo(52))
+            hero_text = QVBoxLayout()
+            eyebrow = QLabel("CENTRO DE REVISIÓN PROFESIONAL")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Decisiones técnicas de expediente, trazables y revisables.")
+            title.setObjectName("StudioTitle")
+            title.setWordWrap(True)
+            subtitle = QLabel(
+                "Valida pasos del agente, acepta advertencias, decide qué entra en "
+                "informe y localiza lo que necesita revisión humana."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            hero_text.addWidget(eyebrow)
+            hero_text.addWidget(title)
+            hero_text.addWidget(subtitle)
+            hero_lay.addLayout(hero_text, 1)
+            open_btn = QPushButton("Abrir expedientes")
+            open_btn.setObjectName("Primary")
+            open_btn.clicked.connect(lambda: self._open_expedientes())
+            hero_lay.addWidget(open_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
+            page_lay.addWidget(hero)
+
+            metrics_row = QHBoxLayout()
+            metrics_row.setSpacing(8)
+            metrics = [
+                ("Pasos", summary.total_steps),
+                ("Pendientes", summary.pending),
+                ("Necesitan revisión", summary.needs_review),
+                ("Validados", summary.validated),
+                ("Advertencias", summary.accepted_warnings),
+                ("Excluidos", summary.excluded),
+            ]
+            for label, value in metrics:
+                box = QFrame()
+                box.setObjectName("StudioMetric")
+                box_lay = QVBoxLayout(box)
+                box_lay.setContentsMargins(10, 8, 10, 8)
+                value_lbl = QLabel(str(value))
+                value_lbl.setObjectName("StudioDecision")
+                label_lbl = QLabel(label)
+                label_lbl.setObjectName("Faint")
+                label_lbl.setWordWrap(True)
+                box_lay.addWidget(value_lbl)
+                box_lay.addWidget(label_lbl)
+                metrics_row.addWidget(box)
+            page_lay.addLayout(metrics_row)
+
+            filter_row = QHBoxLayout()
+            filter_row.setSpacing(6)
+            for key in (
+                "all",
+                "needs_review",
+                "pending",
+                "validated",
+                "warnings",
+                "excluded",
+                "repeat",
+            ):
+                btn = QPushButton(
+                    f"{REVIEW_FILTER_LABELS[key]} · {summary.count_for_filter(key)}"
+                )
+                btn.setObjectName(
+                    "Primary" if key == self._professional_review_filter else "Ghost"
+                )
+                btn.clicked.connect(
+                    lambda _checked=False, selected=key: self._show_professional_review(
+                        selected
+                    )
+                )
+                filter_row.addWidget(btn)
+            filter_row.addStretch(1)
+            page_lay.addLayout(filter_row)
+
+            browser = QTextBrowser()
+            browser.setObjectName("Panel")
+            browser.setOpenExternalLinks(False)
+            browser.anchorClicked.connect(self._handle_professional_review_link)
+            browser.setHtml(
+                self._professional_review_html(
+                    active_steps,
+                    total_steps=summary.total_steps,
+                    active_label=REVIEW_FILTER_LABELS[self._professional_review_filter],
+                    escape=_html.escape,
+                )
+            )
+            page_lay.addWidget(browser, 1)
+
+            idx = self._messages_layout.count() - 1
+            self._messages_layout.insertWidget(idx, page)
+            self._status_label.setText("Vista Revisión Profesional lista.")
+            self.statusBar().showMessage("Revisión Profesional actualizada.", 2500)
+
+        def _professional_review_html(
+            self,
+            steps: object,
+            *,
+            total_steps: int,
+            active_label: str,
+            escape: object,
+        ) -> str:
+            esc = escape
+            step_items = list(steps) if steps else []
+            if not step_items:
+                rows = (
+                    "<div class='empty'>No hay pasos en este filtro. "
+                    "Crea o analiza expedientes para alimentar la revisión profesional.</div>"
+                )
+            else:
+                chunks: list[str] = []
+                for step in step_items:
+                    include_label = (
+                        "Incluido en informe"
+                        if step.include_in_report
+                        else "Excluido del informe"
+                    )
+                    risk_class = {
+                        "alto": "risk-high",
+                        "medio": "risk-medium",
+                        "bajo": "risk-low",
+                    }.get(step.risk_level, "risk-medium")
+                    action_links = [
+                        self._professional_review_action_link(step, "validate", "Validar"),
+                        self._professional_review_action_link(
+                            step,
+                            "accept-warning",
+                            "Aceptar advertencia",
+                        ),
+                        self._professional_review_action_link(step, "repeat", "Repetir"),
+                    ]
+                    if step.include_in_report:
+                        action_links.append(
+                            self._professional_review_action_link(
+                                step,
+                                "exclude",
+                                "Excluir informe",
+                            )
+                        )
+                    else:
+                        action_links.append(
+                            self._professional_review_action_link(
+                                step,
+                                "include",
+                                "Incluir informe",
+                            )
+                        )
+                    action_links.append(
+                        "<a class='ghost' href='professional-review:open:"
+                        f"{esc(step.expediente_id)}'>Abrir expediente</a>"
+                    )
+                    note_html = (
+                        f"<p class='note'>{esc(step.review_note)}</p>"
+                        if step.review_note
+                        else ""
+                    )
+                    chunks.append(
+                        "<section class='card'>"
+                        "<div class='topline'>"
+                        f"<span class='case'>{esc(step.expediente_title)}</span>"
+                        f"<span class='muted'>{esc(step.municipality)}</span>"
+                        f"<span class='risk {risk_class}'>{esc(step.risk_label)}</span>"
+                        "</div>"
+                        f"<h3>{esc(step.step_title)}</h3>"
+                        "<div class='badges'>"
+                        f"<span>{esc(step.step_status_label)}</span>"
+                        f"<span>{esc(step.review_label)}</span>"
+                        f"<span>{esc(include_label)}</span>"
+                        f"<span>Confianza {esc(step.confidence)}</span>"
+                        "</div>"
+                        "<dl>"
+                        f"<dt>Dato oficial consultado</dt><dd>{esc(step.official_data)}</dd>"
+                        f"<dt>Inferencia de ARCHON</dt><dd>{esc(step.archon_inference)}</dd>"
+                        f"<dt>Acción recomendada</dt><dd>{esc(step.recommended_action)}</dd>"
+                        "</dl>"
+                        f"{note_html}"
+                        f"<div class='actions'>{' '.join(action_links)}</div>"
+                        "</section>"
+                    )
+                rows = "\n".join(chunks)
+            return f"""
+            <html>
+            <head>
+            <style>
+                body {{
+                    background: #F7F7F4;
+                    color: #050505;
+                    font-family: -apple-system, BlinkMacSystemFont, "Inter", sans-serif;
+                    margin: 0;
+                    padding: 16px;
+                }}
+                .heading {{
+                    color: #77746B;
+                    font-size: 12px;
+                    font-weight: 700;
+                    letter-spacing: 1px;
+                    text-transform: uppercase;
+                    margin: 0 0 12px 0;
+                }}
+                .card {{
+                    background: #FFFFFF;
+                    border: 1px solid #D9D3C2;
+                    border-radius: 8px;
+                    margin: 0 0 12px 0;
+                    padding: 14px 16px;
+                }}
+                .topline {{
+                    color: #77746B;
+                    font-size: 12px;
+                    font-weight: 600;
+                    margin-bottom: 5px;
+                }}
+                .case {{
+                    color: #050505;
+                    font-weight: 800;
+                    margin-right: 8px;
+                }}
+                .muted {{
+                    color: #8F897A;
+                    margin-right: 8px;
+                }}
+                .risk {{
+                    border-radius: 8px;
+                    padding: 2px 7px;
+                    font-size: 11px;
+                    font-weight: 800;
+                }}
+                .risk-high {{ background: #F7DFDA; color: #B44535; }}
+                .risk-medium {{ background: #FFF3CC; color: #9A7210; }}
+                .risk-low {{ background: #E4F2E7; color: #367A48; }}
+                h3 {{
+                    color: #050505;
+                    font-family: "Libre Baskerville", Georgia, serif;
+                    font-size: 17px;
+                    margin: 3px 0 8px 0;
+                }}
+                .badges span {{
+                    background: #F7F7F4;
+                    border: 1px solid #E4DCC8;
+                    border-radius: 8px;
+                    color: #504D46;
+                    display: inline-block;
+                    font-size: 11px;
+                    font-weight: 700;
+                    margin: 0 5px 6px 0;
+                    padding: 4px 7px;
+                }}
+                dl {{
+                    margin: 5px 0 8px 0;
+                }}
+                dt {{
+                    color: #C9A227;
+                    font-size: 11px;
+                    font-weight: 800;
+                    margin-top: 7px;
+                    text-transform: uppercase;
+                }}
+                dd {{
+                    color: #2E2E2C;
+                    font-size: 13px;
+                    margin: 2px 0 0 0;
+                }}
+                .note {{
+                    background: #FFF8E5;
+                    border-left: 3px solid #C9A227;
+                    color: #504D46;
+                    font-size: 12px;
+                    margin: 8px 0;
+                    padding: 7px 9px;
+                }}
+                .actions {{
+                    border-top: 1px solid #E7E1D2;
+                    margin-top: 10px;
+                    padding-top: 9px;
+                }}
+                a {{
+                    background: #C9A227;
+                    border-radius: 8px;
+                    color: #050505;
+                    display: inline-block;
+                    font-size: 12px;
+                    font-weight: 800;
+                    margin: 0 6px 6px 0;
+                    padding: 6px 9px;
+                    text-decoration: none;
+                }}
+                a.ghost {{
+                    background: #F7F7F4;
+                    border: 1px solid #D9D3C2;
+                    color: #2E2E2C;
+                }}
+                .empty {{
+                    background: #FFFFFF;
+                    border: 1px dashed #D9D3C2;
+                    border-radius: 8px;
+                    color: #77746B;
+                    font-size: 14px;
+                    padding: 24px;
+                    text-align: center;
+                }}
+            </style>
+            </head>
+            <body>
+                <p class='heading'>
+                    {esc(active_label)} · {len(step_items)} de {total_steps} pasos
+                </p>
+                {rows}
+            </body>
+            </html>
+            """
+
+        def _professional_review_action_link(
+            self,
+            step: object,
+            action: str,
+            label: str,
+        ) -> str:
+            import html as _html
+
+            return (
+                "<a href='professional-review:action:"
+                f"{_html.escape(action)}:{_html.escape(step.expediente_id)}:"
+                f"{_html.escape(step.step_code)}'>{_html.escape(label)}</a>"
+            )
+
+        def _handle_professional_review_link(self, url: object) -> None:
+            import dataclasses
+
+            from adv_archon.core.agent_plan import (
+                append_agent_event,
+                update_agent_step_review,
+            )
+            from adv_archon.core.expediente import ExpedienteStore
+
+            raw = str(url.toString())
+            if raw.startswith("professional-review:open:"):
+                expediente_id = raw.split(":", 2)[2]
+                self._open_expedientes(selected_id=expediente_id)
+                return
+            if not raw.startswith("professional-review:action:"):
+                return
+            parts = raw.split(":", 4)
+            if len(parts) != 5:
+                return
+            _, _, action, expediente_id, step_code = parts
+            store = ExpedienteStore(self._studio_data_dir() / "expedientes.db")
+            exp = store.get(expediente_id)
+            if not exp:
+                self.statusBar().showMessage("No se encontró el expediente.", 3500)
+                return
+            action_messages = {
+                "validate": "Paso validado por arquitecto.",
+                "accept-warning": "Advertencia aceptada por arquitecto.",
+                "repeat": "Repetición solicitada; abre el expediente para ejecutarla.",
+                "include": "Paso incluido expresamente en el informe.",
+                "exclude": "Paso excluido del informe por arquitecto.",
+            }
+            message = action_messages.get(action, "Decisión registrada.")
+            updated = dataclasses.replace(
+                exp,
+                agent_step_reviews=update_agent_step_review(
+                    exp.agent_step_reviews,
+                    step_code=step_code,
+                    action=action,
+                ),
+                agent_history=append_agent_event(
+                    exp.agent_history,
+                    step_code=step_code,
+                    title="Decisión arquitecto",
+                    status="completed" if action != "repeat" else "pending",
+                    message=message,
+                ),
+            )
+            store.update(updated)
+            self._last_exp_label = updated.title
+            self._refresh_status_bar()
+            self._show_professional_review(self._professional_review_filter)
+            self.statusBar().showMessage(message, 4000)
+            if action == "repeat":
+                QTimer.singleShot(
+                    250,
+                    lambda eid=expediente_id: self._open_expedientes(selected_id=eid),
+                )
 
         def _open_system_status(self) -> None:
             self._close_workspace_panels()
@@ -2174,6 +2603,7 @@ def launch_desktop_app(
             self._nav_daily_btn.setEnabled(can_send)
             self._nav_pgou_btn.setEnabled(True)
             self._nav_geo_btn.setEnabled(True)
+            self._nav_review_btn.setEnabled(accepts)
             self._nav_demo_btn.setEnabled(accepts)
             self._nav_client_btn.setEnabled(accepts)
             self._nav_pack_btn.setEnabled(accepts)

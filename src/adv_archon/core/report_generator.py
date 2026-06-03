@@ -669,7 +669,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     next_steps = analysis.get("next_steps") or []
     if not full_analysis and isinstance(next_steps, list) and next_steps:
         full_analysis = "Próximos pasos:\n" + "\n".join(f"- {step}" for step in next_steps)
-    from adv_archon.core.agent_plan import build_expediente_agent_plan
+    from adv_archon.core.agent_plan import build_expediente_agent_plan, load_agent_history
     from adv_archon.core.expediente_quality import evaluate_expediente_quality
     from adv_archon.core.studio import build_studio_payload, load_studio_client_config
 
@@ -683,6 +683,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     )
     quality = evaluate_expediente_quality(expediente)
     agent_plan = build_expediente_agent_plan(expediente)
+    agent_history = load_agent_history(getattr(expediente, "agent_history", ""))
 
     # Default output path: Desktop
     if output_path is None:
@@ -840,6 +841,10 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     _section_title(pdf, "TRAZABILIDAD DEL AGENTE")
     _agent_traceability_table(pdf, agent_plan.steps)
     pdf.ln(5)
+    if agent_history:
+        _section_title(pdf, "HISTORIAL DE EJECUCIÓN DEL AGENTE")
+        _agent_history_table(pdf, agent_history[-12:])
+        pdf.ln(5)
 
     # ── Parcel data from site_context ─────────────────────────────────────
     parcel = site_ctx.get("parcel_detail") or {}
@@ -1090,6 +1095,38 @@ def _agent_traceability_table(pdf: ArchonPDF, steps: Sequence[Any]) -> None:
             col_w[3],
             7,
             f"  {_clean_text(str(getattr(step, 'confidence', '')))[:8]}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
+
+
+def _agent_history_table(pdf: ArchonPDF, events: Sequence[Any]) -> None:
+    headers = ["Hora", "Paso", "Estado", "Evento"]
+    col_w = [24, 40, 26, 84]
+    _draw_table_header(pdf, headers, col_w)
+    for idx, event in enumerate(events):
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        created_at = str(getattr(event, "created_at", ""))
+        hour = created_at[11:19] if len(created_at) >= 19 else created_at[:16]
+        status = _clean_text(str(getattr(event, "status_label", "")))[:16]
+        _ensure_space(pdf, 8)
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "", 7)
+        pdf.cell(col_w[0], 7, f"  {_clean_text(hour)}", border=1, fill=True)
+        pdf.cell(
+            col_w[1],
+            7,
+            f"  {_clean_text(str(getattr(event, 'title', '')))[:26]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(col_w[2], 7, f"  {status}", border=1, fill=True)
+        pdf.cell(
+            col_w[3],
+            7,
+            f"  {_clean_text(str(getattr(event, 'message', '')))[:62]}",
             border=1,
             fill=True,
             new_x=XPos.LMARGIN,

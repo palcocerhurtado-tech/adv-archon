@@ -621,9 +621,13 @@ if PYSIDE6_AVAILABLE:
                 pass
 
             try:
-                from adv_archon.core.agent_plan import build_expediente_agent_plan
+                from adv_archon.core.agent_plan import (
+                    build_expediente_agent_plan,
+                    load_agent_history,
+                )
 
                 agent_plan = build_expediente_agent_plan(exp)
+                agent_history = load_agent_history(getattr(exp, "agent_history", ""))
                 verdict_color = {
                     "viable": OK,
                     "conditional": WARN,
@@ -673,6 +677,19 @@ if PYSIDE6_AVAILABLE:
                             f"<td>{escape(source.status)}</td>"
                             f"<td style='font-size:10px;color:#555;'>"
                             f"{escape(source.official_data[:90])}</td></tr>"
+                        )
+                    lines.append("</table>")
+                if agent_history:
+                    lines.append("<h4>Historial vivo del agente</h4><table>")
+                    for event in reversed(agent_history[-8:]):
+                        colour = status_color.get(event.status, TEXT_SUB)
+                        created = event.created_at[11:19] if len(event.created_at) >= 19 else ""
+                        lines.append(
+                            f"<tr><td style='width:18%;color:#777;'>{escape(created)}</td>"
+                            f"<td style='width:22%;color:{colour};'>"
+                            f"{escape(event.status_label)}</td>"
+                            f"<td style='font-size:10px;color:#555;'>"
+                            f"{escape(event.message[:110])}</td></tr>"
                         )
                     lines.append("</table>")
             except Exception:

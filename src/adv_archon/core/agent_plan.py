@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
+from datetime import UTC, datetime
 from typing import Any
 
 from adv_archon.core.expediente_quality import evaluate_expediente_quality
@@ -79,6 +80,31 @@ class AgentSourceLog:
 
 
 @dataclass(frozen=True, slots=True)
+class AgentRunEvent:
+    step_code: str
+    title: str
+    status: str
+    message: str
+    created_at: str
+    run_id: str = ""
+
+    @property
+    def status_label(self) -> str:
+        return AGENT_STEP_STATUS_LABELS.get(self.status, self.status)
+
+    def as_payload(self) -> dict[str, str]:
+        return {
+            "step_code": self.step_code,
+            "title": self.title,
+            "status": self.status,
+            "status_label": self.status_label,
+            "message": self.message,
+            "created_at": self.created_at,
+            "run_id": self.run_id,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class AgentPlan:
     verdict: str
     verdict_label: str
@@ -100,7 +126,82 @@ class AgentPlan:
         }
 
 
-def build_expediente_agent_plan(expediente: Any) -> AgentPlan:
+def append_agent_event(
+    raw_history: str | list[dict[str, Any]] | tuple[AgentRunEvent, ...] | None,
+    *,
+    step_code: str,
+    title: str,
+    status: str,
+    message: str,
+    run_id: str = "",
+    created_at: str | None = None,
+    max_events: int = 120,
+) -> str:
+    """Append one persistent event to an expediente agent history JSON field."""
+    event = AgentRunEvent(
+        step_code=step_code,
+        title=title,
+        status=status,
+        message=message,
+        created_at=created_at or datetime.now(UTC).isoformat(timespec="seconds"),
+        run_id=run_id,
+    )
+    events = [item.as_payload() for item in load_agent_history(raw_history)]
+    events.append(event.as_payload())
+    if max_events > 0:
+        events = events[-max_events:]
+    return json.dumps(events, ensure_ascii=False)
+
+
+def load_agent_history(
+    raw_history: str | list[dict[str, Any]] | tuple[AgentRunEvent, ...] | None,
+) -> tuple[AgentRunEvent, ...]:
+    """Load agent history defensively from persisted JSON."""
+    if isinstance(raw_history, tuple) and all(
+        isinstance(item, AgentRunEvent) for item in raw_history
+    ):
+        return raw_history
+    raw_items: list[Any]
+    if isinstance(raw_history, list):
+        raw_items = list(raw_history)
+    elif isinstance(raw_history, str) and raw_history.strip():
+        try:
+            parsed = json.loads(raw_history)
+        except (TypeError, ValueError):
+            return ()
+        raw_items = parsed if isinstance(parsed, list) else []
+    else:
+        raw_items = []
+    events: list[AgentRunEvent] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        step_code = str(item.get("step_code") or item.get("code") or "").strip()
+        title = str(item.get("title") or step_code or "Evento del agente").strip()
+        status = str(item.get("status") or "pending").strip()
+        message = str(item.get("message") or "").strip()
+        created_at = str(item.get("created_at") or "").strip()
+        run_id = str(item.get("run_id") or "").strip()
+        if not step_code or not created_at:
+            continue
+        events.append(
+            AgentRunEvent(
+                step_code=step_code,
+                title=title,
+                status=status,
+                message=message,
+                created_at=created_at,
+                run_id=run_id,
+            )
+        )
+    return tuple(events)
+
+
+def build_expediente_agent_plan(
+    expediente: Any,
+    *,
+    include_history: bool = True,
+) -> AgentPlan:
     """Build the guided urban-planning agent plan for one expediente.
 
     The plan is deliberately derived from the expediente state instead of being
@@ -132,7 +233,7 @@ def build_expediente_agent_plan(expediente: Any) -> AgentPlan:
     legal_checks = site_context.get("legal_checks") if site_context else []
     legal_checks = legal_checks if isinstance(legal_checks, list) else []
 
-    steps = (
+    steps: tuple[AgentPlanStep, ...] = (
         _location_step(address, municipality, has_coords, status),
         _catastro_step(cadastral_ref, site_context),
         _sectorial_step(site_context),
@@ -141,6 +242,11 @@ def build_expediente_agent_plan(expediente: Any) -> AgentPlan:
         _dictamen_step(has_analysis, has_plan, site_context, analysis),
         _architect_review_step(review.status, review.label),
     )
+    if include_history:
+        steps = _apply_history_overlay(
+            steps,
+            load_agent_history(getattr(expediente, "agent_history", "")),
+        )
     questions = tuple(
         _build_questions(
             has_plan=has_plan,
@@ -556,6 +662,39 @@ def _has_sectorial_affection(site_context: dict[str, Any]) -> bool:
     )
 
 
+def _apply_history_overlay(
+    steps: tuple[AgentPlanStep, ...],
+    history: tuple[AgentRunEvent, ...],
+) -> tuple[AgentPlanStep, ...]:
+    latest_by_step: dict[str, AgentRunEvent] = {}
+    for event in history:
+        latest_by_step[event.step_code] = event
+    updated: list[AgentPlanStep] = []
+    for step in steps:
+        latest_event = latest_by_step.get(step.code)
+        if latest_event and latest_event.status == "in_progress":
+            updated.append(
+                replace(
+                    step,
+                    status="in_progress",
+                    archon_inference=latest_event.message or step.archon_inference,
+                    recommended_action=latest_event.message or step.recommended_action,
+                )
+            )
+        elif latest_event and latest_event.status == "blocked" and step.status != "completed":
+            updated.append(
+                replace(
+                    step,
+                    status="blocked",
+                    archon_inference=latest_event.message or step.archon_inference,
+                    recommended_action=latest_event.message or step.recommended_action,
+                )
+            )
+        else:
+            updated.append(step)
+    return tuple(updated)
+
+
 def _loads_dict(raw: Any) -> dict[str, Any]:
     if isinstance(raw, dict):
         return raw
@@ -580,6 +719,9 @@ __all__ = [
     "AgentPlan",
     "AgentPlanStep",
     "AgentQuestion",
+    "AgentRunEvent",
     "AgentSourceLog",
+    "append_agent_event",
     "build_expediente_agent_plan",
+    "load_agent_history",
 ]

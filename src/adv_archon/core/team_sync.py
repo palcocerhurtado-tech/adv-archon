@@ -80,14 +80,17 @@ def import_expediente(
               (id, title, address, municipality, province,
                latitude, longitude, cadastral_ref, status,
                plan_path, site_context, analysis_result, report_path,
-               created_at, updated_at, notes)
-            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+               created_at, updated_at, notes, case_type, review_state,
+               quality_score, quality_result, agent_history)
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
             """,
             (
                 exp.id, exp.title, exp.address, exp.municipality, exp.province,
                 exp.latitude, exp.longitude, exp.cadastral_ref, exp.status,
                 exp.plan_path, exp.site_context, exp.analysis_result, exp.report_path,
-                exp.created_at, exp.updated_at, exp.notes,
+                exp.created_at, exp.updated_at, exp.notes, exp.case_type,
+                exp.review_state, exp.quality_score, exp.quality_result,
+                exp.agent_history,
             ),
         )
         store._conn.commit()  # noqa: SLF001

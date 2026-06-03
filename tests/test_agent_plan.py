@@ -4,7 +4,11 @@ import json
 from dataclasses import replace
 from pathlib import Path
 
-from adv_archon.core.agent_plan import build_expediente_agent_plan
+from adv_archon.core.agent_plan import (
+    append_agent_event,
+    build_expediente_agent_plan,
+    load_agent_history,
+)
 from adv_archon.core.expediente import ExpedienteStore
 from adv_archon.core.expediente_quality import review_state_json
 
@@ -20,6 +24,34 @@ def test_agent_plan_blocks_empty_expediente(tmp_path: Path) -> None:
     assert plan.steps[0].code == "resolve-location"
     assert plan.steps[0].status == "blocked"
     assert any(question.code == "continue-without-plan" for question in plan.questions)
+
+
+def test_agent_history_appends_and_overlays_in_progress_step(tmp_path: Path) -> None:
+    store = ExpedienteStore(tmp_path / "expedientes.db")
+    history = append_agent_event(
+        "",
+        step_code="query-catastro",
+        title="Consultar Catastro",
+        status="in_progress",
+        message="Consultando Catastro OVC…",
+        run_id="run-1",
+        created_at="2026-06-03T10:00:00+00:00",
+    )
+    exp = store.create(
+        title="Con progreso",
+        address="Calle Mayor 24, Madrid",
+        municipality="Madrid",
+    )
+    exp = replace(exp, agent_history=history)
+
+    loaded = load_agent_history(history)
+    plan = build_expediente_agent_plan(exp)
+    catastro = next(step for step in plan.steps if step.code == "query-catastro")
+
+    assert len(loaded) == 1
+    assert loaded[0].status_label == "En curso"
+    assert catastro.status == "in_progress"
+    assert "Catastro OVC" in catastro.recommended_action
 
 
 def test_agent_plan_guides_complete_validated_expediente(tmp_path: Path) -> None:

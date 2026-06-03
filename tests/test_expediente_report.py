@@ -95,3 +95,4 @@ def test_expediente_store_migrates_existing_minimal_table(tmp_path: Path) -> Non
     assert exp.site_context == ""
     assert exp.quality_score is None
     assert exp.quality_result == ""
+    assert exp.agent_history == ""

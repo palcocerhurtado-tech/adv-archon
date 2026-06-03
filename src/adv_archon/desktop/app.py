@@ -3606,6 +3606,15 @@ def launch_desktop_app(
                     "generated_at": datetime.now().isoformat(timespec="minutes"),
                 }
 
+            def _loads_agent_json(raw: str) -> dict[str, Any]:
+                if not raw.strip():
+                    return {}
+                try:
+                    parsed = json.loads(raw)
+                except (TypeError, ValueError):
+                    return {}
+                return parsed if isinstance(parsed, dict) else {}
+
             # -- Background geo-resolver ----------------------------------------
             class _GeoWorker(QObject):
                 resolved = _Signal(object)
@@ -3706,14 +3715,320 @@ def launch_desktop_app(
                     finally:
                         self.finished.emit()
 
+            class _AgentReviewWorker(QObject):
+                progress = _Signal(object, str)
+                completed = _Signal(object)
+                failed = _Signal(object, str)
+                finished = _Signal()
+
+                def __init__(self, exp: Expediente, data_root: Path) -> None:
+                    super().__init__()
+                    self._exp = exp
+                    self._data_root = data_root
+                    self._run_id = datetime.now().strftime("%Y%m%d%H%M%S")
+
+                def run(self) -> None:
+                    try:
+                        from adv_archon.core.agent_plan import build_expediente_agent_plan
+
+                        self._emit_event(
+                            "resolve-location",
+                            "Resolver parcela",
+                            "in_progress",
+                            "Resolviendo parcela y coordenadas del expediente…",
+                        )
+                        if not self._ensure_site_context():
+                            self._finish_with_current_plan()
+                            return
+
+                        self._emit_status_from_plan("resolve-location")
+                        self._emit_status_from_plan("query-catastro")
+                        self._emit_status_from_plan("sectorial-sources")
+                        self._emit_status_from_plan("pgou-normativa")
+
+                        plan_path = str(getattr(self._exp, "plan_path", "") or "").strip()
+                        self._emit_event(
+                            "plan-document",
+                            "Revisar plano adjunto",
+                            "completed" if plan_path else "needs_review",
+                            (
+                                "Plano localizado para contraste con PGOU."
+                                if plan_path
+                                else "No tengo plano; continuaré con Catastro y fuentes oficiales."
+                            ),
+                        )
+
+                        if not str(getattr(self._exp, "analysis_result", "") or "").strip():
+                            self._emit_event(
+                                "preliminary-dictamen",
+                                "Generar dictamen preliminar",
+                                "in_progress",
+                                "Generando dictamen preliminar a partir del contexto oficial…",
+                            )
+                            analysis = _build_expediente_analysis(self._exp)
+                            next_status = (
+                                "requiere_revision"
+                                if analysis.get("verdict") == "revisar"
+                                else "analizado"
+                            )
+                            self._exp = dataclasses.replace(
+                                self._exp,
+                                analysis_result=json.dumps(analysis, ensure_ascii=False),
+                                status=next_status,
+                            )
+                        self._emit_status_from_plan("preliminary-dictamen")
+
+                        plan = build_expediente_agent_plan(
+                            self._exp,
+                            include_history=False,
+                        )
+                        review_step = next(
+                            (
+                                step for step in plan.steps
+                                if step.code == "architect-review"
+                            ),
+                            None,
+                        )
+                        self._emit_event(
+                            "architect-review",
+                            "Marcar puntos de arquitecto",
+                            review_step.status if review_step else "needs_review",
+                            (
+                                review_step.recommended_action
+                                if review_step
+                                else "Arquitecto debe revisar el expediente."
+                            ),
+                        )
+
+                        final_plan = build_expediente_agent_plan(
+                            self._exp,
+                            include_history=False,
+                        )
+                        final_status = (
+                            "requiere_revision"
+                            if final_plan.verdict in {"blocked", "review"}
+                            else "analizado"
+                        )
+                        if getattr(self._exp, "report_path", ""):
+                            final_status = getattr(self._exp, "status", "") or final_status
+                        self._exp = dataclasses.replace(self._exp, status=final_status)
+                        self._emit_event(
+                            "agent-finish",
+                            "Revisión completa",
+                            "completed",
+                            f"Resultado final del agente: {final_plan.verdict_label}.",
+                        )
+                        self.completed.emit(self._exp)
+                    except Exception as exc:
+                        self._emit_event(
+                            "agent-error",
+                            "Revisión completa",
+                            "blocked",
+                            f"No se pudo completar la revisión guiada: {exc}",
+                        )
+                        self.failed.emit(self._exp, str(exc))
+                    finally:
+                        self.finished.emit()
+
+                def _ensure_site_context(self) -> bool:
+                    site_context = _loads_agent_json(
+                        str(getattr(self._exp, "site_context", "") or "")
+                    )
+                    required_sources = (
+                        "parcel_detail",
+                        "flood_zone",
+                        "natura2000",
+                        "costas",
+                        "carreteras",
+                    )
+                    has_full_context = bool(site_context) and all(
+                        site_context.get(key) for key in required_sources
+                    )
+                    if has_full_context:
+                        self._emit_event(
+                            "resolve-location",
+                            "Resolver parcela",
+                            "completed",
+                            "La parcela ya estaba resuelta en el expediente.",
+                        )
+                        return True
+
+                    coords = _parse_coordinate_text(str(self._exp.address or ""))
+                    if coords is None and self._exp.latitude and self._exp.longitude:
+                        coords = (float(self._exp.latitude), float(self._exp.longitude))
+                    if coords is None:
+                        ref = _parse_cadastral_ref_text(str(self._exp.address or ""))
+                        if ref:
+                            self._emit_event(
+                                "query-catastro",
+                                "Consultar Catastro",
+                                "in_progress",
+                                "Consultando coordenadas por referencia catastral…",
+                            )
+                            from adv_archon.integrations import catastro as _catastro
+
+                            result = _catastro.get_coordinates_by_ref(ref)
+                            if result.get("error"):
+                                self._emit_event(
+                                    "query-catastro",
+                                    "Consultar Catastro",
+                                    "blocked",
+                                    str(
+                                        result.get("error")
+                                        or "Catastro no resolvió la referencia."
+                                    ),
+                                )
+                                return False
+                            coords = (
+                                float(result.get("latitude", 0) or 0),
+                                float(result.get("longitude", 0) or 0),
+                            )
+                        elif str(self._exp.address or "").strip():
+                            from adv_archon.integrations import nominatim as _nominatim
+
+                            result = _nominatim.forward_geocode(self._exp.address)
+                            if not result:
+                                self._emit_event(
+                                    "resolve-location",
+                                    "Resolver parcela",
+                                    "blocked",
+                                    "No he podido resolver la dirección con Nominatim.",
+                                )
+                                return False
+                            coords = (
+                                float(result.get("lat", 0) or 0),
+                                float(result.get("lon", 0) or 0),
+                            )
+                        else:
+                            self._emit_event(
+                                "resolve-location",
+                                "Resolver parcela",
+                                "blocked",
+                                "Falta dirección, coordenadas o referencia catastral.",
+                            )
+                            return False
+
+                    lat, lon = coords
+                    self._emit_event(
+                        "query-catastro",
+                        "Consultar Catastro",
+                        "in_progress",
+                        "Consultando Catastro OVC y detalle parcelario…",
+                    )
+                    self._emit_event(
+                        "sectorial-sources",
+                        "Comprobar afecciones",
+                        "in_progress",
+                        "Comprobando SNCZI, Red Natura 2000, Costas y Carreteras…",
+                    )
+                    self._emit_event(
+                        "pgou-normativa",
+                        "Buscar normativa PGOU",
+                        "in_progress",
+                        "Buscando PGOU municipal y zonificación preliminar…",
+                    )
+                    from adv_archon.core.geo_store import GeoStore
+                    from adv_archon.core.pgou_store import PGOUStore
+                    from adv_archon.integrations import catastro as _catastro
+                    from adv_archon.tools.geo_tools import GeoTools
+
+                    geo_tools = GeoTools(
+                        GeoStore(self._data_root / "geo.db"),
+                        PGOUStore(self._data_root / "pgou.db"),
+                    )
+                    site_result = geo_tools.site_compliance_context(lat, lon)
+                    site_payload = dict(site_result.payload)
+                    if not site_payload.get("ok"):
+                        self._emit_event(
+                            "sectorial-sources",
+                            "Comprobar afecciones",
+                            "blocked",
+                            str(
+                                site_payload.get("error")
+                                or "No se pudo resolver el contexto de parcela."
+                            ),
+                        )
+                        return False
+                    cadastral_ref = str(site_payload.get("cadastral_ref") or "")
+                    if not cadastral_ref:
+                        try:
+                            cd = _catastro.get_cadastral_data(lat, lon)
+                            cadastral_ref = cd.get("cadastral_ref", "") or ""
+                        except Exception:
+                            cadastral_ref = ""
+                    self._exp = dataclasses.replace(
+                        self._exp,
+                        latitude=lat,
+                        longitude=lon,
+                        municipality=str(site_payload.get("municipality") or ""),
+                        province=str(site_payload.get("province") or ""),
+                        cadastral_ref=cadastral_ref,
+                        site_context=json.dumps(site_payload, ensure_ascii=False),
+                        status="geocodificado",
+                    )
+                    return True
+
+                def _emit_status_from_plan(self, step_code: str) -> None:
+                    from adv_archon.core.agent_plan import build_expediente_agent_plan
+
+                    plan = build_expediente_agent_plan(
+                        self._exp,
+                        include_history=False,
+                    )
+                    step = next((item for item in plan.steps if item.code == step_code), None)
+                    if step is None:
+                        return
+                    self._emit_event(
+                        step.code,
+                        step.title,
+                        step.status,
+                        step.recommended_action,
+                    )
+
+                def _finish_with_current_plan(self) -> None:
+                    self._exp = dataclasses.replace(self._exp, status="requiere_revision")
+                    self._emit_event(
+                        "agent-finish",
+                        "Revisión completa",
+                        "blocked",
+                        "La revisión guiada queda bloqueada hasta completar los datos mínimos.",
+                    )
+                    self.completed.emit(self._exp)
+
+                def _emit_event(
+                    self,
+                    step_code: str,
+                    title: str,
+                    status: str,
+                    message: str,
+                ) -> None:
+                    from adv_archon.core.agent_plan import append_agent_event
+
+                    self._exp = dataclasses.replace(
+                        self._exp,
+                        agent_history=append_agent_event(
+                            getattr(self._exp, "agent_history", ""),
+                            step_code=step_code,
+                            title=title,
+                            status=status,
+                            message=message,
+                            run_id=self._run_id,
+                        ),
+                    )
+                    self.progress.emit(self._exp, message)
+
             class _ExpedienteThreadBridge(QObject):
                 geo_resolved = _Signal(object)
                 geo_failed = _Signal(str)
                 exported = _Signal(str)
                 export_failed = _Signal(str)
+                agent_progress = _Signal(object, str)
+                agent_completed = _Signal(object)
+                agent_failed = _Signal(object, str)
 
             _active_geo_threads: list[tuple[Any, Any]] = []
             _active_export_threads: list[tuple[Any, Any]] = []
+            _active_agent_threads: list[tuple[Any, Any, Any]] = []
 
             def _launch_geo(exp: Expediente) -> None:
                 detail_panel.set_operation_busy(
@@ -3781,6 +4096,71 @@ def launch_desktop_app(
             close_btn.clicked.connect(dlg.close)
             dlg.finished.connect(lambda _code: setattr(self, "_expedientes_dialog", None))
             self._expedientes_dialog = dlg
+
+            def _launch_agent_review(eid: str) -> None:
+                exp = store.get(eid)
+                if not exp:
+                    return
+                detail_panel.set_operation_busy(
+                    True,
+                    "ARCHON ejecutando revisión guiada del expediente…",
+                )
+                self.statusBar().showMessage("ARCHON inicia revisión guiada…")
+                t = QThread(dlg)
+                t.setObjectName("adv-archon-expediente-agent")
+                w = _AgentReviewWorker(exp, data_dir)
+                bridge = _ExpedienteThreadBridge(dlg)
+                w.moveToThread(t)
+                t.started.connect(w.run)
+
+                def _on_agent_progress(updated: Expediente, message: str) -> None:
+                    store.update(updated)
+                    list_panel.populate(store.list_all())
+                    detail_panel.load_expediente(updated)
+                    self._last_exp_label = updated.title
+                    self._refresh_status_bar()
+                    self.statusBar().showMessage(message, 4000)
+
+                def _on_agent_completed(updated: Expediente) -> None:
+                    store.update(updated)
+                    list_panel.populate(store.list_all())
+                    detail_panel.load_expediente(updated)
+                    detail_panel.set_operation_busy(False)
+                    self._last_exp_label = updated.title
+                    self._refresh_status_bar()
+                    self.statusBar().showMessage(
+                        "Revisión guiada completada por ARCHON.",
+                        5000,
+                    )
+                    t.quit()
+
+                def _on_agent_failed(updated: Expediente, message: str) -> None:
+                    store.update(updated)
+                    list_panel.populate(store.list_all())
+                    detail_panel.load_expediente(updated)
+                    detail_panel.set_operation_busy(False)
+                    self.statusBar().showMessage(
+                        f"No se pudo completar la revisión guiada: {message}",
+                        6000,
+                    )
+                    t.quit()
+
+                def _cleanup_agent_thread() -> None:
+                    with suppress(ValueError):
+                        _active_agent_threads.remove((t, w, bridge))
+
+                w.progress.connect(bridge.agent_progress)
+                w.completed.connect(bridge.agent_completed)
+                w.failed.connect(bridge.agent_failed)
+                w.finished.connect(w.deleteLater)
+                w.finished.connect(t.quit)
+                bridge.agent_progress.connect(_on_agent_progress)
+                bridge.agent_completed.connect(_on_agent_completed)
+                bridge.agent_failed.connect(_on_agent_failed)
+                t.finished.connect(_cleanup_agent_thread)
+                t.finished.connect(t.deleteLater)
+                _active_agent_threads.append((t, w, bridge))
+                t.start()
 
             def _on_analyze(eid: str) -> None:
                 exp = store.get(eid)
@@ -3958,7 +4338,7 @@ def launch_desktop_app(
                 on_export=_on_export,
                 on_talk=_on_talk,
                 on_review=_on_review,
-                on_run_agent=_on_analyze,
+                on_run_agent=_launch_agent_review,
             )
 
             def _attach_plan(eid: str) -> None:

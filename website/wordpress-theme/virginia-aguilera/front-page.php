@@ -33,10 +33,6 @@ $img = get_template_directory_uri() . '/img/';
     <div class="text-center reveal">
       <span class="label">Lo que hago</span>
       <h2>Especialización total.<br>Resultados que se notan.</h2>
-      <p style="margin:16px auto 0">
-        No hago un poco de todo. Me he especializado en micropigmentación facial para hacerlo
-        al más alto nivel. Cejas, ojos y labios, con la técnica que mejor se adapta a ti.
-      </p>
     </div>
 
     <div class="services-grid">

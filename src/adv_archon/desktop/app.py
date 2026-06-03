@@ -3958,6 +3958,7 @@ def launch_desktop_app(
                 on_export=_on_export,
                 on_talk=_on_talk,
                 on_review=_on_review,
+                on_run_agent=_on_analyze,
             )
 
             def _attach_plan(eid: str) -> None:

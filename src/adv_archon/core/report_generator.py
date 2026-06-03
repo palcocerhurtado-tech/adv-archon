@@ -669,6 +669,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     next_steps = analysis.get("next_steps") or []
     if not full_analysis and isinstance(next_steps, list) and next_steps:
         full_analysis = "Próximos pasos:\n" + "\n".join(f"- {step}" for step in next_steps)
+    from adv_archon.core.agent_plan import build_expediente_agent_plan
     from adv_archon.core.expediente_quality import evaluate_expediente_quality
     from adv_archon.core.studio import build_studio_payload, load_studio_client_config
 
@@ -681,6 +682,7 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
         analysis=analysis,
     )
     quality = evaluate_expediente_quality(expediente)
+    agent_plan = build_expediente_agent_plan(expediente)
 
     # Default output path: Desktop
     if output_path is None:
@@ -819,6 +821,10 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     _quality_panel(pdf, quality)
     pdf.ln(4)
 
+    _section_title(pdf, "PLAN DEL AGENTE")
+    _agent_plan_panel(pdf, agent_plan)
+    pdf.ln(4)
+
     _section_title(pdf, "CHECKLIST POR TIPO DE EXPEDIENTE")
     _studio_checklist(pdf, studio)
     pdf.ln(4)
@@ -829,6 +835,10 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
 
     _section_title(pdf, "TRAZABILIDAD DE CONCLUSIONES")
     _traceability_table(pdf, quality.source_traces)
+    pdf.ln(5)
+
+    _section_title(pdf, "TRAZABILIDAD DEL AGENTE")
+    _agent_traceability_table(pdf, agent_plan.steps)
     pdf.ln(5)
 
     # ── Parcel data from site_context ─────────────────────────────────────
@@ -971,6 +981,52 @@ def _quality_panel(pdf: ArchonPDF, quality: Any) -> None:
     _simple_key_value_table(pdf, rows)
 
 
+def _agent_plan_panel(pdf: ArchonPDF, agent_plan: Any) -> None:
+    rows = [
+        ("Resultado final", getattr(agent_plan, "verdict_label", "Revisar")),
+        ("Confianza", getattr(agent_plan, "confidence", "media")),
+        ("Resumen", getattr(agent_plan, "summary", "")),
+    ]
+    _simple_key_value_table(pdf, rows)
+    pdf.ln(2)
+    headers = ["Paso", "Estado", "Acción recomendada"]
+    col_w = [45, 30, 99]
+    _draw_table_header(pdf, headers, col_w)
+    steps = list(getattr(agent_plan, "steps", ()) or ())
+    for idx, step in enumerate(steps):
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        status = _clean_text(str(getattr(step, "status_label", "")))[:18]
+        action = _clean_text(str(getattr(step, "recommended_action", "")))[:75]
+        _ensure_space(pdf, 8)
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "B", 7.5)
+        pdf.cell(
+            col_w[0],
+            7,
+            f"  {_clean_text(str(getattr(step, 'title', '')))[:28]}",
+            border=1,
+            fill=True,
+        )
+        pdf.set_font(pdf._fn, "", 7.4)
+        pdf.cell(col_w[1], 7, f"  {status}", border=1, fill=True)
+        pdf.cell(
+            col_w[2],
+            7,
+            f"  {action}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
+    questions = list(getattr(agent_plan, "questions", ()) or ())
+    if questions:
+        pdf.ln(2)
+        text = "Preguntas abiertas: " + " · ".join(
+            _clean_text(str(getattr(question, "question", ""))) for question in questions[:3]
+        )
+        _summary_box(pdf, text)
+
+
 def _traceability_table(pdf: ArchonPDF, traces: Sequence[Any]) -> None:
     headers = ["Fuente", "Dato oficial", "Inferencia / validación pendiente"]
     col_w = [34, 54, 86]
@@ -992,6 +1048,48 @@ def _traceability_table(pdf: ArchonPDF, traces: Sequence[Any]) -> None:
             col_w[2],
             7,
             f"  {status}: {detail}",
+            border=1,
+            fill=True,
+            new_x=XPos.LMARGIN,
+            new_y=YPos.NEXT,
+        )
+
+
+def _agent_traceability_table(pdf: ArchonPDF, steps: Sequence[Any]) -> None:
+    headers = ["Paso", "Dato oficial", "Inferencia ARCHON", "Conf."]
+    col_w = [34, 49, 73, 18]
+    _draw_table_header(pdf, headers, col_w)
+    for idx, step in enumerate(steps):
+        fill = _C_ROW_ALT if idx % 2 == 0 else _C_WHITE
+        _ensure_space(pdf, 8)
+        pdf.set_fill_color(*fill)
+        pdf.set_font(pdf._fn, "B", 7.2)
+        pdf.cell(
+            col_w[0],
+            7,
+            f"  {_clean_text(str(getattr(step, 'title', '')))[:22]}",
+            border=1,
+            fill=True,
+        )
+        pdf.set_font(pdf._fn, "", 7)
+        pdf.cell(
+            col_w[1],
+            7,
+            f"  {_clean_text(str(getattr(step, 'official_data', '')))[:36]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(
+            col_w[2],
+            7,
+            f"  {_clean_text(str(getattr(step, 'archon_inference', '')))[:55]}",
+            border=1,
+            fill=True,
+        )
+        pdf.cell(
+            col_w[3],
+            7,
+            f"  {_clean_text(str(getattr(step, 'confidence', '')))[:8]}",
             border=1,
             fill=True,
             new_x=XPos.LMARGIN,

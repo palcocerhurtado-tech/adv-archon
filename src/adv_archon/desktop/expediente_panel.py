@@ -330,6 +330,7 @@ if PYSIDE6_AVAILABLE:
             on_export: Any = None,
             on_talk: Any = None,
             on_review: Any = None,
+            on_run_agent: Any = None,
         ) -> None:
             super().__init__()
             self._on_attach_plan = on_attach_plan
@@ -337,6 +338,7 @@ if PYSIDE6_AVAILABLE:
             self._on_export = on_export
             self._on_talk = on_talk
             self._on_review = on_review
+            self._on_run_agent = on_run_agent
             self._expediente_id: str | None = None
             self._expediente: Any = None
             self._operation_busy = False
@@ -379,6 +381,27 @@ if PYSIDE6_AVAILABLE:
             self._context_browser.setOpenExternalLinks(False)
             self._context_browser.setMinimumHeight(240)
             layout.addWidget(self._context_browser)
+
+            # Agent Mode row
+            agent_row = QHBoxLayout()
+            self._agent_btn = QPushButton("Ejecutar revisión completa")
+            self._set_brand_icon(self._agent_btn)
+            self._agent_btn.setEnabled(False)
+            self._agent_btn.setToolTip(
+                "ARCHON recorre el expediente como copiloto: parcela, fuentes, PGOU, "
+                "dictamen y revisión humana."
+            )
+            self._agent_btn.setStyleSheet(
+                f"background:{ACCENT};color:{BG};"
+                "padding:7px 16px;border-radius:4px;font-weight:800;"
+            )
+            self._agent_btn.clicked.connect(self._on_agent_clicked)
+            agent_row.addWidget(self._agent_btn)
+            agent_hint = QLabel("Plan guiado del agente")
+            agent_hint.setStyleSheet(f"color:{TEXT_FAINT};font-size:10px;font-weight:700;")
+            agent_row.addWidget(agent_hint)
+            agent_row.addStretch(1)
+            layout.addLayout(agent_row)
 
             # Plano row
             plan_row = QHBoxLayout()
@@ -505,6 +528,7 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setEnabled(has_report and not self._operation_busy)
             self._open_report_btn.setVisible(has_report)
             self._talk_btn.setEnabled(not self._operation_busy)
+            self._agent_btn.setEnabled(not self._operation_busy)
             for button in (
                 self._review_confirm_btn,
                 self._review_correct_btn,
@@ -522,6 +546,7 @@ if PYSIDE6_AVAILABLE:
             self._export_btn.setEnabled(False)
             self._open_report_btn.setEnabled(False)
             self._talk_btn.setEnabled(False)
+            self._agent_btn.setEnabled(False)
             for button in (
                 self._review_confirm_btn,
                 self._review_correct_btn,
@@ -592,6 +617,64 @@ if PYSIDE6_AVAILABLE:
                         "<p style='font-size:10px;color:#555;'>"
                         f"Nota revisión: {escape(review.note)}</p>"
                     )
+            except Exception:
+                pass
+
+            try:
+                from adv_archon.core.agent_plan import build_expediente_agent_plan
+
+                agent_plan = build_expediente_agent_plan(exp)
+                verdict_color = {
+                    "viable": OK,
+                    "conditional": WARN,
+                    "review": ERR,
+                    "blocked": ERR,
+                }.get(agent_plan.verdict, TEXT_SUB)
+                lines.append(
+                    "<h4>Plan del Agente</h4>"
+                    "<table>"
+                    f"<tr><td>Resultado final</td><td style='color:{verdict_color};'>"
+                    f"<b>{escape(agent_plan.verdict_label)}</b></td></tr>"
+                    f"<tr><td>Confianza</td><td><b>{escape(agent_plan.confidence)}</b></td></tr>"
+                    f"<tr><td>Resumen</td><td>{escape(agent_plan.summary)}</td></tr>"
+                    "</table>"
+                    "<table>"
+                )
+                status_color = {
+                    "pending": TEXT_FAINT,
+                    "in_progress": ACCENT,
+                    "completed": OK,
+                    "needs_review": WARN,
+                    "blocked": ERR,
+                }
+                for step in agent_plan.steps:
+                    colour = status_color.get(step.status, TEXT_SUB)
+                    lines.append(
+                        f"<tr><td style='width:26%;'><b>{escape(step.title)}</b></td>"
+                        f"<td style='color:{colour};width:20%;'>"
+                        f"{escape(step.status_label)}</td>"
+                        f"<td style='font-size:10px;color:#555;'>"
+                        f"{escape(step.recommended_action[:100])}</td></tr>"
+                    )
+                lines.append("</table>")
+                if agent_plan.questions:
+                    lines.append("<p style='font-size:10px;color:#555;'><b>ARCHON pregunta:</b> ")
+                    lines.append(
+                        escape(agent_plan.questions[0].question)
+                        + "</p>"
+                    )
+                if agent_plan.source_log:
+                    lines.append(
+                        "<h4>Log de fuentes del agente</h4><table>"
+                    )
+                    for source in agent_plan.source_log[:4]:
+                        lines.append(
+                            f"<tr><td><b>{escape(source.name)}</b></td>"
+                            f"<td>{escape(source.status)}</td>"
+                            f"<td style='font-size:10px;color:#555;'>"
+                            f"{escape(source.official_data[:90])}</td></tr>"
+                        )
+                    lines.append("</table>")
             except Exception:
                 pass
 
@@ -778,6 +861,7 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setEnabled(False)
             self._open_report_btn.setVisible(False)
             self._talk_btn.setEnabled(False)
+            self._agent_btn.setEnabled(False)
             for button in (
                 self._review_confirm_btn,
                 self._review_correct_btn,
@@ -807,6 +891,12 @@ if PYSIDE6_AVAILABLE:
         def _on_talk_clicked(self) -> None:
             if self._on_talk and self._expediente_id:
                 self._on_talk(self._expediente_id)
+
+        def _on_agent_clicked(self) -> None:
+            if self._on_run_agent and self._expediente_id:
+                self._on_run_agent(self._expediente_id)
+            elif self._on_analyze and self._expediente_id:
+                self._on_analyze(self._expediente_id)
 
         def _on_review_clicked(self, action: str) -> None:
             if not self._on_review or not self._expediente_id:

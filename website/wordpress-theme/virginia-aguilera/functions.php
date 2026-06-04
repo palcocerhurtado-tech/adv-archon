@@ -346,23 +346,64 @@ function virginia_create_required_pages() {
 }
 add_action('admin_init', 'virginia_create_required_pages');
 
-// ─── Forzar plantilla correcta por slug ────────────────────────
-// Garantiza que la plantilla se carga aunque WordPress no tenga
-// el _wp_page_template meta asignado en la base de datos.
+// ─── Rutas de servicio — independientes de páginas WP ──────────
+// Añade rewrite rules propias que interceptan las URLs de servicio
+// ANTES de que WordPress busque páginas en la base de datos.
+// Funciona aunque las páginas no existan en WordPress.
+function virginia_service_rewrite_rules() {
+    add_rewrite_rule('^micropigmentacion-cejas/?$',  'index.php?virginia_tpl=cejas',    'top');
+    add_rewrite_rule('^micropigmentacion-ojos/?$',   'index.php?virginia_tpl=ojos',     'top');
+    add_rewrite_rule('^micropigmentacion-labios/?$', 'index.php?virginia_tpl=labios',   'top');
+    add_rewrite_rule('^trabajos/?$',                 'index.php?virginia_tpl=trabajos', 'top');
+    add_rewrite_rule('^contacto/?$',                 'index.php?virginia_tpl=contacto', 'top');
+    add_rewrite_rule('^virginia/?$',                 'index.php?virginia_tpl=virginia', 'top');
+}
+add_action('init', 'virginia_service_rewrite_rules');
+
+// Registrar la variable de query personalizada
+add_filter('query_vars', function($vars) {
+    $vars[] = 'virginia_tpl';
+    return $vars;
+});
+
+// Flush rewrite rules una sola vez al activar o actualizar el tema
+add_action('init', function() {
+    if (get_option('virginia_rules_v') !== '3') {
+        flush_rewrite_rules(false);
+        update_option('virginia_rules_v', '3');
+    }
+}, 20);
+
+// Cargar la plantilla correcta según la query var
 add_filter('template_include', function($template) {
-    if (!is_page()) return $template;
-    $slug_map = [
-        'micropigmentacion-cejas'   => 'template-cejas.php',
-        'micropigmentacion-ojos'    => 'template-ojos.php',
-        'micropigmentacion-labios'  => 'template-labios.php',
-        'trabajos'                  => 'template-trabajos.php',
-        'contacto'                  => 'template-contacto.php',
-        'virginia'                  => 'template-quienes-somos.php',
+    $tpl_key = get_query_var('virginia_tpl');
+    $map = [
+        'cejas'    => 'template-cejas.php',
+        'ojos'     => 'template-ojos.php',
+        'labios'   => 'template-labios.php',
+        'trabajos' => 'template-trabajos.php',
+        'contacto' => 'template-contacto.php',
+        'virginia' => 'template-quienes-somos.php',
     ];
-    $slug = get_post_field('post_name', get_the_ID());
-    if (isset($slug_map[$slug])) {
-        $tpl = get_template_directory() . '/page-templates/' . $slug_map[$slug];
+    if ($tpl_key && isset($map[$tpl_key])) {
+        $tpl = get_template_directory() . '/page-templates/' . $map[$tpl_key];
         if (file_exists($tpl)) return $tpl;
+    }
+    // Fallback si la página existe en WP con el slug correcto
+    if (is_page()) {
+        $slug = get_post_field('post_name', get_the_ID());
+        $page_map = [
+            'micropigmentacion-cejas'   => 'template-cejas.php',
+            'micropigmentacion-ojos'    => 'template-ojos.php',
+            'micropigmentacion-labios'  => 'template-labios.php',
+            'trabajos'                  => 'template-trabajos.php',
+            'contacto'                  => 'template-contacto.php',
+            'virginia'                  => 'template-quienes-somos.php',
+        ];
+        if (isset($page_map[$slug])) {
+            $tpl = get_template_directory() . '/page-templates/' . $page_map[$slug];
+            if (file_exists($tpl)) return $tpl;
+        }
     }
     return $template;
 }, 99);

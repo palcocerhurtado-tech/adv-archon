@@ -13,7 +13,7 @@ $img = get_template_directory_uri() . '/img/';
     <div class="page-hero-content">
       <span class="label">Servicio</span>
       <h1>Micropigmentación<br>de cejas</h1>
-      <p>Ceja por ceja. Trazo por trazo. Diseñadas para tu cara, no para ninguna otra.</p>
+      <p>Ceja por ceja. Trazo por trazo. Diseñadas para tu rostro, no para ningún otro.</p>
     </div>
   </div>
 </section>
@@ -35,7 +35,7 @@ $img = get_template_directory_uri() . '/img/';
           La micropigmentación de cejas es una solución duradera y de aspecto completamente natural.
           No un tatuaje, no una máscara: un resultado que parece que siempre has tenido esas cejas.
         </p>
-        <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary">Pide tu valoración gratuita</a>
+        <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary">Pide tu cita</a>
       </div>
       <div class="content-img reveal reveal-delay-1">
         <img src="<?php echo $img; ?>micropigmentacion-cejas.jpg"
@@ -148,10 +148,10 @@ $img = get_template_directory_uri() . '/img/';
       <div class="proceso-step reveal">
         <div class="step-number">1</div>
         <div class="step-body">
-          <h4>Valoración gratuita</h4>
+          <h4>Primera cita</h4>
           <p>
             Hablamos de lo que quieres, veo tus cejas, tu tipo de piel, tu tono.
-            Sin compromiso de ningún tipo. Si no encaja, te lo digo con honestidad.
+            Si no encaja, te lo digo con honestidad.
           </p>
         </div>
       </div>
@@ -308,7 +308,7 @@ $img = get_template_directory_uri() . '/img/';
         <div class="faq-answer">
           <p>
             Sí, es uno de los casos en los que más impacto tiene el tratamiento. He trabajado
-            con muchas personas con alopecia areata y los resultados son muy bonitos.
+            con muchas personas con alopecia areata y los resultados son muy preciosos.
             Lo valoramos en consulta.
           </p>
         </div>
@@ -321,14 +321,14 @@ $img = get_template_directory_uri() . '/img/';
 <section class="cta-block">
   <div class="container">
     <div class="reveal">
-      <span class="label" style="color:var(--nude)">Sin compromiso</span>
+      <span class="label" style="color:var(--nude)">Da el primer paso</span>
       <h2>¿Hablamos de tus cejas?</h2>
-      <p>La primera consulta es gratuita. Sin presiones, sin venderte nada.</p>
+      <p>Sin presiones, sin venderte nada.</p>
       <div class="cta-actions">
         <a href="https://wa.me/34620834002?text=Hola%20Virginia%2C%20me%20gustar%C3%ADa%20pedir%20informaci%C3%B3n%20sobre%20micropigmentaci%C3%B3n%20de%20cejas."
            class="btn btn--whatsapp" target="_blank" rel="noopener">
           <svg viewBox="0 0 24 24" fill="currentColor"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347zM12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.122 1.524 5.863L.057 23.57a.75.75 0 00.918.918l5.702-1.467A11.94 11.94 0 0012 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.75A9.74 9.74 0 016.31 19.94l-.387-.23-3.384.87.886-3.295-.25-.404A9.71 9.71 0 012.25 12C2.25 6.615 6.615 2.25 12 2.25S21.75 6.615 21.75 12 17.385 21.75 12 21.75z"/></svg>
-          Pide tu valoración gratuita
+          Pide tu cita
         </a>
         <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--white">Formulario</a>
       </div>

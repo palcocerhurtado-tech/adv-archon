@@ -79,7 +79,7 @@ $img = get_template_directory_uri() . '/img/';
         <h4>Fuzzy (borroso)</h4>
         <p>
           Similar al sombreado pero con un aspecto más "desenfocado", como un delineado
-          aplicado con la yema del dedo. Muy de moda, queda muy bonito en ojos grandes.
+          aplicado con la yema del dedo. Muy en tendencia, queda muy precioso en ojos grandes.
         </p>
       </div>
       <div class="tecnica-card reveal reveal-delay-4">
@@ -126,8 +126,8 @@ $img = get_template_directory_uri() . '/img/';
       <div class="proceso-step reveal">
         <div class="step-number">1</div>
         <div class="step-body">
-          <h4>Consulta previa</h4>
-          <p>Hablamos de tu forma de ojo, el estilo que buscas y qué técnica encaja mejor. Gratuita y sin compromiso.</p>
+          <h4>Primera cita</h4>
+          <p>Hablamos de tu forma de ojo, el estilo que buscas y qué técnica encaja mejor.</p>
         </div>
       </div>
       <div class="proceso-step reveal">
@@ -199,9 +199,9 @@ $img = get_template_directory_uri() . '/img/';
 <section class="cta-block">
   <div class="container">
     <div class="reveal">
-      <span class="label" style="color:var(--nude)">Sin compromiso</span>
-      <h2>¿Te lo cuento todo sin compromiso?</h2>
-      <p>Escríbeme y hablamos de tu mirada. La primera consulta es gratuita.</p>
+      <span class="label" style="color:var(--nude)">Da el primer paso</span>
+      <h2>¿Hablamos de tu mirada?</h2>
+      <p>Escríbeme y hablamos de tu mirada.</p>
       <div class="cta-actions">
         <a href="https://wa.me/34620834002?text=Hola%20Virginia%2C%20me%20gustar%C3%ADa%20informaci%C3%B3n%20sobre%20micropigmentaci%C3%B3n%20de%20ojos."
            class="btn btn--whatsapp" target="_blank" rel="noopener">

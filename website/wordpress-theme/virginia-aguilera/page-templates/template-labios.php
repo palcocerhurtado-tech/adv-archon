@@ -24,7 +24,7 @@ $img = get_template_directory_uri() . '/img/';
     <div class="content-grid">
       <div class="content-text reveal">
         <span class="label">Por qué los labios</span>
-        <h2>Unos labios definidos cambian la cara entera.</h2>
+        <h2>Unos labios definidos cambian el rostro entero.</h2>
         <p>
           Con los años, el contorno de los labios tiende a difuminarse y perder definición.
           O simplemente tienes unos labios más finos de lo que te gustaría, o asimétricos,
@@ -37,7 +37,7 @@ $img = get_template_directory_uri() . '/img/';
         </p>
         <p>
           El resultado es tan natural que la gente no va a saber qué has hecho.
-          Solo van a notar que estás más guapa.
+          Solo van a notar que estás más radiante.
         </p>
         <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary">Reserva tu cita</a>
       </div>
@@ -138,8 +138,8 @@ $img = get_template_directory_uri() . '/img/';
       <div class="proceso-step reveal">
         <div class="step-number">1</div>
         <div class="step-body">
-          <h4>Consulta gratuita</h4>
-          <p>Hablamos de tu labio, el tono que buscas, las correcciones que quieres. Sin coste y sin compromiso.</p>
+          <h4>Primera cita</h4>
+          <p>Hablamos de tu labio, el tono que buscas, las correcciones que quieres.</p>
         </div>
       </div>
       <div class="proceso-step reveal">
@@ -210,7 +210,7 @@ $img = get_template_directory_uri() . '/img/';
     <div class="reveal">
       <span class="label" style="color:var(--nude)">Da el paso</span>
       <h2>Reserva tu cita.</h2>
-      <p>Primera consulta gratuita, sin compromisos. Te respondo lo antes posible.</p>
+      <p>Escríbeme y lo hablamos. Te respondo lo antes posible.</p>
       <div class="cta-actions">
         <a href="https://wa.me/34620834002?text=Hola%20Virginia%2C%20me%20gustar%C3%ADa%20informaci%C3%B3n%20sobre%20micropigmentaci%C3%B3n%20de%20labios."
            class="btn btn--whatsapp" target="_blank" rel="noopener">

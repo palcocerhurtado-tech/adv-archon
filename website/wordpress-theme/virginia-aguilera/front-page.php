@@ -16,7 +16,7 @@ $img = get_template_directory_uri() . '/img/';
       <h1>Tu mirada,<br><em>perfecta. Cada día.</em></h1>
       <p class="hero-subtitle">
         Cejas, ojos y labios con la técnica más precisa y el trato más cercano.
-        Sin compromiso, sin clínicas frías: solo Virginia y tú hablando de lo que quieres.
+        Sin clínicas frías: solo Virginia y tú hablando de lo que quieres.
       </p>
       <div class="hero-actions">
         <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary">Pide tu cita</a>
@@ -44,7 +44,7 @@ $img = get_template_directory_uri() . '/img/';
         <div class="service-card-overlay"></div>
         <div class="service-card-body">
           <h3>Cejas</h3>
-          <p>Pelo a pelo, sombreado o técnica combinada. Diseñamos la ceja perfecta para tu cara.</p>
+          <p>Pelo a pelo, sombreado o técnica combinada. Diseñamos la ceja perfecta para tu rostro.</p>
           <a href="<?php echo home_url('/micropigmentacion-cejas/'); ?>" class="btn btn--outline" style="border-color:rgba(255,255,255,0.5);color:#fff">Saber más</a>
         </div>
       </div>
@@ -105,7 +105,8 @@ $img = get_template_directory_uri() . '/img/';
           <circle cx="20" cy="20" r="19" stroke="#c9a96e" stroke-width="1.5"/>
           <path d="M20 13a4 4 0 100 8 4 4 0 000-8zm-8 14c0-4 3.6-7 8-7s8 3 8 7" stroke="#c9a96e" stroke-width="1.8" stroke-linecap="round"/>
         </svg>
-        <span>Consulta inicial gratuita</span>
+        <span>Atención personalizada</span>
+
       </div>
     </div>
   </div>
@@ -268,7 +269,7 @@ $img = get_template_directory_uri() . '/img/';
           que la persona que se sienta frente a mí se vaya con exactamente lo que quería.
         </p>
         <p>
-          Primera consulta sin coste. Sin presiones. Solo tú contándome lo que quieres
+          Sin presiones. Solo tú contándome lo que buscas
           y yo diciéndote con honestidad si puedo dártelo y cómo.
         </p>
         <a href="<?php echo home_url('/virginia/'); ?>" class="btn btn--primary" style="margin-top:8px">Conoce mi historia</a>
@@ -337,8 +338,7 @@ $img = get_template_directory_uri() . '/img/';
       <span class="label" style="color:var(--nude)">Damos el primer paso</span>
       <h2>¿Hablamos?</h2>
       <p>
-        Sin compromiso, sin formularios eternos. Escríbeme por WhatsApp o rellena el formulario
-        y te respondo lo antes posible. La primera consulta siempre es gratuita.
+        Escríbeme por WhatsApp o rellena el formulario y te respondo lo antes posible.
       </p>
       <div class="cta-actions">
         <a href="https://wa.me/34620834002?text=Hola%20Virginia%2C%20me%20gustar%C3%ADa%20pedir%20informaci%C3%B3n%20sobre%20micropigmentaci%C3%B3n."

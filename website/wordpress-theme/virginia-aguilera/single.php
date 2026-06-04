@@ -36,7 +36,7 @@ get_header();
   <?php the_content(); ?>
 
   <div style="margin-top:40px;padding-top:32px;border-top:1px solid var(--border)">
-    <p style="margin-bottom:20px;font-size:0.9rem;color:var(--text-light)">¿Tienes dudas? Consúltame sin compromiso.</p>
+    <p style="margin-bottom:20px;font-size:0.9rem;color:var(--text-light)">¿Tienes dudas? Escríbeme.</p>
     <div style="display:flex;gap:14px;flex-wrap:wrap">
       <a href="<?php echo home_url('/trabajos/'); ?>" class="btn btn--outline">Ver trabajos</a>
       <a href="https://wa.me/34620834002?text=Hola%20Virginia%2C%20me%20gustar%C3%ADa%20pedir%20informaci%C3%B3n."

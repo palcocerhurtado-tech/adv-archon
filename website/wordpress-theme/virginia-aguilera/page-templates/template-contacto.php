@@ -18,10 +18,9 @@ if ($form_status === 'error') {
   <div class="container">
     <div class="text-center reveal">
       <span class="label">Hablemos</span>
-      <h1>Escríbeme sin compromiso.</h1>
+      <h1>Escríbeme.</h1>
       <p style="font-size:1.1rem;margin:16px auto 0;max-width:540px">
-        Te respondo lo antes posible. La primera consulta siempre es gratuita.
-        Sin presiones, sin formularios eternos.
+        Escríbeme por WhatsApp o rellena el formulario y te respondo lo antes posible.
       </p>
     </div>
   </div>
@@ -85,7 +84,7 @@ if ($form_status === 'error') {
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="10"/><path d="M12 8v4l3 3"/></svg>
           <div>
             <h4>Consulta previa</h4>
-            <p>La primera consulta es <strong>gratuita y sin compromiso</strong>.<br>Escríbeme y quedamos.</p>
+            <p>Escríbeme y quedamos.</p>
           </div>
         </div>
       </div>
@@ -142,7 +141,7 @@ if ($form_status === 'error') {
 
           <div class="form-group">
             <label for="mensaje">Cuéntame *</label>
-            <textarea id="mensaje" name="mensaje" placeholder="Escríbeme lo que quieras. Sin compromisos." required></textarea>
+            <textarea id="mensaje" name="mensaje" placeholder="Cuéntame lo que buscas." required></textarea>
           </div>
 
           <div class="form-group">

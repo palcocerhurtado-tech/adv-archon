@@ -34,7 +34,7 @@ $img = get_template_directory_uri() . '/img/';
         <p>
           He formado a otras profesionales. Distribuyo pigmentos de alta calidad.
           He competido a nivel nacional. Pero lo que me sigue haciendo levantarme con ganas
-          cada mañana es lo mismo de siempre: ver la cara que pone una persona cuando
+          cada mañana es lo mismo de siempre: ver la expresión de una persona cuando
           se mira al espejo por primera vez después de una sesión.
         </p>
         <p>
@@ -43,7 +43,7 @@ $img = get_template_directory_uri() . '/img/';
           exactamente lo que esa persona esperaba, o mejor.
         </p>
 
-        <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary" style="margin-top:8px">Ven a conocerme — primera consulta gratuita</a>
+        <a href="<?php echo home_url('/contacto/'); ?>" class="btn btn--primary" style="margin-top:8px">Ven a conocerme</a>
       </div>
 
     </div>
@@ -180,7 +180,7 @@ $img = get_template_directory_uri() . '/img/';
     <div class="reveal">
       <span class="label" style="color:var(--nude)">Nos conocemos</span>
       <h2>Ven a conocerme.</h2>
-      <p>La primera consulta es gratuita. Sin compromiso, sin presiones. Solo hablamos.</p>
+      <p>Sin presiones. Solo hablamos.</p>
       <div class="cta-actions">
         <a href="https://wa.me/34620834002?text=Hola%20Virginia%2C%20me%20gustar%C3%ADa%20conocerte%20y%20pedir%20informaci%C3%B3n."
            class="btn btn--whatsapp" target="_blank" rel="noopener">

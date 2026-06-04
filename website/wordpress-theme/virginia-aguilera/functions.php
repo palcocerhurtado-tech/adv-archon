@@ -233,7 +233,7 @@ function virginia_create_blog_posts() {
 </ul>
 
 <h2>Mi recomendación</h2>
-<p>Si llevas tiempo dándole vueltas, lo más probable es que ya estés lista. Pide una consulta gratuita, hablamos de lo que quieres, y vemos si tiene sentido hacerlo ahora.</p>',
+<p>Si llevas tiempo dándole vueltas, lo más probable es que ya estés lista. Escríbeme, hablamos de lo que buscas, y vemos si tiene sentido hacerlo ahora.</p>',
         ],
         [
             'title'   => 'Cómo la micropigmentación puede cambiar tu cara (y tu mañana).',

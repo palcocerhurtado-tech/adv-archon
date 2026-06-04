@@ -106,7 +106,6 @@ $img = get_template_directory_uri() . '/img/';
           <path d="M20 13a4 4 0 100 8 4 4 0 000-8zm-8 14c0-4 3.6-7 8-7s8 3 8 7" stroke="#c9a96e" stroke-width="1.8" stroke-linecap="round"/>
         </svg>
         <span>Atención personalizada</span>
-
       </div>
     </div>
   </div>

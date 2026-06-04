@@ -13,7 +13,7 @@
              onerror="this.style.display='none'">
         <p>Especialista en micropigmentación facial en Zaragoza. Cejas, ojos y labios con la precisión y el trato personalizado que mereces.</p>
         <div class="footer-social">
-          <a href="https://www.instagram.com/vir_micropigmentacion_zaragoza" target="_blank" rel="noopener" aria-label="Instagram">
+          <a href="https://www.instagram.com/vir_micropigmentacion_zaragoza/?hl=es" target="_blank" rel="noopener" aria-label="Instagram">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="2" y="2" width="20" height="20" rx="5" ry="5"/><circle cx="12" cy="12" r="4"/><circle cx="17.5" cy="6.5" r="1" fill="currentColor" stroke="none"/></svg>
           </a>
           <a href="https://wa.me/34620834002" target="_blank" rel="noopener" aria-label="WhatsApp">

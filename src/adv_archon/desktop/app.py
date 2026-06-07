@@ -1927,6 +1927,19 @@ def launch_desktop_app(
                 ),
             )
             store.update(updated)
+            from adv_archon.core.office_memory import OfficeMemoryStore
+
+            office_store = OfficeMemoryStore(self._studio_data_dir() / "office_memory.db")
+            try:
+                office_store.record_step_decision(
+                    municipality=exp.municipality,
+                    step_code=step_code,
+                    action=action,
+                    label=message,
+                    source="professional_review",
+                )
+            finally:
+                office_store.close()
             self._last_exp_label = updated.title
             self._refresh_status_bar()
             self._show_professional_review(self._professional_review_filter)
@@ -4166,7 +4179,10 @@ def launch_desktop_app(
                             build_expediente_autopilot,
                         )
 
-                        initial_autopilot = build_expediente_autopilot(self._exp)
+                        initial_autopilot = build_expediente_autopilot(
+                            self._exp,
+                            office_memory_snapshot=self._office_memory_snapshot(),
+                        )
                         AutopilotStore(self._data_root / "autopilot.db").save_run(
                             initial_autopilot,
                             run_id=self._run_id,
@@ -4232,6 +4248,7 @@ def launch_desktop_app(
                         plan = build_expediente_agent_plan(
                             self._exp,
                             include_history=False,
+                            office_policy=self._office_policy(),
                         )
                         review_step = next(
                             (
@@ -4254,6 +4271,7 @@ def launch_desktop_app(
                         final_plan = build_expediente_agent_plan(
                             self._exp,
                             include_history=False,
+                            office_policy=self._office_policy(),
                         )
                         final_status = (
                             "requiere_revision"
@@ -4429,6 +4447,7 @@ def launch_desktop_app(
                     plan = build_expediente_agent_plan(
                         self._exp,
                         include_history=False,
+                        office_policy=self._office_policy(),
                     )
                     step = next((item for item in plan.steps if item.code == step_code), None)
                     if step is None:
@@ -4474,6 +4493,22 @@ def launch_desktop_app(
                         ),
                     )
                     self.progress.emit(self._exp, message)
+
+                def _office_memory_snapshot(self) -> object:
+                    from adv_archon.core.office_memory import OfficeMemoryStore
+
+                    store = OfficeMemoryStore(self._data_root / "office_memory.db")
+                    try:
+                        return store.snapshot()
+                    finally:
+                        store.close()
+
+                def _office_policy(self) -> object | None:
+                    municipality = str(getattr(self._exp, "municipality", "") or "").strip()
+                    if not municipality:
+                        return None
+                    snapshot = self._office_memory_snapshot()
+                    return snapshot.policy_for(municipality)
 
             class _ExpedienteThreadBridge(QObject):
                 geo_resolved = _Signal(object)
@@ -4823,6 +4858,21 @@ def launch_desktop_app(
                     ),
                 )
                 store.update(updated)
+                from adv_archon.core.office_memory import OfficeMemoryStore
+
+                office_store = OfficeMemoryStore(
+                    self._studio_data_dir() / "office_memory.db"
+                )
+                try:
+                    office_store.record_step_decision(
+                        municipality=exp.municipality,
+                        step_code=step_code,
+                        action=action,
+                        label=message,
+                        source="expediente_panel",
+                    )
+                finally:
+                    office_store.close()
                 list_panel.populate(store.list_all())
                 detail_panel.load_expediente(updated)
                 self._last_exp_label = updated.title

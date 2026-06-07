@@ -14,6 +14,7 @@ from adv_archon.core.expediente_autopilot import (
     build_expediente_autopilot,
     build_office_memory,
 )
+from adv_archon.core.office_memory import OfficeMemoryStore
 
 
 def test_autopilot_detects_missing_inputs_and_permissions(tmp_path: Path) -> None:
@@ -116,3 +117,54 @@ def test_office_memory_summarizes_municipalities_and_warnings(tmp_path: Path) ->
 
     assert memory.municipalities == ("Madrid", "Zaragoza")
     assert memory.recurring_warnings[0] == "Inundabilidad"
+
+
+def test_autopilot_uses_office_memory_for_recurrent_municipal_policy(
+    tmp_path: Path,
+) -> None:
+    store = ExpedienteStore(tmp_path / "expedientes.db")
+    exp = store.create(
+        title="PGOU preliminar con criterio previo",
+        address="Calle Mayor 24",
+        municipality="Pamplona",
+        cadastral_ref="2807901VK4720G0001ZX",
+    )
+    exp = replace(
+        exp,
+        site_context=json.dumps(
+            {
+                "municipality": "Pamplona",
+                "cadastral_ref": "2807901VK4720G0001ZX",
+                "parcel_detail": {"surface_m2": 80},
+                "flood_zone": {"in_flood_zone": False},
+                "natura2000": {"in_protected_area": False},
+                "costas": {"in_public_domain": False},
+                "carreteras": {"in_affection_zone": False},
+                "parcel_zoning": {"summary": "Zona residencial preliminar."},
+                "legal_checks": [
+                    {"title": "PGOU municipal", "status": "pending_review"}
+                ],
+            }
+        ),
+    )
+    office_store = OfficeMemoryStore(tmp_path / "office_memory.db")
+    try:
+        office_store.record_step_decision(
+            municipality="Pamplona",
+            step_code="pgou-normativa",
+            action="validated",
+            label="Validado por arquitecto.",
+        )
+        snapshot = office_store.snapshot()
+    finally:
+        office_store.close()
+
+    autopilot = build_expediente_autopilot(
+        exp,
+        office_memory_snapshot=snapshot,
+    )
+    pgou_task = next(task for task in autopilot.tasks if task.code == "pgou-normativa")
+
+    assert autopilot.office_memory.policies[0].validated_pgou is True
+    assert "criterio municipal previo" in pgou_task.question
+    assert "criterio previo del despacho" in pgou_task.next_action

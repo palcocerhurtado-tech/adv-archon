@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from adv_archon.core.agentic_studio import build_agentic_studio_section
 from adv_archon.core.architect_brain import build_architect_brain_section
 
 
@@ -19,7 +20,7 @@ def build_system_prompt(
     base_system_prompt: str,
     *,
     paths: PersonalityPaths,
-    token_budget: int = 1200,
+    token_budget: int = 2200,
 ) -> str:
     """Build the effective system prompt with the stable local-first operating contract.
 
@@ -31,8 +32,11 @@ def build_system_prompt(
     identity_block = _render_core_identity(core_identity)
     state_block = _render_adaptive_state(paths.state_db_path)
     architect_block = build_architect_brain_section()
+    agentic_block = build_agentic_studio_section()
     extra = "\n\n".join(
-        block for block in (architect_block, identity_block, state_block) if block
+        block
+        for block in (architect_block, agentic_block, identity_block, state_block)
+        if block
     )
     return _truncate_to_budget(
         f"{base_system_prompt.rstrip()}\n\n{extra}",

@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from typing import Any
 
 from adv_archon.core.expediente_quality import evaluate_expediente_quality
+from adv_archon.core.office_memory import MunicipalityPolicy
 
 AGENT_STEP_STATUS_LABELS = {
     "pending": "Pendiente",
@@ -300,6 +301,7 @@ def build_expediente_agent_plan(
     expediente: Any,
     *,
     include_history: bool = True,
+    office_policy: MunicipalityPolicy | None = None,
 ) -> AgentPlan:
     """Build the guided urban-planning agent plan for one expediente.
 
@@ -336,7 +338,7 @@ def build_expediente_agent_plan(
         _location_step(address, municipality, has_coords, status),
         _catastro_step(cadastral_ref, site_context),
         _sectorial_step(site_context),
-        _pgou_step(municipality, site_context, pack),
+        _pgou_step(municipality, site_context, pack, office_policy),
         _plan_document_step(has_plan),
         _dictamen_step(has_analysis, has_plan, site_context, analysis),
         _architect_review_step(review.status, review.label),
@@ -354,6 +356,7 @@ def build_expediente_agent_plan(
         _build_questions(
             has_plan=has_plan,
             pack_status=pack.status if pack else "",
+            office_policy=office_policy,
             legal_checks=legal_checks,
             review_status=review.status,
             site_context=site_context,
@@ -486,7 +489,12 @@ def _sectorial_step(site_context: dict[str, Any]) -> AgentPlanStep:
     )
 
 
-def _pgou_step(municipality: str, site_context: dict[str, Any], pack: Any) -> AgentPlanStep:
+def _pgou_step(
+    municipality: str,
+    site_context: dict[str, Any],
+    pack: Any,
+    office_policy: MunicipalityPolicy | None,
+) -> AgentPlanStep:
     zoning = _loads_dict(site_context.get("parcel_zoning"))
     if pack and pack.status == "validado" and zoning:
         status = "completed"
@@ -505,6 +513,14 @@ def _pgou_step(municipality: str, site_context: dict[str, Any], pack: Any) -> Ag
         if pack
         else municipality or "Municipio pendiente"
     )
+    has_office_pgou = bool(office_policy and office_policy.validated_pgou)
+    if has_office_pgou and status != "completed":
+        assert office_policy is not None
+        inference = (
+            f"{inference} El despacho tiene criterio previo validado para "
+            f"{office_policy.municipality}; debe reutilizarse con comprobación de "
+            "fecha, fuente y alcance."
+        )
     return AgentPlanStep(
         code="pgou-normativa",
         title="Buscar normativa PGOU",
@@ -515,6 +531,8 @@ def _pgou_step(municipality: str, site_context: dict[str, Any], pack: Any) -> Ag
         confidence="alta" if status == "completed" else "media" if status != "blocked" else "baja",
         recommended_action=(
             "Confirmar ordenanza exacta en planos/visor municipal."
+            if status == "needs_review" and not has_office_pgou
+            else "Revisar criterio previo del despacho y confirmar que sigue vigente."
             if status == "needs_review"
             else "Cargar o validar paquete municipal antes del informe."
             if status in {"pending", "blocked"}
@@ -611,6 +629,7 @@ def _build_questions(
     *,
     has_plan: bool,
     pack_status: str,
+    office_policy: MunicipalityPolicy | None,
     legal_checks: list[Any],
     review_status: str,
     site_context: dict[str, Any],
@@ -632,9 +651,17 @@ def _build_questions(
             AgentQuestion(
                 code="pgou-preliminar",
                 question=(
-                    "El PGOU está preliminar. ¿Quieres marcar el informe como no validado?"
+                    "El PGOU está preliminar. ¿Quieres usar el criterio previo del despacho "
+                    "y mantener el informe como no validado?"
+                    if office_policy and office_policy.validated_pgou
+                    else "El PGOU está preliminar. ¿Quieres marcar el informe como no validado?"
                 ),
-                reason="La zonificación exacta requiere plano/visor municipal validado.",
+                reason=(
+                    "Hay memoria de despacho, pero la zonificación exacta sigue requiriendo "
+                    "plano/visor municipal validado."
+                    if office_policy and office_policy.validated_pgou
+                    else "La zonificación exacta requiere plano/visor municipal validado."
+                ),
             )
         )
     elif not pack_status:

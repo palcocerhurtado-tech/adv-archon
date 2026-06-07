@@ -718,6 +718,22 @@ if PYSIDE6_AVAILABLE:
                         f"{escape(', '.join(autopilot.office_memory.municipalities))}"
                         "</p>"
                     )
+                if autopilot.office_memory.policies:
+                    policy_bits = []
+                    for policy in autopilot.office_memory.policies[:3]:
+                        parts = [policy.municipality]
+                        if policy.validated_pgou:
+                            parts.append("PGOU revisado")
+                        if policy.accepted_warnings:
+                            parts.append(
+                                "avisos aceptados: "
+                                + ", ".join(policy.accepted_warnings[:2])
+                            )
+                        policy_bits.append(" · ".join(parts))
+                    lines.append(
+                        "<p style='font-size:10px;color:#555;'><b>Criterios recurrentes:</b> "
+                        f"{escape(' | '.join(policy_bits))}</p>"
+                    )
             except Exception:
                 pass
 

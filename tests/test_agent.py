@@ -1310,6 +1310,30 @@ def test_deterministic_document_response_uses_compact_prompt(tmp_path: Path) -> 
     assert "[... contenido intermedio omitido para agilizar el resumen ...]" in rendered_prompt
 
 
+def test_local_general_final_response_does_not_force_pgou_refusal(
+    tmp_path: Path,
+) -> None:
+    llm = RecordingLLM()
+    agent = Agent(
+        llm=llm,  # type: ignore[arg-type]
+        system_prompt="system\n\n## Agentic Studio",
+        session=SessionStore(tmp_path),
+        project_root=tmp_path,
+        extra_tools=_build_agent(tmp_path)._tools.values(),
+    )
+
+    response = agent._final_response(
+        "hazme un documento maquetado para una entrega de clase",
+        _build_state(tmp_path),
+        tool_observations=[],
+        on_chunk=None,
+    )
+
+    assert response.text == "resumen listo"
+    assert "## Agentic Studio" in (llm.system_prompt or "")
+    assert "NO tienes normativa indexada" not in (llm.system_prompt or "")
+
+
 def test_deterministic_related_documents_response_lists_candidates(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
     agent._session.append(

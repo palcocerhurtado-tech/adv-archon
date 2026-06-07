@@ -18,6 +18,11 @@ from adv_archon.core.agent_plan import (
     load_agent_history,
 )
 from adv_archon.core.expediente_quality import evaluate_expediente_quality
+from adv_archon.core.office_memory import (
+    MunicipalityPolicy,
+    OfficeMemorySnapshot,
+    snapshot_from_expedientes,
+)
 
 PERMISSION_AUTOMATIC = "automatic"
 PERMISSION_CONFIRM = "requires_confirmation"
@@ -128,6 +133,7 @@ class OfficeMemory:
     recurring_warnings: tuple[str, ...]
     validated_decisions: int
     preferred_report_style: str
+    policies: tuple[MunicipalityPolicy, ...] = ()
 
     def as_payload(self) -> dict[str, Any]:
         return {
@@ -135,6 +141,7 @@ class OfficeMemory:
             "recurring_warnings": list(self.recurring_warnings),
             "validated_decisions": self.validated_decisions,
             "preferred_report_style": self.preferred_report_style,
+            "policies": [policy.as_payload() for policy in self.policies],
         }
 
 
@@ -315,6 +322,7 @@ def build_expediente_autopilot(
     expediente: Any,
     *,
     office_expedientes: Iterable[Any] = (),
+    office_memory_snapshot: OfficeMemorySnapshot | None = None,
 ) -> ExpedienteAutopilot:
     """Build the local-first Autopilot view for one expediente.
 
@@ -322,12 +330,17 @@ def build_expediente_autopilot(
     agent_plan and quality checks. It does not invent a second workflow store:
     execution remains visible through the persistent agent history.
     """
-    plan = build_expediente_agent_plan(expediente)
+    office_expedientes_tuple = tuple(office_expedientes)
+    if office_memory_snapshot is None:
+        office_memory_snapshot = snapshot_from_expedientes(list(office_expedientes_tuple))
+    municipality = str(getattr(expediente, "municipality", "") or "").strip()
+    office_policy = office_memory_snapshot.policy_for(municipality) if municipality else None
+    plan = build_expediente_agent_plan(expediente, office_policy=office_policy)
     quality = evaluate_expediente_quality(expediente)
     site_context = _loads_dict(getattr(expediente, "site_context", ""))
     history = load_agent_history(getattr(expediente, "agent_history", ""))
     signals = _build_signals(expediente, site_context, plan.questions, quality)
-    tasks = _build_tasks(expediente, plan.steps, quality)
+    tasks = _build_tasks(expediente, plan.steps, quality, office_policy=office_policy)
     inbox = _build_inbox(expediente, plan.questions, tasks, quality)
     completed = sum(1 for task in tasks if task.status == "completed")
     progress = int((completed / len(tasks)) * 100) if tasks else 0
@@ -346,16 +359,24 @@ def build_expediente_autopilot(
         inbox=tuple(inbox),
         questions=plan.questions,
         permissions=_permission_rules(),
-        office_memory=build_office_memory(office_expedientes),
+        office_memory=build_office_memory(
+            office_expedientes_tuple,
+            snapshot=office_memory_snapshot,
+        ),
         recent_events=history[-8:],
     )
 
 
-def build_office_memory(expedientes: Iterable[Any]) -> OfficeMemory:
+def build_office_memory(
+    expedientes: Iterable[Any],
+    *,
+    snapshot: OfficeMemorySnapshot | None = None,
+) -> OfficeMemory:
     municipalities: Counter[str] = Counter()
     warnings: Counter[str] = Counter()
     validated = 0
-    for exp in expedientes:
+    expedientes_tuple = tuple(expedientes)
+    for exp in expedientes_tuple:
         municipality = str(getattr(exp, "municipality", "") or "").strip()
         if municipality:
             municipalities[municipality] += 1
@@ -381,13 +402,27 @@ def build_office_memory(expedientes: Iterable[Any]) -> OfficeMemory:
                 and str(item.get("status") or "")
                 in {"validated", "accepted_warning", "included"}
             )
+    snapshot = snapshot or snapshot_from_expedientes(list(expedientes_tuple))
     return OfficeMemory(
-        municipalities=tuple(name for name, _ in municipalities.most_common(5)),
-        recurring_warnings=tuple(name for name, _ in warnings.most_common(5)),
-        validated_decisions=validated,
-        preferred_report_style=(
-            "Informe preliminar de viabilidad urbanística con trazabilidad fuerte."
-        ),
+        municipalities=tuple(
+            dict.fromkeys(
+                [
+                    *(name for name, _ in municipalities.most_common(5)),
+                    *snapshot.municipalities[:5],
+                ]
+            )
+        )[:5],
+        recurring_warnings=tuple(
+            dict.fromkeys(
+                [
+                    *(name for name, _ in warnings.most_common(5)),
+                    *snapshot.recurring_warnings[:5],
+                ]
+            )
+        )[:5],
+        validated_decisions=validated + snapshot.validated_decisions,
+        preferred_report_style=snapshot.preferred_report_style,
+        policies=snapshot.policies,
     )
 
 
@@ -481,6 +516,8 @@ def _build_tasks(
     expediente: Any,
     steps: tuple[Any, ...],
     quality: Any,
+    *,
+    office_policy: MunicipalityPolicy | None,
 ) -> list[AutopilotTask]:
     step_map = {step.code: step for step in steps}
     has_quality_score = getattr(expediente, "quality_score", None) is not None
@@ -517,7 +554,12 @@ def _build_tasks(
                 else PERMISSION_CONFIRM
             ),
             source="Biblioteca PGOU local + zonificación preliminar",
-            question="Confirmar que el PGOU preliminar no se presenta como validado.",
+            question=(
+                "Hay criterio municipal previo del despacho. ¿Quieres reutilizarlo "
+                "manteniendo advertencia de PGOU no validado oficialmente?"
+                if office_policy and office_policy.validated_pgou
+                else "Confirmar que el PGOU preliminar no se presenta como validado."
+            ),
         ),
         _task_from_step(
             step_map.get("plan-document"),

@@ -1807,7 +1807,8 @@ class Agent:
         has_knowledge = bool(state.knowledge_hits)
         has_tool_results = bool(tool_observations)
         has_grounded_context = has_knowledge or has_tool_results
-        if is_local:
+        requires_normative_grounding = state.intent.category == "compliance"
+        if is_local and requires_normative_grounding:
             grounding_block = (
                 "## NORMATIVA DISPONIBLE EN CONTEXTO\n"
                 "Tienes fragmentos de normativa indexada en el contexto. "
@@ -1837,9 +1838,10 @@ class Agent:
                 f"{packet.render_compact()}"
             )
         else:
+            packet_text = packet.render_compact() if is_local else packet.render_for_model()
             final_prompt = (
                 f"{self._system_prompt}\n\n"
-                f"{packet.render_for_model()}\n\n"
+                f"{packet_text}\n\n"
                 f"{architect_context}\n\n"
                 "Write the final answer for the user. "
                 "Use the tool results already in the conversation when relevant. "

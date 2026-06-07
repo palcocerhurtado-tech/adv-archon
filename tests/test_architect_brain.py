@@ -124,6 +124,7 @@ def test_personality_prompt_includes_architect_brain_with_empty_identity(
 
     assert prompt.startswith("Base system")
     assert "## Architect Brain" in prompt
+    assert "## Agentic Studio" in prompt
     assert "gestor de expediente" in prompt
 
 

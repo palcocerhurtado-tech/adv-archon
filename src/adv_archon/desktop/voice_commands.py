@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from adv_archon.core.architect_brain import build_architect_brain_section
+
 
 @dataclass(frozen=True, slots=True)
 class VoiceIntent:
@@ -74,6 +76,7 @@ def classify_voice_intent(text: str) -> VoiceIntent | None:
 
 def build_voice_system_prompt(expediente_context: str = "") -> str:
     context = expediente_context.strip()
+    architect_brain = build_architect_brain_section(compact=True)
     base = (
         "Eres ADV ARCHON en modo voz local dentro de una app de escritorio para "
         "despachos de arquitectura. Responde siempre en español, breve y con criterio. "
@@ -81,6 +84,7 @@ def build_voice_system_prompt(expediente_context: str = "") -> str:
         "Devuelve dos bloques: 'VOZ:' con una respuesta de una o dos frases para leer "
         "en alto, y 'DETALLE:' con los pasos, riesgos o fuentes útiles para pantalla."
     )
+    base = f"{base}\n\n{architect_brain}"
     if not context:
         return base
     return f"{base}\n\nContexto del expediente activo:\n{context}"

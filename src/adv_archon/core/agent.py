@@ -11,6 +11,7 @@ from pathlib import Path
 from threading import Event
 from typing import Any
 
+from adv_archon.core.architect_brain import build_expediente_brain_brief
 from adv_archon.core.context import RuntimeContext
 from adv_archon.core.context_packets import ContextPacket, ToolObservation
 from adv_archon.core.evals import (
@@ -453,6 +454,7 @@ class Agent:
         self._memory_store = memory_store
         self._knowledge_store = knowledge_store
         self._expediente_id: str | None = expediente_id
+        self._active_expediente: Any | None = None
         self._usage_callback = usage_callback
         self._auto_recall_limit = auto_recall_limit
         self._auto_knowledge_limit = auto_knowledge_limit
@@ -820,8 +822,10 @@ class Agent:
         """Switch active expediente context and auto-snapshot it into memory."""
         if expediente is None:
             self._expediente_id = None
+            self._active_expediente = None
             return
         self._expediente_id = str(getattr(expediente, "id", "") or "")
+        self._active_expediente = expediente
         if self._expediente_id and self._memory_store is not None:
             self._auto_remember_expediente(expediente)
 
@@ -923,11 +927,15 @@ class Agent:
             tool_observations=[],
         )
         if self._llm.mode == "local":
+            architect_context = self._active_expediente_brain_context()
             # Minimal planner prompt — large manifests slow down local inference.
             tool_names = list(self._tools.keys())
             planner_prompt = (
                 f"Task: {user_input}\n"
+                f"{architect_context}\n"
                 f"Tools available: {', '.join(tool_names)}\n"
+                "Architect routing: si la consulta trata del expediente activo, "
+                "usa ese contexto y no inventes normativa ni validaciones.\n"
                 "Return JSON only:\n"
                 '{"kind":"answer"} or {"kind":"tool","tool_name":"<name>","arguments":{}}\n'
             )
@@ -1794,6 +1802,7 @@ class Agent:
             plan={"kind": "answer", "step_summary": "responder"},
             tool_observations=tool_observations,
         )
+        architect_context = self._active_expediente_brain_context()
         is_local = self._llm.mode == "local"
         has_knowledge = bool(state.knowledge_hits)
         has_tool_results = bool(tool_observations)
@@ -1824,12 +1833,14 @@ class Agent:
                 "Nunca lo parafrasees.\n"
                 "4. Si no tienes el dato, dilo explícitamente. Prohibido inventar.\n\n"
                 f"{grounding_block}"
+                f"{architect_context}\n\n"
                 f"{packet.render_compact()}"
             )
         else:
             final_prompt = (
                 f"{self._system_prompt}\n\n"
                 f"{packet.render_for_model()}\n\n"
+                f"{architect_context}\n\n"
                 "Write the final answer for the user. "
                 "Use the tool results already in the conversation when relevant. "
                 "When useful, mention what context you used in one short line. "
@@ -1870,6 +1881,11 @@ class Agent:
         )
         self._record_usage("assistant", response)
         return response
+
+    def _active_expediente_brain_context(self) -> str:
+        if self._active_expediente is None:
+            return ""
+        return build_expediente_brain_brief(self._active_expediente)
 
     def _deterministic_meta_response(
         self,

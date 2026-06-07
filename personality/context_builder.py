@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from adv_archon.core.architect_brain import build_architect_brain_section
+
 
 @dataclass(frozen=True, slots=True)
 class PersonalityPaths:
@@ -19,7 +21,7 @@ def build_system_prompt(
     paths: PersonalityPaths,
     token_budget: int = 1200,
 ) -> str:
-    """Build the effective system prompt without changing behavior for empty identity.
+    """Build the effective system prompt with the stable local-first operating contract.
 
     FASE 2 intentionally avoids LLM-generated summaries. It reads a small, deterministic
     snapshot from SQLite so local models do not receive raw personality state.
@@ -28,9 +30,10 @@ def build_system_prompt(
     core_identity = _load_core_identity(paths.core_identity_path)
     identity_block = _render_core_identity(core_identity)
     state_block = _render_adaptive_state(paths.state_db_path)
-    extra = "\n\n".join(block for block in (identity_block, state_block) if block)
-    if not extra:
-        return base_system_prompt
+    architect_block = build_architect_brain_section()
+    extra = "\n\n".join(
+        block for block in (architect_block, identity_block, state_block) if block
+    )
     return _truncate_to_budget(
         f"{base_system_prompt.rstrip()}\n\n{extra}",
         token_budget=token_budget,

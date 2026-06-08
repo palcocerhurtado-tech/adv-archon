@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-import xml.etree.ElementTree as ET
+import xml.etree.ElementTree as ET  # type: ignore[import-not-found]
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import quote_plus

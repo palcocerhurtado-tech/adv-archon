@@ -46,6 +46,7 @@ from adv_archon.tools.pem import tool_calcular_pem
 from adv_archon.tools.personal import PersonalTools, build_personal_tool_specs
 from adv_archon.tools.python_sandbox import PythonSandboxTool, build_python_tool_specs
 from adv_archon.tools.shell import AutoModeManager, ShellPolicy, ShellTool, build_shell_tool_specs
+from adv_archon.tools.spreadsheet import build_spreadsheet_tool_specs
 from adv_archon.tools.task_tools import TaskTools, build_task_tool_specs
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
 from adv_archon.tools.vision import VisionTools, build_vision_tool_specs
@@ -636,6 +637,8 @@ class ArchonRuntime:
         for definition in _build_informe_tool_specs(self.informe_tools):
             specs.append(ToolSpec(**definition))
         for definition in _build_team_tool_specs(self.team_tools):
+            specs.append(ToolSpec(**definition))
+        for definition in build_spreadsheet_tool_specs():
             specs.append(ToolSpec(**definition))
         for definition in build_vision_tool_specs(self.vision_tools):
             specs.append(ToolSpec(**definition))

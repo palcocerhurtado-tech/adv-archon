@@ -443,6 +443,10 @@ def launch_desktop_app(
             self._nav_chat_btn.clicked.connect(self._show_chat_home)
             sl.addWidget(self._nav_chat_btn)
 
+            self._nav_research_btn = self._make_nav_btn("  Research")
+            self._nav_research_btn.clicked.connect(self._open_research_workbench)
+            sl.addWidget(self._nav_research_btn)
+
             self._nav_pgou_btn = self._make_nav_btn("  PGOU")
             self._nav_pgou_btn.clicked.connect(self._show_pgou_status)
             sl.addWidget(self._nav_pgou_btn)
@@ -1304,6 +1308,7 @@ def launch_desktop_app(
                 "home": getattr(self, "_nav_home_btn", None),
                 "review": getattr(self, "_nav_review_btn", None),
                 "chat": getattr(self, "_nav_chat_btn", None),
+                "research": getattr(self, "_nav_research_btn", None),
                 "system": getattr(self, "_system_button", None),
                 "training": getattr(self, "_nav_training_btn", None),
             }
@@ -2056,6 +2061,303 @@ def launch_desktop_app(
             if self._last_performance_report is not None:
                 self._render_system_report(self._last_performance_report)
 
+        def _open_research_workbench(self) -> None:
+            self._close_workspace_panels()
+            self._clear_message_area()
+            self._home_visible = False
+            self._set_nav_context("research")
+
+            page = QFrame()
+            page.setObjectName("HomeStudio")
+            lay = QVBoxLayout(page)
+            lay.setContentsMargins(6, 4, 6, 4)
+            lay.setSpacing(14)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(16)
+            hero_lay.addWidget(self._make_logo(52))
+            text_col = QVBoxLayout()
+            eyebrow = QLabel("AGENTIC STUDIO")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Research Workbench")
+            title.setObjectName("StudioTitle")
+            subtitle = QLabel(
+                "Investiga, extrae evidencias, detecta fórmulas y exporta entregables."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            text_col.addWidget(eyebrow)
+            text_col.addWidget(title)
+            text_col.addWidget(subtitle)
+            hero_lay.addLayout(text_col, 1)
+            lay.addWidget(hero)
+
+            body = QHBoxLayout()
+            body.setSpacing(12)
+
+            brief_panel = QFrame()
+            brief_panel.setObjectName("Panel")
+            brief_lay = QVBoxLayout(brief_panel)
+            brief_lay.setContentsMargins(14, 14, 14, 14)
+            brief_lay.setSpacing(10)
+            brief_title = QLabel("Brief")
+            brief_title.setObjectName("StudioCase")
+            brief_lay.addWidget(brief_title)
+
+            question_input = QPlainTextEdit()
+            question_input.setPlaceholderText(
+                "Ej.: resuelve este trabajo, busca fuentes y prepara entrega..."
+            )
+            question_input.setMinimumHeight(140)
+            brief_lay.addWidget(question_input)
+
+            attachments_label = QLabel("Adjuntos: ninguno")
+            attachments_label.setObjectName("Faint")
+            attachments_label.setWordWrap(True)
+            brief_lay.addWidget(attachments_label)
+
+            actions = QHBoxLayout()
+            attach_btn = QPushButton("Adjuntar")
+            attach_btn.setObjectName("Ghost")
+            run_btn = QPushButton("Ejecutar investigación")
+            run_btn.setObjectName("Primary")
+            actions.addWidget(attach_btn)
+            actions.addWidget(run_btn)
+            brief_lay.addLayout(actions)
+
+            export_docx_btn = QPushButton("Exportar DOCX")
+            export_docx_btn.setObjectName("Ghost")
+            export_pdf_btn = QPushButton("Exportar PDF")
+            export_pdf_btn.setObjectName("Ghost")
+            export_xlsx_btn = QPushButton("Exportar Excel auditoría")
+            export_xlsx_btn.setObjectName("Ghost")
+            export_docx_btn.setEnabled(False)
+            export_pdf_btn.setEnabled(False)
+            export_xlsx_btn.setEnabled(False)
+            brief_lay.addWidget(export_docx_btn)
+            brief_lay.addWidget(export_pdf_btn)
+            brief_lay.addWidget(export_xlsx_btn)
+            brief_lay.addStretch(1)
+            body.addWidget(brief_panel, 1)
+
+            result_panel = QFrame()
+            result_panel.setObjectName("Panel")
+            result_lay = QVBoxLayout(result_panel)
+            result_lay.setContentsMargins(14, 14, 14, 14)
+            result_lay.setSpacing(10)
+            result_title = QLabel("Resultado")
+            result_title.setObjectName("StudioCase")
+            result_view = QTextEdit()
+            result_view.setReadOnly(True)
+            result_view.setMinimumHeight(420)
+            result_view.setPlainText(
+                "Research Workbench listo. Adjunta un enunciado/PDF o escribe el brief."
+            )
+            result_lay.addWidget(result_title)
+            result_lay.addWidget(result_view, 1)
+            body.addWidget(result_panel, 2)
+            lay.addLayout(body, 1)
+
+            state: dict[str, Any] = {
+                "attachments": [],
+                "result": None,
+                "thread": None,
+                "worker": None,
+            }
+
+            def render_attachments() -> None:
+                names = [Path(path).name for path in state["attachments"]]
+                attachments_label.setText(
+                    "Adjuntos: " + (", ".join(names) if names else "ninguno")
+                )
+
+            def choose_attachments() -> None:
+                paths, _filter = QFileDialog.getOpenFileNames(
+                    self,
+                    "Adjuntar material de investigación",
+                    str(Path.home()),
+                    "Documentos (*.pdf *.docx *.pptx *.xlsx *.txt *.md);;Todos (*)",
+                )
+                if paths:
+                    state["attachments"] = list(dict.fromkeys([*state["attachments"], *paths]))
+                    render_attachments()
+
+            def set_exports_enabled(enabled: bool) -> None:
+                export_docx_btn.setEnabled(enabled)
+                export_pdf_btn.setEnabled(enabled)
+                export_xlsx_btn.setEnabled(enabled)
+
+            class _ResearchWorker(QObject):
+                completed = Signal(object)
+                failed = Signal(str)
+                finished = Signal()
+
+                def __init__(self, question: str, attachments: list[str]) -> None:
+                    super().__init__()
+                    self._question = question
+                    self._attachments = attachments
+
+                def run(self) -> None:
+                    try:
+                        from adv_archon.core.research_workbench import (
+                            run_research_workbench,
+                        )
+
+                        self.completed.emit(
+                            run_research_workbench(
+                                self._question,
+                                attachment_paths=self._attachments,
+                                search_results_per_query=4,
+                                fetch_top_results=2,
+                            )
+                        )
+                    except Exception as exc:
+                        self.failed.emit(str(exc))
+                    finally:
+                        self.finished.emit()
+
+            def render_result(result: object) -> str:
+                payload = result.as_payload()
+                lines = [
+                    f"Pregunta: {payload['question']}",
+                    "",
+                    "Subpreguntas:",
+                    *[f"- {item}" for item in payload["subquestions"]],
+                    "",
+                    "Síntesis:",
+                    str(payload["synthesis"]),
+                    "",
+                    "Evidencias:",
+                ]
+                for item in payload["evidences"]:
+                    lines.append(f"- {item['id']} · {item['title']} · {item['url']}")
+                    lines.append(f"  {item['excerpt']}")
+                if payload["formula_candidates"]:
+                    lines.append("")
+                    lines.append("Fórmulas / métodos detectados:")
+                    lines.extend(f"- {item}" for item in payload["formula_candidates"])
+                if payload["gaps"]:
+                    lines.append("")
+                    lines.append("Pendiente de validar:")
+                    lines.extend(f"- {item}" for item in payload["gaps"])
+                return "\n".join(lines)
+
+            def run_research() -> None:
+                question = question_input.toPlainText().strip()
+                if not question:
+                    self.statusBar().showMessage(
+                        "Escribe primero el brief de investigación.",
+                        3500,
+                    )
+                    return
+                if state["thread"] is not None:
+                    self.statusBar().showMessage("Investigación ya en curso.", 2500)
+                    return
+                set_exports_enabled(False)
+                run_btn.setEnabled(False)
+                result_view.setPlainText("Investigando fuentes y leyendo adjuntos...")
+                thread = QThread(self)
+                worker = _ResearchWorker(question, list(state["attachments"]))
+                worker.moveToThread(thread)
+                thread.started.connect(worker.run)
+
+                def done(result: object) -> None:
+                    state["result"] = result
+                    result_view.setPlainText(render_result(result))
+                    set_exports_enabled(True)
+                    self.statusBar().showMessage(
+                        f"Investigación lista: {getattr(result, 'evidence_count', 0)} evidencias.",
+                        5000,
+                    )
+
+                def failed(message: str) -> None:
+                    result_view.setPlainText(f"No se pudo completar la investigación:\n{message}")
+                    self.statusBar().showMessage("Research Workbench falló.", 6000)
+
+                def cleanup() -> None:
+                    state["thread"] = None
+                    state["worker"] = None
+                    run_btn.setEnabled(True)
+
+                worker.completed.connect(done)
+                worker.failed.connect(failed)
+                worker.finished.connect(worker.deleteLater)
+                worker.finished.connect(thread.quit)
+                thread.finished.connect(thread.deleteLater)
+                thread.finished.connect(cleanup)
+                state["thread"] = thread
+                state["worker"] = worker
+                thread.start()
+
+            def export_docx() -> None:
+                result = state.get("result")
+                if result is None:
+                    return
+                from adv_archon.core.research_workbench import export_research_docx
+
+                output = Path.home() / "Desktop" / "adv_archon_research_workbench.docx"
+                export_research_docx(result, output)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
+
+            def export_pdf() -> None:
+                result = state.get("result")
+                if result is None:
+                    return
+                from adv_archon.core.research_workbench import export_research_pdf
+
+                output = Path.home() / "Desktop" / "adv_archon_research_workbench.pdf"
+                export_research_pdf(result, output)
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
+
+            def export_xlsx() -> None:
+                result = state.get("result")
+                if result is None:
+                    return
+                from adv_archon.core.spreadsheet_brain import (
+                    SpreadsheetFormula,
+                    SpreadsheetInput,
+                    create_auditable_workbook,
+                )
+
+                evidence_count = int(getattr(result, "evidence_count", 0))
+                formula_count = len(getattr(result, "formula_candidates", ()))
+                output = Path.home() / "Desktop" / "adv_archon_research_auditoria.xlsx"
+                create_auditable_workbook(
+                    title="Research Workbench - auditoría",
+                    output_path=output,
+                    inputs=[
+                        SpreadsheetInput("Evidencias", evidence_count, "ud"),
+                        SpreadsheetInput("Formulas detectadas", formula_count, "ud"),
+                    ],
+                    formulas=[
+                        SpreadsheetFormula(
+                            "Score revision",
+                            "=MIN(100,Entradas!B4*20+Entradas!B5*10)",
+                            "%",
+                            "Indicador simple para priorizar revisión manual.",
+                        )
+                    ],
+                    assumptions=[
+                        "El score no mide verdad; solo suficiencia de material revisable.",
+                        "Las fórmulas detectadas deben pasarse a un cálculo específico.",
+                    ],
+                )
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
+
+            attach_btn.clicked.connect(choose_attachments)
+            run_btn.clicked.connect(run_research)
+            export_docx_btn.clicked.connect(export_docx)
+            export_pdf_btn.clicked.connect(export_pdf)
+            export_xlsx_btn.clicked.connect(export_xlsx)
+
+            idx = self._messages_layout.count() - 1
+            self._messages_layout.insertWidget(idx, page)
+            self._status_label.setText("Research Workbench listo.")
+            self.statusBar().showMessage("Research Workbench listo.", 2500)
+
         def _open_training_lab(self) -> None:
             from adv_archon.core.training_lab import (
                 build_training_lab_status,
@@ -2621,6 +2923,7 @@ def launch_desktop_app(
             self._nav_client_btn.setEnabled(accepts)
             self._nav_pack_btn.setEnabled(accepts)
             self._nav_training_btn.setEnabled(accepts)
+            self._nav_research_btn.setEnabled(accepts)
             self._settings_button.setEnabled(allows_cfg)
             self._system_button.setEnabled(accepts)
             self._cancel_button.setVisible(state.cancellable)

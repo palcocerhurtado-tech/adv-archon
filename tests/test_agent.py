@@ -425,6 +425,29 @@ def test_rule_based_plan_creates_note_from_recent_document_context(tmp_path: Pat
     assert "idea uno" in plan["arguments"]["body"]
 
 
+def test_rule_based_plan_routes_excel_request_to_auditable_workbook(tmp_path: Path) -> None:
+    agent = _build_agent(tmp_path)
+    agent._tools["crear_excel_auditable"] = ToolSpec(
+        name="crear_excel_auditable",
+        description="excel",
+        schema={},
+        fn=lambda **_kwargs: None,
+    )
+    state = _build_state(tmp_path)
+
+    plan = agent._rule_based_plan(
+        "hazme un Excel de presupuesto con ingresos: 1000 EUR y costes: 350 EUR",
+        state,
+        [],
+    )
+
+    assert plan is not None
+    assert plan["tool_name"] == "crear_excel_auditable"
+    assert plan["arguments"]["title"] == "presupuesto con ingresos: 1000 EUR y costes: 350 EUR"
+    assert plan["arguments"]["inputs"][1]["name"] == "ingresos"
+    assert plan["arguments"]["inputs"][1]["value"] == 1000
+
+
 def test_rule_based_plan_reads_local_file_before_note_creation(tmp_path: Path) -> None:
     agent = _build_agent(tmp_path)
     state = _build_state(tmp_path)

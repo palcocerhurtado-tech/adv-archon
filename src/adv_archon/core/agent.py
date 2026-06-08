@@ -193,6 +193,15 @@ WEB_LIBRARY_KEYWORDS = {
     "fuentes guardadas",
     "research library",
 }
+SPREADSHEET_KEYWORDS = {
+    "excel",
+    "xlsx",
+    "hoja de calculo",
+    "hoja de cálculo",
+    "libro de calculo",
+    "libro de cálculo",
+    "spreadsheet",
+}
 EXECUTIVE_BRIEF_KEYWORDS = {
     "briefing ejecutivo",
     "executive brief",
@@ -1103,6 +1112,7 @@ class Agent:
         wants_vault = _contains_any(normalized, VAULT_KEYWORDS)
         wants_drive = _contains_any(normalized, DRIVE_KEYWORDS)
         wants_web_library = _contains_any(normalized, WEB_LIBRARY_KEYWORDS)
+        wants_spreadsheet = _looks_like_spreadsheet_request(normalized)
         wants_executive_brief = _looks_like_executive_brief_request(normalized)
         wants_contacts = _contains_any(normalized, CONTACT_KEYWORDS)
         wants_browser = _contains_any(normalized, BROWSER_KEYWORDS)
@@ -1116,6 +1126,18 @@ class Agent:
         wants_web_document_compare = _looks_like_web_grounded_document_compare_request(
             normalized
         )
+
+        if (
+            wants_spreadsheet
+            and "crear_excel_auditable" in self._tools
+            and "crear_excel_auditable" not in executed
+        ):
+            return {
+                "kind": "tool",
+                "tool_name": "crear_excel_auditable",
+                "arguments": _extract_spreadsheet_arguments(user_input),
+                "step_summary": "crear libro excel auditable",
+            }
 
         if wants_executive_brief:
             window = _infer_calendar_window(
@@ -1963,6 +1985,8 @@ class Agent:
             sections.append("hacer triage del inbox y proponerte borradores de respuesta")
         if {"read_file", "notes_create"} & tool_names:
             sections.append("actuar como study partner sobre documentos locales")
+        if {"crear_excel_auditable"} & tool_names:
+            sections.append("crear libros Excel/XLSX auditables con entradas y formulas visibles")
         if {
             "web_search",
             "web_fetch",
@@ -2022,6 +2046,7 @@ class Agent:
             "- `prepárame la reunión de mañana con contexto`\n"
             "- `hazme triage del gmail y dime qué responder hoy`\n"
             "- `actúa como study partner sobre este PDF`\n"
+            "- `hazme un Excel auditable para este presupuesto`\n"
             "- `abre una pagina y saca una captura`"
         )
 
@@ -3546,6 +3571,22 @@ def _looks_like_gmail_draft_request(text: str) -> bool:
     )
 
 
+def _looks_like_spreadsheet_request(text: str) -> bool:
+    return _contains_any(text, SPREADSHEET_KEYWORDS) and _contains_any(
+        text,
+        MUTATION_KEYWORDS
+        | {
+            "genera",
+            "generar",
+            "hazme",
+            "modelo",
+            "necesito",
+            "presupuesto",
+            "tabla",
+        },
+    )
+
+
 def _looks_like_study_partner_request(text: str) -> bool:
     return _contains_any(text, STUDY_PARTNER_KEYWORDS) or (
         _contains_any(text, {"documento", "pdf", "libro", "texto", "apuntes"})
@@ -4094,6 +4135,85 @@ def _extract_note_create_arguments(text: str) -> dict[str, Any]:
     if folder is not None:
         arguments["folder"] = folder
     return arguments
+
+
+def _extract_spreadsheet_arguments(text: str) -> dict[str, Any]:
+    inputs: list[dict[str, Any]] = [
+        {
+            "name": "Brief",
+            "value": " ".join(text.strip().split())[:500],
+            "note": "Brief original del usuario.",
+        }
+    ]
+    inputs.extend(_extract_spreadsheet_numeric_inputs(text))
+    return {
+        "title": _extract_spreadsheet_title(text),
+        "inputs": inputs,
+        "formulas": [],
+        "assumptions": [
+            "Libro generado localmente por ADV ARCHON.",
+            "Las entradas y unidades deben revisarse antes de una entrega formal.",
+            "Añade o ajusta formulas si el modelo requiere calculo profesional exacto.",
+        ],
+    }
+
+
+def _extract_spreadsheet_title(text: str) -> str:
+    cleaned = re.sub(
+        (
+            r"\b(excel|xlsx|spreadsheet|hoja de calculo|hoja de cálculo|"
+            r"libro de calculo|libro de cálculo)\b"
+        ),
+        " ",
+        text,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(
+        r"\b(hazme|crea|crear|genera|generar|prepara|necesito|un|una|de|para)\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    title = " ".join(cleaned.strip(" .,:;").split())
+    if title:
+        return title[:80]
+    return "ADV ARCHON - Excel auditable"
+
+
+def _extract_spreadsheet_numeric_inputs(text: str) -> list[dict[str, Any]]:
+    pattern = re.compile(
+        r"([A-Za-zÁÉÍÓÚÜÑáéíóúüñ][A-Za-zÁÉÍÓÚÜÑáéíóúüñ0-9 _/-]{1,36})"
+        r"\s*(?:=|:)\s*(-?\d+(?:[.,]\d+)?)\s*([A-Za-z€%/0-9²]*)"
+    )
+    inputs: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for match in pattern.finditer(text):
+        raw_name = match.group(1)
+        raw_name = re.split(r"\b(?:con|y|e)\b|[,;]", raw_name, flags=re.IGNORECASE)[-1]
+        name = " ".join(raw_name.strip(" .,:;-_").split())
+        if not name or "formula" in name.casefold():
+            continue
+        key = name.casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        inputs.append(
+            {
+                "name": name[:40],
+                "value": _coerce_spreadsheet_number(match.group(2)),
+                "unit": match.group(3).strip(),
+                "note": "Valor extraido del brief.",
+            }
+        )
+    return inputs[:12]
+
+
+def _coerce_spreadsheet_number(value: str) -> float | int:
+    normalized = value.replace(",", ".")
+    number = float(normalized)
+    if number.is_integer():
+        return int(number)
+    return number
 
 
 def _extract_note_title(text: str) -> str:

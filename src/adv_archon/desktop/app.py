@@ -4206,11 +4206,13 @@ def launch_desktop_app(
                                 if isinstance(raw_score, int):
                                     quality_score = raw_score
                                 quality_result = _json.dumps(quality, ensure_ascii=False)
+                            _ep = result.get("extracted_params") or {}
                             updated = _dc.replace(
                                 exp,
                                 analysis_result=_json.dumps(result, ensure_ascii=False),
                                 quality_score=quality_score,
                                 quality_result=quality_result,
+                                extracted_params=_json.dumps(_ep, ensure_ascii=False) if _ep else "",  # noqa: E501
                                 status="analizado",
                             )
                             self._active_exp_store.update(updated)

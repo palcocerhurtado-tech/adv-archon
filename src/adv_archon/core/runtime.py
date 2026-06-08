@@ -230,17 +230,22 @@ class ArchonRuntime:
         )
         self.web_library_tools = WebLibraryTools(self.web_library_store)
         _progress(50, "Cargando módulos urbanísticos y geográficos…")
+        from adv_archon.core.episodic_memory import EpisodicMemory
         from adv_archon.core.geo_store import GeoStore
         from adv_archon.core.pgou_store import PGOUStore
         from adv_archon.core.scraper_daemon import ScraperDaemon
+        from adv_archon.integrations.resilient import init_cache as _init_api_cache
         from adv_archon.tools.geo_tools import GeoTools
+        _init_api_cache(config.paths.api_cache_db)
         self.pgou_store = PGOUStore(config.paths.pgou_db, encoder=encoder)
         self.geo_store = GeoStore(config.paths.geo_db)
         self.geo_tools = GeoTools(self.geo_store, self.pgou_store)
+        self.episodic_memory = EpisodicMemory(config.paths.episodic_db)
         self.urban_compliance_tools = UrbanComplianceTools(
             self.pgou_store,
             llm,
             geo_tools=self.geo_tools,
+            episodic_memory=self.episodic_memory,
         )
         self.compliance_tools = self.urban_compliance_tools
         # Background scraper daemon — keeps PGOU data fresh automatically

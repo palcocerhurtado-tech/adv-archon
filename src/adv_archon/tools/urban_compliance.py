@@ -2,14 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from contextlib import suppress
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from adv_archon.core.compliance_judge import ComplianceJudge
+from adv_archon.core.episodic_memory import EpisodicMemory
 from adv_archon.core.llm import LLMRouter
 from adv_archon.core.llm_types import LLMMessage
+from adv_archon.core.param_extractor import ParamExtractor
 from adv_archon.core.pgou_store import PGOUChunk, PGOUStore
 from adv_archon.core.report_generator import generate_compliance_pdf
 from adv_archon.core.token_budget import TokenBudget
@@ -43,6 +46,7 @@ class ComplianceReport:
     quality_score: int | None = None
     quality_flags: list[str] | None = None
     quality_verdict: str = "REVISAR"
+    extracted_params: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -58,11 +62,14 @@ class UrbanComplianceTools:
         llm: LLMRouter,
         *,
         geo_tools: GeoTools | None = None,
+        episodic_memory: EpisodicMemory | None = None,
     ) -> None:
         self._store = pgou_store
         self._llm = llm
         self._geo_tools = geo_tools
         self._scraper = PGOUScraper(pgou_store)
+        self._param_extractor = ParamExtractor(llm)
+        self._episodic_memory = episodic_memory
 
     # ------------------------------------------------------------------ #
     # Tool: pgou_add                                                       #
@@ -238,6 +245,7 @@ class UrbanComplianceTools:
                     for a in report.annotations
                 ],
                 "full_analysis": report.raw_analysis,
+                "extracted_params": report.extracted_params,
             },
         )
 
@@ -429,8 +437,14 @@ class UrbanComplianceTools:
             limit=10,
         )
 
-        normativa_block = _format_normativa(search_result.chunks)
         plan_summary = plan_to_summary(plan)
+        extracted_params = self._param_extractor.extract(
+            [c.text for c in search_result.chunks],
+            municipality=municipality,
+            case_description=plan_summary[:300],
+        )
+
+        normativa_block = _format_normativa(search_result.chunks)
         site_block = _format_site_context(site_context) if site_context else ""
 
         system_prompt = (
@@ -499,6 +513,12 @@ class UrbanComplianceTools:
                 f"=== FRAGMENTOS RELEVANTES DEL PGOU DE {municipality.upper()} ===\n"
                 f"{budgeted['pgou_chunks']}"
             )
+        params_block = _format_params_brief(extracted_params)
+        if params_block:
+            user_parts.append(
+                f"=== PARÁMETROS URBANÍSTICOS DETECTADOS (PGOU {municipality.upper()}) ===\n"
+                f"{params_block}"
+            )
         if budgeted.get("notas"):
             user_parts.append(budgeted["notas"])
         if budget.utilization > 0.9:
@@ -533,6 +553,17 @@ class UrbanComplianceTools:
             else []
         )
 
+        verdict = str(judge_result.get("verdict") or "REVISAR")
+        if self._episodic_memory is not None:
+            with suppress(Exception):
+                self._episodic_memory.store(
+                    municipality=municipality,
+                    case_type="compliance_check",
+                    verdict=verdict,
+                    params=extracted_params,
+                    summary=summary[:500],
+                )
+
         return ComplianceReport(
             plan_path=plan.path,
             municipality=municipality,
@@ -546,13 +577,46 @@ class UrbanComplianceTools:
             context_hash=context_hash,
             quality_score=quality_score,
             quality_flags=quality_flags,
-            quality_verdict=str(judge_result.get("verdict") or "REVISAR"),
+            quality_verdict=verdict,
+            extracted_params=extracted_params,
         )
 
 
 # ------------------------------------------------------------------ #
 # Helpers                                                             #
 # ------------------------------------------------------------------ #
+
+
+def _format_params_brief(params: dict[str, Any]) -> str:
+    """Compact one-liner summary of extracted urbanistic params for LLM context."""
+    if not params or params.get("confianza") == "baja":
+        return ""
+    lines: list[str] = []
+    mapping = (
+        ("calificacion", "Calificación"),
+        ("clasificacion", "Clasificación"),
+        ("uso_principal", "Uso principal"),
+        ("edificabilidad_m2m2", "Edificabilidad (m²/m²)"),
+        ("ocupacion_pct", "Ocupación (%)"),
+        ("altura_maxima_m", "Altura máx. (m)"),
+        ("num_plantas", "Nº plantas"),
+        ("retranqueos_m", "Retranqueos"),
+    )
+    for key, label in mapping:
+        val = params.get(key)
+        if val is not None and val != "" and val != []:
+            lines.append(f"- {label}: {val}")
+    uses = params.get("usos_permitidos") or []
+    if uses:
+        lines.append(f"- Usos permitidos: {', '.join(str(u) for u in uses[:4])}")
+    arts = params.get("articulos_referencia") or []
+    if arts:
+        lines.append(f"- Artículos: {', '.join(str(a) for a in arts[:3])}")
+    conf = params.get("confianza", "baja")
+    if lines:
+        lines.append(f"- Confianza extracción: {conf}")
+    return "\n".join(lines)
+
 
 def _format_site_context(ctx: dict[str, Any]) -> str:
     """Render real parcel + flood data as a compact block for the LLM prompt."""

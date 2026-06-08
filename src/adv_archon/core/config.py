@@ -82,6 +82,8 @@ class PathsConfig:
     logs_dir: Path = field(init=False)
     pgou_db: Path = field(init=False)
     geo_db: Path = field(init=False)
+    api_cache_db: Path = field(init=False)
+    episodic_db: Path = field(init=False)
 
     def __post_init__(self) -> None:
         self.config_file = self.root / "config.toml"
@@ -102,6 +104,8 @@ class PathsConfig:
         self.logs_dir = self.root / "logs"
         self.pgou_db = self.root / "pgou.db"
         self.geo_db = self.root / "geo.db"
+        self.api_cache_db = self.root / "api_cache.db"
+        self.episodic_db = self.root / "episodic.db"
 
 
 @dataclass(slots=True)

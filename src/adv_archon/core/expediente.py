@@ -31,6 +31,9 @@ class Expediente:
     quality_result: str = ""
     agent_history: str = ""
     agent_step_reviews: str = ""
+    extracted_params: str = ""
+    params_confirmed: bool = False
+    orchestrator_state: str = ""
 
 
 class ExpedienteStore:
@@ -98,6 +101,9 @@ class ExpedienteStore:
             "quality_result": "TEXT NOT NULL DEFAULT ''",
             "agent_history": "TEXT NOT NULL DEFAULT ''",
             "agent_step_reviews": "TEXT NOT NULL DEFAULT ''",
+            "extracted_params": "TEXT NOT NULL DEFAULT ''",
+            "params_confirmed": "INTEGER NOT NULL DEFAULT 0",
+            "orchestrator_state": "TEXT NOT NULL DEFAULT ''",
         }
         for name, definition in columns.items():
             if name not in existing:
@@ -149,6 +155,9 @@ class ExpedienteStore:
             quality_result="",
             agent_history="",
             agent_step_reviews="",
+            extracted_params="",
+            params_confirmed=False,
+            orchestrator_state="",
         )
         self._conn.execute(
             """
@@ -157,8 +166,9 @@ class ExpedienteStore:
                 latitude, longitude, cadastral_ref, status,
                 plan_path, site_context, analysis_result, report_path,
                 created_at, updated_at, notes, case_type, review_state,
-                quality_score, quality_result, agent_history, agent_step_reviews
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                quality_score, quality_result, agent_history, agent_step_reviews,
+                extracted_params, params_confirmed, orchestrator_state
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 expediente.id,
@@ -183,6 +193,9 @@ class ExpedienteStore:
                 expediente.quality_result,
                 expediente.agent_history,
                 expediente.agent_step_reviews,
+                expediente.extracted_params,
+                int(expediente.params_confirmed),
+                expediente.orchestrator_state,
             ),
         )
         self._conn.commit()
@@ -225,7 +238,10 @@ class ExpedienteStore:
                 quality_score = ?,
                 quality_result = ?,
                 agent_history = ?,
-                agent_step_reviews = ?
+                agent_step_reviews = ?,
+                extracted_params = ?,
+                params_confirmed = ?,
+                orchestrator_state = ?
             WHERE id = ?
             """,
             (
@@ -249,6 +265,9 @@ class ExpedienteStore:
                 expediente.quality_result,
                 expediente.agent_history,
                 expediente.agent_step_reviews,
+                expediente.extracted_params,
+                int(expediente.params_confirmed),
+                expediente.orchestrator_state,
                 expediente.id,
             ),
         )
@@ -290,6 +309,9 @@ class ExpedienteStore:
             quality_result=row["quality_result"],
             agent_history=row["agent_history"],
             agent_step_reviews=row["agent_step_reviews"],
+            extracted_params=row["extracted_params"] or "",
+            params_confirmed=bool(row["params_confirmed"]),
+            orchestrator_state=row["orchestrator_state"] or "",
         )
 
 

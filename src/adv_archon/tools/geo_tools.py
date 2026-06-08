@@ -1,6 +1,7 @@
 """Geolocation tools: resolve coordinates → municipality → normativa aplicable."""
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Any
 
@@ -14,6 +15,7 @@ from adv_archon.integrations import costas as _costas
 from adv_archon.integrations import natura2000 as _natura2000
 from adv_archon.integrations import nominatim as _nominatim
 from adv_archon.integrations import snczi as _snczi
+from adv_archon.integrations.resilient import resilient_call as _rc
 
 _COASTAL_PROVINCES = {
     "A Coruña",
@@ -116,135 +118,146 @@ class GeoTools:
         payload["pgou_indexed"] = pgou_indexed
         payload["indexed_municipalities"] = indexed_munis
 
-        # Fetch real parcel detail up-front so it's available for legal checks
-        # and exposed as a structured field in the API response.
+        # Parallel sectorial API calls — circuit breaker + persistent cache per endpoint.
         cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
-        parcel_detail: dict[str, object] = {}
-        if cadastral_ref:
-            try:
-                parcel_detail = _catastro.get_parcel_by_ref(cadastral_ref)
-                if parcel_detail.get("error"):
-                    parcel_detail = {}
-            except Exception:
-                parcel_detail = {}
-        payload["parcel_detail"] = parcel_detail
-
-        # Pre-fetch flood zone so the result is stored in payload for the API.
-        flood_data: dict[str, Any] = {
-            "queried": False, "in_flood_zone": None, "periods": [], "error": "skipped",
-        }
-        if latitude and longitude:
-            try:
-                raw = _snczi.query_flood_zone(latitude, longitude)
-                flood_data = {
-                    "queried": True,
-                    "in_flood_zone": raw.get("in_flood_zone"),
-                    "periods": raw.get("periods", []),
-                    "source": raw.get("source", "SNCZI/CNIG"),
-                    "error": raw.get("error", ""),
-                }
-            except Exception as exc:
-                flood_data = {
-                    "queried": True, "in_flood_zone": None,
-                    "periods": [], "error": str(exc)[:120],
-                }
-        payload["flood_zone"] = flood_data
-
-        # Pre-fetch Red Natura 2000 protected area data.
-        natura_data: dict[str, Any] = {
-            "queried": False, "in_protected_area": None, "zones": [], "error": "skipped",
-        }
-        if latitude and longitude:
-            try:
-                raw_n = _natura2000.query_protected_area(latitude, longitude)
-                natura_data = {
-                    "queried": True,
-                    "in_protected_area": raw_n.get("in_protected_area"),
-                    "zones": raw_n.get("zones", []),
-                    "source": raw_n.get("source", "Red Natura 2000 / CNIG"),
-                    "error": raw_n.get("error", ""),
-                }
-            except Exception as exc:
-                natura_data = {
-                    "queried": True, "in_protected_area": None,
-                    "zones": [], "error": str(exc)[:120],
-                }
-        payload["natura2000"] = natura_data
-
-        # Pre-fetch coastal zone data — only for provinces with sea frontage.
         province = str(payload.get("province") or "").strip()
-        costas_data: dict[str, Any] = {
-            "queried": False,
-            "in_dpmt": None,
-            "in_protection_zone": None,
-            "in_influence_zone": None,
-            "zones": [],
-            "error": "skipped",
-        }
-        if latitude and longitude and province in _COASTAL_PROVINCES:
-            try:
-                raw_c = _costas.query_coastal_zone(latitude, longitude)
-                costas_data = {
-                    "queried": True,
-                    "in_dpmt": raw_c.get("in_dpmt"),
-                    "in_protection_zone": raw_c.get("in_protection_zone"),
-                    "in_influence_zone": raw_c.get("in_influence_zone"),
-                    "zones": raw_c.get("zones", []),
-                    "source": raw_c.get("source", "SIGCOSTAS / MITECO"),
-                    "error": raw_c.get("error", ""),
-                }
-            except Exception as exc:
-                costas_data = {
-                    "queried": True,
-                    "in_dpmt": None,
-                    "in_protection_zone": None,
-                    "in_influence_zone": None,
-                    "zones": [],
-                    "error": str(exc)[:120],
-                }
-        payload["costas"] = costas_data
+        _coord_key = (round(latitude, 5), round(longitude, 5))
 
-        # Pre-fetch official road geometry screening data.
-        carreteras_data: dict[str, Any] = {
-            "queried": False,
-            "in_domain_zone": None,
-            "in_servitude_zone": None,
-            "in_affection_zone": None,
-            "zones": [],
+        _flood_def: dict[str, Any] = {
+            "queried": True, "in_flood_zone": None, "periods": [],
+            "error": "servicio no disponible",
+        }
+        _natura_def: dict[str, Any] = {
+            "queried": True, "in_protected_area": None, "zones": [],
+            "error": "servicio no disponible",
+        }
+        _costas_def: dict[str, Any] = {
+            "queried": True, "in_dpmt": None, "in_protection_zone": None,
+            "in_influence_zone": None, "zones": [], "error": "servicio no disponible",
+        }
+        _carreteras_def: dict[str, Any] = {
+            "queried": True, "in_domain_zone": None, "in_servitude_zone": None,
+            "in_affection_zone": None, "zones": [],
             "source": "Transportes INSPIRE / CNIG",
             "method": "cribado geométrico por proximidad a eje viario oficial",
-            "nearest_distance_m": None,
-            "error": "skipped",
+            "nearest_distance_m": None, "error": "servicio no disponible",
         }
-        if latitude and longitude:
-            try:
-                raw_r = _carreteras.query_road_zone(latitude, longitude)
-                carreteras_data = {
-                    "queried": True,
-                    "in_domain_zone": raw_r.get("in_domain_zone"),
-                    "in_servitude_zone": raw_r.get("in_servitude_zone"),
-                    "in_affection_zone": raw_r.get("in_affection_zone"),
-                    "zones": raw_r.get("zones", []),
-                    "source": raw_r.get("source", "Transportes INSPIRE / CNIG"),
-                    "method": raw_r.get(
-                        "method",
-                        "cribado geométrico por proximidad a eje viario oficial",
-                    ),
-                    "nearest_distance_m": raw_r.get("nearest_distance_m"),
-                    "error": raw_r.get("error", ""),
+
+        def _do_parcel() -> dict[str, Any]:
+            if not cadastral_ref:
+                return {}
+            res = _rc(
+                "catastro.parcel",
+                lambda: _catastro.get_parcel_by_ref(cadastral_ref),
+                cache_params=cadastral_ref,
+                ttl_days=30.0,
+                default={},
+            )
+            data: dict[str, Any] = res.data if isinstance(res.data, dict) else {}
+            return {} if data.get("error") else data
+
+        def _do_flood() -> dict[str, Any]:
+            res = _rc(
+                "snczi.flood",
+                lambda: _snczi.query_flood_zone(latitude, longitude),
+                cache_params=_coord_key,
+                default=_flood_def,
+            )
+            raw: dict[str, Any] = res.data if isinstance(res.data, dict) else {}
+            if not raw:
+                return _flood_def
+            return {
+                "queried": True,
+                "in_flood_zone": raw.get("in_flood_zone"),
+                "periods": raw.get("periods", []),
+                "source": raw.get("source", "SNCZI/CNIG"),
+                "error": raw.get("error", ""),
+            }
+
+        def _do_natura() -> dict[str, Any]:
+            res = _rc(
+                "natura2000",
+                lambda: _natura2000.query_protected_area(latitude, longitude),
+                cache_params=_coord_key,
+                default=_natura_def,
+            )
+            raw: dict[str, Any] = res.data if isinstance(res.data, dict) else {}
+            if not raw:
+                return _natura_def
+            return {
+                "queried": True,
+                "in_protected_area": raw.get("in_protected_area"),
+                "zones": raw.get("zones", []),
+                "source": raw.get("source", "Red Natura 2000 / CNIG"),
+                "error": raw.get("error", ""),
+            }
+
+        def _do_costas() -> dict[str, Any]:
+            if province not in _COASTAL_PROVINCES:
+                return {
+                    "queried": False, "in_dpmt": None, "in_protection_zone": None,
+                    "in_influence_zone": None, "zones": [], "error": "skipped",
                 }
-            except Exception as exc:
-                carreteras_data = {
-                    "queried": True,
-                    "in_domain_zone": None,
-                    "in_servitude_zone": None,
-                    "in_affection_zone": None,
-                    "zones": [],
-                    "source": "Transportes INSPIRE / CNIG",
-                    "method": "cribado geométrico por proximidad a eje viario oficial",
-                    "nearest_distance_m": None,
-                    "error": str(exc)[:120],
-                }
+            res = _rc(
+                "costas",
+                lambda: _costas.query_coastal_zone(latitude, longitude),
+                cache_params=_coord_key,
+                default=_costas_def,
+            )
+            raw: dict[str, Any] = res.data if isinstance(res.data, dict) else {}
+            if not raw:
+                return _costas_def
+            return {
+                "queried": True,
+                "in_dpmt": raw.get("in_dpmt"),
+                "in_protection_zone": raw.get("in_protection_zone"),
+                "in_influence_zone": raw.get("in_influence_zone"),
+                "zones": raw.get("zones", []),
+                "source": raw.get("source", "SIGCOSTAS / MITECO"),
+                "error": raw.get("error", ""),
+            }
+
+        def _do_carreteras() -> dict[str, Any]:
+            res = _rc(
+                "carreteras",
+                lambda: _carreteras.query_road_zone(latitude, longitude),
+                cache_params=_coord_key,
+                default=_carreteras_def,
+            )
+            raw: dict[str, Any] = res.data if isinstance(res.data, dict) else {}
+            if not raw:
+                return _carreteras_def
+            return {
+                "queried": True,
+                "in_domain_zone": raw.get("in_domain_zone"),
+                "in_servitude_zone": raw.get("in_servitude_zone"),
+                "in_affection_zone": raw.get("in_affection_zone"),
+                "zones": raw.get("zones", []),
+                "source": raw.get("source", "Transportes INSPIRE / CNIG"),
+                "method": raw.get(
+                    "method",
+                    "cribado geométrico por proximidad a eje viario oficial",
+                ),
+                "nearest_distance_m": raw.get("nearest_distance_m"),
+                "error": raw.get("error", ""),
+            }
+
+        with ThreadPoolExecutor(max_workers=5) as _pool:
+            _fp = _pool.submit(_do_parcel)
+            _ff = _pool.submit(_do_flood)
+            _fn = _pool.submit(_do_natura)
+            _fc = _pool.submit(_do_costas)
+            _fr = _pool.submit(_do_carreteras)
+            parcel_detail: dict[str, Any] = _fp.result()
+            flood_data: dict[str, Any] = _ff.result()
+            natura_data: dict[str, Any] = _fn.result()
+            costas_data: dict[str, Any] = _fc.result()
+            carreteras_data: dict[str, Any] = _fr.result()
+
+        payload["parcel_detail"] = parcel_detail
+        payload["flood_zone"] = flood_data
+        payload["natura2000"] = natura_data
+        payload["costas"] = costas_data
         payload["carreteras"] = carreteras_data
 
         parcel_zoning_data = query_parcel_zoning(

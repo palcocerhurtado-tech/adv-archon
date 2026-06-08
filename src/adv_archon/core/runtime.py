@@ -34,6 +34,7 @@ from adv_archon.core.web_library import WebLibraryStore
 from adv_archon.integrations.boe import tool_boe_fetch, tool_boe_search
 from adv_archon.tools.browser import BrowserTools, build_browser_tool_specs
 from adv_archon.tools.comparador import tool_comparar_parcelas
+from adv_archon.tools.document_tools import DocumentTools, build_document_tool_specs
 from adv_archon.tools.edificabilidad import tool_calcular_edificabilidad
 from adv_archon.tools.google_workspace import (
     GoogleWorkspaceTools,
@@ -313,6 +314,9 @@ class ArchonRuntime:
         self.pem_pdf_tools = PEMPDFTools()
         self.team_tools = TeamTools(config)
         self.vision_tools = VisionTools(llm=llm)
+        from adv_archon.core.document_store import DocumentStore
+        self.document_store = DocumentStore(config.paths.document_db)
+        self.document_tools = DocumentTools(self.document_store)
         # ExpedienteStore se inyecta externamente (opcional — desktop lo hace)
 
         _progress(88, "Creando agente de IA…")
@@ -693,6 +697,8 @@ class ArchonRuntime:
         for definition in _build_team_tool_specs(self.team_tools):
             specs.append(ToolSpec(**definition))
         for definition in build_spreadsheet_tool_specs():
+            specs.append(ToolSpec(**definition))
+        for definition in build_document_tool_specs(self.document_tools):
             specs.append(ToolSpec(**definition))
         for definition in build_vision_tool_specs(self.vision_tools):
             specs.append(ToolSpec(**definition))

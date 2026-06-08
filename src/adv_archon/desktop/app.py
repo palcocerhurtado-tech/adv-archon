@@ -251,6 +251,7 @@ def launch_desktop_app(
             self._stream_buffer = ""
             self._voice_transcript_edit: _AutoTextEdit | None = None
             self._home_visible = False
+            self._active_nav_context = "home"
             self._progress_animation  = None
             self._model_loader_ref: tuple[Any, Any] | None = None
             self._active_file_picker: Any = None
@@ -1316,6 +1317,7 @@ def launch_desktop_app(
             self._submit_prompt()
 
         def _set_nav_context(self, active: str) -> None:
+            self._active_nav_context = active
             navs = {
                 "home": getattr(self, "_nav_home_btn", None),
                 "review": getattr(self, "_nav_review_btn", None),
@@ -2251,6 +2253,29 @@ def launch_desktop_app(
             result_lay.addWidget(result_title)
             result_lay.addWidget(result_view, 1)
             body.addWidget(result_panel, 2)
+
+            from adv_archon.desktop.draft_editor import DraftEditorWidget
+
+            draft_editor = DraftEditorWidget()
+            draft_editor.setMinimumWidth(320)
+            draft_editor.load_draft(
+                {
+                    "title": "Borrador de entrega",
+                    "status": "Pendiente de investigación",
+                    "executive_summary": "",
+                    "sections": [
+                        {
+                            "id": "synthesis",
+                            "title": "Síntesis",
+                            "content": (
+                                "Ejecuta una investigación para generar el borrador "
+                                "editable."
+                            ),
+                        }
+                    ],
+                }
+            )
+            body.addWidget(draft_editor, 1)
             lay.addLayout(body, 1)
 
             state: dict[str, Any] = {
@@ -2359,6 +2384,9 @@ def launch_desktop_app(
                 def done(result: object) -> None:
                     state["result"] = result
                     result_view.setPlainText(render_result(result))
+                    from adv_archon.core.document_draft import build_research_draft
+
+                    draft_editor.load_draft(build_research_draft(result).to_dict())
                     set_exports_enabled(True)
                     self.statusBar().showMessage(
                         f"Investigación lista: {getattr(result, 'evidence_count', 0)} evidencias.",
@@ -2388,55 +2416,36 @@ def launch_desktop_app(
                 result = state.get("result")
                 if result is None:
                     return
-                from adv_archon.core.research_workbench import export_research_docx
+                from adv_archon.core.document_draft import DocumentDraft
+                from adv_archon.core.docx_generator import generate_research_docx
 
                 output = Path.home() / "Desktop" / "adv_archon_research_workbench.docx"
-                export_research_docx(result, output)
+                draft = DocumentDraft.from_dict(draft_editor.current_draft())
+                generate_research_docx(draft, output)
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
 
             def export_pdf() -> None:
                 result = state.get("result")
                 if result is None:
                     return
-                from adv_archon.core.research_workbench import export_research_pdf
+                from adv_archon.core.document_draft import DocumentDraft
+                from adv_archon.core.pdf_generator_v2 import generate_draft_pdf
 
                 output = Path.home() / "Desktop" / "adv_archon_research_workbench.pdf"
-                export_research_pdf(result, output)
+                draft = DocumentDraft.from_dict(draft_editor.current_draft())
+                generate_draft_pdf(draft, output, archon_logo_path=logo_path())
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
 
             def export_xlsx() -> None:
                 result = state.get("result")
                 if result is None:
                     return
-                from adv_archon.core.spreadsheet_brain import (
-                    SpreadsheetFormula,
-                    SpreadsheetInput,
-                    create_auditable_workbook,
-                )
+                from adv_archon.core.document_draft import DocumentDraft
+                from adv_archon.core.xlsx_generator import generate_research_xlsx
 
-                evidence_count = int(getattr(result, "evidence_count", 0))
-                formula_count = len(getattr(result, "formula_candidates", ()))
                 output = Path.home() / "Desktop" / "adv_archon_research_auditoria.xlsx"
-                create_auditable_workbook(
-                    title="Research Workbench - auditoría",
-                    output_path=output,
-                    inputs=[
-                        SpreadsheetInput("Evidencias", evidence_count, "ud"),
-                        SpreadsheetInput("Formulas detectadas", formula_count, "ud"),
-                    ],
-                    formulas=[
-                        SpreadsheetFormula(
-                            "Score revision",
-                            "=MIN(100,Entradas!B4*20+Entradas!B5*10)",
-                            "%",
-                            "Indicador simple para priorizar revisión manual.",
-                        )
-                    ],
-                    assumptions=[
-                        "El score no mide verdad; solo suficiencia de material revisable.",
-                        "Las fórmulas detectadas deben pasarse a un cálculo específico.",
-                    ],
-                )
+                draft = DocumentDraft.from_dict(draft_editor.current_draft())
+                generate_research_xlsx(draft, output)
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(output)))
 
             attach_btn.clicked.connect(choose_attachments)
@@ -2444,6 +2453,13 @@ def launch_desktop_app(
             export_docx_btn.clicked.connect(export_docx)
             export_pdf_btn.clicked.connect(export_pdf)
             export_xlsx_btn.clicked.connect(export_xlsx)
+            draft_editor.export_requested.connect(
+                lambda kind: {
+                    "docx": export_docx,
+                    "pdf": export_pdf,
+                    "xlsx": export_xlsx,
+                }.get(str(kind), lambda: None)()
+            )
 
             idx = self._messages_layout.count() - 1
             self._messages_layout.insertWidget(idx, page)
@@ -3250,7 +3266,9 @@ def launch_desktop_app(
 
         def _open_qa_panel(self) -> None:
             from PySide6.QtCore import QObject as _QObject
+            from PySide6.QtCore import Qt as _Qt
             from PySide6.QtCore import Signal as _Signal
+            from PySide6.QtCore import Slot as _Slot
             from PySide6.QtWidgets import QDialog, QDialogButtonBox
 
             class _QAWorker(_QObject):
@@ -3260,6 +3278,11 @@ def launch_desktop_app(
                     from adv_archon.desktop.qa import run_qa_checks
 
                     self.loaded.emit(run_qa_checks(config))
+
+            class _QAReceiver(_QObject):
+                @_Slot(object)
+                def loaded(self, items: object) -> None:
+                    on_loaded(items)
 
             dlg = QDialog(self)
             self._qa_dialog = dlg
@@ -3337,13 +3360,14 @@ def launch_desktop_app(
                 thread = QThread(dlg)
                 thread.setObjectName("adv-archon-qa")
                 worker = _QAWorker()
+                receiver = _QAReceiver(dlg)
                 worker.moveToThread(thread)
                 thread.started.connect(worker.run)
-                worker.loaded.connect(on_loaded)
+                worker.loaded.connect(receiver.loaded, _Qt.ConnectionType.QueuedConnection)
                 worker.loaded.connect(worker.deleteLater)
                 worker.loaded.connect(thread.quit)
                 thread.finished.connect(thread.deleteLater)
-                self._qa_runner_ref = (thread, worker)
+                self._qa_runner_ref = (thread, worker, receiver)
                 thread.start()
 
             retry_btn.clicked.connect(run)
@@ -3528,15 +3552,16 @@ def launch_desktop_app(
                     setattr(self, attr, None)
 
         def _show_chat_home(self) -> None:
+            was_chat = self._active_nav_context == "chat"
             self._close_workspace_panels()
-            self._set_nav_context("chat")
-            if self._home_visible:
+            if self._home_visible or not was_chat:
                 self._clear_message_area()
                 self._home_visible = False
                 self._append_system(
                     "Chat contextual listo. Abre un expediente para que ARCHON use "
                     "su parcela, municipio, PGOU y afecciones en la respuesta."
                 )
+            self._set_nav_context("chat")
             self._input.setFocus()
             self.statusBar().showMessage("Chat principal listo.", 2500)
 

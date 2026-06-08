@@ -101,9 +101,10 @@ def _parse_json_block(text: str) -> dict[str, Any]:
     if not match:
         return {}
     try:
-        return json.loads(match.group())
+        parsed = json.loads(match.group())
     except json.JSONDecodeError:
         return {}
+    return parsed if isinstance(parsed, dict) else {}
 
 
 def _normalise(raw: dict[str, Any]) -> dict[str, Any]:

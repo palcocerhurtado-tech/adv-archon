@@ -65,38 +65,66 @@ def create_macos_app_bundle(
         '[ -f "$HOME/.zprofile" ] && . "$HOME/.zprofile"',
         '[ -f "$HOME/.zshrc"    ] && . "$HOME/.zshrc" 2>/dev/null',
         '[ -f "$HOME/.bash_profile" ] && . "$HOME/.bash_profile" 2>/dev/null',
-        "# Find uv — common locations",
-        'for UV in "$HOME/.cargo/bin/uv" "/opt/homebrew/bin/uv"'
+        'cd "$PROJECT_ROOT"',
+        '/usr/bin/chflags -R nohidden "$PROJECT_ROOT/.venv" 2>/dev/null || true',
+        'PYTHON_BIN="$PROJECT_ROOT/.venv/bin/python"',
+        'UV=""',
+        "find_uv() {",
+        '    for CANDIDATE in "$HOME/.cargo/bin/uv" "/opt/homebrew/bin/uv"'
         ' "/usr/local/bin/uv" "$(command -v uv 2>/dev/null)"; do',
-        '    [ -x "$UV" ] && break',
-        "done",
-        'if [ ! -x "$UV" ]; then',
+        '        if [ -x "$CANDIDATE" ]; then',
+        '            UV="$CANDIDATE"',
+        "            return 0",
+        "        fi",
+        "    done",
+        "    return 1",
+        "}",
+        "ensure_uv() {",
+        '    if [ -x "$UV" ]; then',
+        "        return 0",
+        "    fi",
+        "    if find_uv; then",
+        "        return 0",
+        "    fi",
         "    osascript -e 'display alert \"ADV ARCHON\""
         " message \"No se encontró uv."
         " Instálalo con: curl -LsSf https://astral.sh/uv/install.sh | sh\" as critical'",
         "    exit 1",
+        "}",
+        "sync_desktop_env() {",
+        "    ensure_uv",
+        (
+            '    "$UV" sync --extra desktop --reinstall-package python-dotenv '
+            "--reinstall-package PySide6 --reinstall-package PySide6-Addons "
+            "--reinstall-package PySide6-Essentials --reinstall-package shiboken6"
+        ),
+        "}",
+        "python_command() {",
+        '    if [ -x "$PYTHON_BIN" ]; then',
+        '        "$PYTHON_BIN" "$@"',
+        "        return $?",
+        "    fi",
+        "    ensure_uv",
+        '    "$UV" run python "$@"',
+        "}",
+        'if [ ! -x "$PYTHON_BIN" ]; then',
+        "    sync_desktop_env",
         "fi",
-        'cd "$PROJECT_ROOT"',
-        '/usr/bin/chflags -R nohidden "$PROJECT_ROOT/.venv" 2>/dev/null || true',
         'export PYTHONPATH="$PROJECT_ROOT/src:$PYTHONPATH"',
         "export QT_LOGGING_RULES='qt.qpa.fonts.warning=false'",
         "unset QT_PLUGIN_PATH",
         "unset QT_QPA_PLATFORM_PLUGIN_PATH",
         (
-            'QT_PLUGIN_DIR=$("$UV" run python -c "import dotenv.main; '
+            'QT_PLUGIN_DIR=$(python_command -c "import dotenv.main; '
             'from PySide6.QtCore import '
             'QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))" '
             "2>/dev/null)"
         ),
         "# Repair generated uv environments when Finder launches a stale/corrupt .venv.",
         'if [ ! -d "$QT_PLUGIN_DIR/platforms" ]; then',
+        "    sync_desktop_env",
         (
-            '    "$UV" sync --extra desktop --reinstall-package python-dotenv '
-            "--reinstall-package PySide6 --reinstall-package PySide6-Addons "
-            "--reinstall-package PySide6-Essentials --reinstall-package shiboken6"
-        ),
-        (
-            '    QT_PLUGIN_DIR=$("$UV" run python -c "import dotenv.main; '
+            '    QT_PLUGIN_DIR=$(python_command -c "import dotenv.main; '
             'from PySide6.QtCore import '
             'QLibraryInfo; print(QLibraryInfo.path(QLibraryInfo.LibraryPath.PluginsPath))" '
             "2>/dev/null)"
@@ -104,6 +132,10 @@ def create_macos_app_bundle(
         "fi",
         'export QT_PLUGIN_PATH="$QT_PLUGIN_DIR"',
         'export QT_QPA_PLATFORM_PLUGIN_PATH="$QT_PLUGIN_DIR/platforms"',
+        'if [ -x "$PYTHON_BIN" ]; then',
+        '    exec "$PYTHON_BIN" -m adv_archon.main desktop "$@"',
+        "fi",
+        "ensure_uv",
         'exec "$UV" run python -m adv_archon.main desktop "$@"',
         "",
     ]

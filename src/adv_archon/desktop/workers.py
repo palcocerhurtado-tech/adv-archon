@@ -33,7 +33,9 @@ class DesktopBusyState:
 
     @property
     def accepts_user_actions(self) -> bool:
-        return not self.busy and not self.closing
+        if self.closing:
+            return False
+        return not self.busy or self.task == "initializing"
 
     @property
     def can_dispatch_requests(self) -> bool:
@@ -41,7 +43,9 @@ class DesktopBusyState:
 
     @property
     def allows_configuration(self) -> bool:
-        return not self.busy and not self.closing
+        if self.closing:
+            return False
+        return not self.busy or self.task == "initializing"
 
     def status_text(self, *, mode: str, profile: str) -> str:
         if self.closing:
@@ -49,7 +53,7 @@ class DesktopBusyState:
         if self.detail:
             return self.detail
         if self.task == "initializing":
-            return "Preparando motor…"
+            return "Preparando motor local…"
         if self.task == "prompt":
             return "Procesando petición…"
         if self.task == "knowledge_import":
@@ -107,7 +111,7 @@ if PYSIDE6_AVAILABLE:
                     backend_ready=False,
                     busy=True,
                     task="initializing",
-                    detail="Preparando motor…",
+                    detail="Preparando motor local…",
                 )
             )
 
@@ -117,7 +121,7 @@ if PYSIDE6_AVAILABLE:
                     backend_ready=False,
                     busy=True,
                     task="initializing",
-                    detail="Preparando motor…",
+                    detail="Preparando motor local…",
                     progress=0,
                 )
             )

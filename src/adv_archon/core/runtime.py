@@ -57,11 +57,46 @@ from adv_archon.tools.web_library_tools import (
 )
 from adv_archon.ui.commands import CommandServices
 from adv_archon.ui.render import Renderer
-from adv_archon.voice.stt import WhisperSpeechToText
 from adv_archon.voice.tts import MacTextToSpeech
 
 ConfirmCallback = Callable[[str], bool]
 ProgressCallback = Callable[[int, str], None]
+
+
+class LazyWhisperSpeechToText:
+    """Proxy de STT que no importa faster-whisper/numpy hasta el primer uso real."""
+
+    def __init__(self, **kwargs: Any) -> None:
+        self._kwargs = kwargs
+        self._instance: Any | None = None
+
+    def describe(self) -> str:
+        wake_word = self._kwargs.get("wake_word_keyword") if self._kwargs.get(
+            "wake_word_enabled"
+        ) else "off"
+        return (
+            f"modelo={self._kwargs.get('model_name')} | "
+            f"idioma={self._kwargs.get('language')} | wake-word={wake_word}"
+        )
+
+    def listen_once(self, *args: Any, **kwargs: Any) -> Any:
+        return self._load().listen_once(*args, **kwargs)
+
+    def listen_streaming(self, *args: Any, **kwargs: Any) -> Any:
+        return self._load().listen_streaming(*args, **kwargs)
+
+    def transcribe_file(self, *args: Any, **kwargs: Any) -> Any:
+        return self._load().transcribe_file(*args, **kwargs)
+
+    def wait_for_wake_word(self, *args: Any, **kwargs: Any) -> Any:
+        return self._load().wait_for_wake_word(*args, **kwargs)
+
+    def _load(self) -> Any:
+        if self._instance is None:
+            from adv_archon.voice.stt import WhisperSpeechToText
+
+            self._instance = WhisperSpeechToText(**self._kwargs)
+        return self._instance
 
 
 class ArchonRuntime:
@@ -134,7 +169,7 @@ class ArchonRuntime:
             rate_wpm=config.voice.rate_wpm,
             logger=self.logger,
         )
-        self.stt = WhisperSpeechToText(
+        self.stt = LazyWhisperSpeechToText(
             model_name=config.voice.stt_model,
             language=config.voice.stt_language,
             device=config.voice.stt_device,
@@ -170,8 +205,7 @@ class ArchonRuntime:
             self.knowledge_store,
             profile_manager=self.profile_manager,
         )
-        from adv_archon.core.personal_kb import PersonalKB
-        self.personal_kb = PersonalKB(config.paths.memory_db.parent / "personal_kb.db")
+        self._personal_kb: Any | None = None
         file_policy = FileAccessPolicy(
             allowed_roots=tuple(
                 Path(item).expanduser().resolve() for item in config.files.allowed_roots
@@ -217,6 +251,7 @@ class ArchonRuntime:
                 if hasattr(config, "pgou") and hasattr(config.pgou, "refresh_interval_hours")
                 else 24.0,
             max_age_days=30,
+            initial_delay_seconds=90.0,
         )
         if not incognito:
             self.scraper_daemon.start()
@@ -325,6 +360,16 @@ class ArchonRuntime:
             active_profile=self.profile_manager.active_profile,
         )
 
+    @property
+    def personal_kb(self) -> Any:
+        if self._personal_kb is None:
+            from adv_archon.core.personal_kb import PersonalKB
+
+            self._personal_kb = PersonalKB(
+                self.config.paths.memory_db.parent / "personal_kb.db"
+            )
+        return self._personal_kb
+
     def send_prompt(
         self,
         prompt: str,
@@ -339,13 +384,14 @@ class ArchonRuntime:
         enriched_prompt = _maybe_build_compliance_prompt(
             prompt, resolved_attachments, self.urban_compliance_tools
         )
-        # Self-RAG: inject personal KB context when relevant
-        try:
-            kb_context = self.personal_kb.build_context_injection(prompt)
-            if kb_context:
-                enriched_prompt = kb_context + "\n\n" + enriched_prompt
-        except Exception:
-            pass  # KB errors must never break the main loop
+        if _should_use_personal_kb(prompt):
+            # Self-RAG personal bajo demanda: evita cargar embeddings en cada chat genérico.
+            try:
+                kb_context = self.personal_kb.build_context_injection(prompt)
+                if kb_context:
+                    enriched_prompt = kb_context + "\n\n" + enriched_prompt
+            except Exception:
+                pass  # KB errors must never break the main loop
         final_prompt = format_prompt_with_attachments(enriched_prompt, resolved_attachments)
         return self.agent.stream_final_response(
             final_prompt,
@@ -421,6 +467,9 @@ class ArchonRuntime:
             self.scraper_daemon.stop()
         with suppress(Exception):
             self.browser_tools.browser_close()
+        with suppress(Exception):
+            if self._personal_kb is not None:
+                self._personal_kb.close()
 
     def record_usage(self, phase: str, response: object) -> None:
         from adv_archon.core.llm_types import LLMResponse
@@ -756,6 +805,29 @@ def _build_pem_tool_specs() -> list[dict[str, Any]]:
             "fn": tool_calcular_pem,
         },
     ]
+
+
+def _should_use_personal_kb(prompt: str) -> bool:
+    text = _normalize(prompt)
+    signals = (
+        "kb",
+        "conocimiento personal",
+        "memoria personal",
+        "segun mis datos",
+        "según mis datos",
+        "segun lo que sabes",
+        "según lo que sabes",
+        "mis notas",
+        "mis documentos",
+        "mi informacion",
+        "mi información",
+        "mi contexto",
+        "recuerdas",
+        "recuerda que",
+        "lo que te conte",
+        "lo que te conté",
+    )
+    return any(signal in text for signal in signals)
 
 
 def _extract_coordinate_pair_from_text(text: str) -> tuple[float, float] | None:

@@ -12,6 +12,20 @@ def test_busy_state_blocks_actions_until_backend_is_ready() -> None:
     assert state.status_text(mode="local", profile="general") == "Esperando backend…"
 
 
+def test_initializing_state_keeps_navigation_responsive_without_dispatch() -> None:
+    state = DesktopBusyState(
+        backend_ready=False,
+        busy=True,
+        task="initializing",
+        detail="Preparando motor local…",
+    )
+
+    assert state.accepts_user_actions is True
+    assert state.can_dispatch_requests is False
+    assert state.allows_configuration is True
+    assert state.status_text(mode="local", profile="general") == "Preparando motor local…"
+
+
 def test_busy_state_reports_prompt_processing() -> None:
     state = DesktopBusyState(
         backend_ready=True,

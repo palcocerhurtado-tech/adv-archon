@@ -90,7 +90,6 @@ def launch_desktop_app(
             "`uv pip install PySide6` o añade el extra desktop antes de lanzarla."
         ) from exc
 
-    from adv_archon.core.agent import TurnContextSnapshot
     from adv_archon.desktop.workers import DesktopBusyState, DesktopRuntimeWorker
 
     # ── Confirm bridge ────────────────────────────────────────────────────────
@@ -244,7 +243,7 @@ def launch_desktop_app(
             self._recent_history_entries: list[str] = []
             self._recent_attachment_entries: list[str] = []
             self._active_tool_names: list[str] = []
-            self._last_snapshot: TurnContextSnapshot | None = None
+            self._last_snapshot: Any | None = None
             self._pending_prompt    = ""
             self._pending_attachments: list[Path] = []
             self._current_stream_edit: _AutoTextEdit | None = None
@@ -310,8 +309,7 @@ def launch_desktop_app(
             self._build_professional_status_bar()
             self._load_controls_state()
             self._fit_to_screen()
-            self._show_dashboard_home()
-            self._backend_thread.start()
+            self._show_dashboard_home(defer_load=True)
             # Do not start the Ollama warmup thread in the window constructor:
             # on macOS/Finder it can abort startup with
             # "QThread: Destroyed while thread is still running" before the
@@ -320,6 +318,12 @@ def launch_desktop_app(
             QTimer.singleShot(600, self._maybe_show_onboarding)
 
         # ── Lifecycle ─────────────────────────────────────────────────────────
+        def _start_backend(self) -> None:
+            if self._backend_thread is not None and not self._backend_thread.isRunning():
+                self._status_label.setText("Preparando motor local…")
+                self.statusBar().showMessage("Preparando motor local…", 3000)
+                self._backend_thread.start()
+
         def closeEvent(self, ev) -> None:
             if self._backend_thread is None or not self._backend_thread.isRunning():
                 ev.accept()
@@ -987,7 +991,15 @@ def launch_desktop_app(
                 self._add_notice(f"[{name}]")
 
         def _show_context_snapshot(self, snapshot: object) -> None:
-            if isinstance(snapshot, TurnContextSnapshot):
+            if all(
+                hasattr(snapshot, attr)
+                for attr in (
+                    "intent",
+                    "profile",
+                    "execution_mode",
+                    "checkpoint",
+                )
+            ):
                 self._last_snapshot = snapshot
                 lines = [
                     f"Intent: {snapshot.intent}",
@@ -1318,7 +1330,12 @@ def launch_desktop_app(
                     btn.style().unpolish(btn)
                     btn.style().polish(btn)
 
-        def _show_dashboard_home(self) -> None:
+        def _show_dashboard_home(self, *, defer_load: bool = False) -> None:
+            if defer_load:
+                self._show_dashboard_home_skeleton()
+                QTimer.singleShot(700, self._load_dashboard_home_if_visible)
+                return
+
             from adv_archon.core.expediente import ExpedienteStore
             from adv_archon.core.studio import load_studio_client_config
 
@@ -1526,6 +1543,81 @@ def launch_desktop_app(
             self._messages_layout.insertWidget(idx, page)
             self._status_label.setText("Inicio Studio listo.")
             self.statusBar().showMessage("Inicio Studio listo.", 2500)
+
+        def _load_dashboard_home_if_visible(self) -> None:
+            if self._home_visible:
+                self._show_dashboard_home()
+
+        def _show_dashboard_home_skeleton(self) -> None:
+            self._close_workspace_panels()
+            self._clear_message_area()
+            self._home_visible = True
+            self._set_nav_context("home")
+
+            page = QFrame()
+            page.setObjectName("HomeStudio")
+            page_lay = QVBoxLayout(page)
+            page_lay.setContentsMargins(6, 4, 6, 4)
+            page_lay.setSpacing(14)
+
+            hero = QFrame()
+            hero.setObjectName("StudioHero")
+            hero_lay = QHBoxLayout(hero)
+            hero_lay.setContentsMargins(18, 16, 18, 16)
+            hero_lay.setSpacing(16)
+            hero_lay.addWidget(self._make_logo(58))
+            hero_text = QVBoxLayout()
+            eyebrow = QLabel("ADV ARCHON STUDIO")
+            eyebrow.setObjectName("Eyebrow")
+            title = QLabel("Expedientes urbanísticos, de la parcela al informe.")
+            title.setObjectName("StudioTitle")
+            title.setWordWrap(True)
+            subtitle = QLabel(
+                "Ventana lista. Preparando motor local, expedientes y métricas en segundo plano."
+            )
+            subtitle.setObjectName("Sub")
+            subtitle.setWordWrap(True)
+            hero_text.addWidget(eyebrow)
+            hero_text.addWidget(title)
+            hero_text.addWidget(subtitle)
+            hero_lay.addLayout(hero_text, 1)
+            page_lay.addWidget(hero)
+
+            action_row = QHBoxLayout()
+            action_row.setSpacing(10)
+            for heading, copy in (
+                ("Nuevo expediente", "Disponible en cuanto termine la carga ligera."),
+                ("Studio Demo", "Casos de muestra, informes y trazabilidad."),
+                ("Research", "Investigación, evidencias y Excel auditable."),
+            ):
+                card = QFrame()
+                card.setObjectName("StudioCard")
+                card_lay = QVBoxLayout(card)
+                card_lay.setContentsMargins(14, 14, 14, 14)
+                card_lay.setSpacing(8)
+                h = QLabel(heading)
+                h.setObjectName("StudioCase")
+                body = QLabel(copy)
+                body.setObjectName("Sub")
+                body.setWordWrap(True)
+                card_lay.addWidget(h)
+                card_lay.addWidget(body)
+                card_lay.addStretch(1)
+                action_row.addWidget(card)
+            page_lay.addLayout(action_row)
+
+            loading = QLabel(
+                "Motor cargando · Knowledge diferido · Voz inactiva hasta pulsar Hablar"
+            )
+            loading.setObjectName("Faint")
+            loading.setWordWrap(True)
+            page_lay.addWidget(loading)
+            page_lay.addStretch(1)
+
+            idx = self._messages_layout.count() - 1
+            self._messages_layout.insertWidget(idx, page)
+            self._status_label.setText("Ventana lista. Preparando motor local…")
+            self.statusBar().showMessage("Ventana lista. Preparando motor local…", 3000)
 
         def _show_professional_review(self, filter_key: str = "all") -> None:
             import html as _html
@@ -5340,6 +5432,7 @@ def launch_desktop_app(
     window.show()
     window.raise_()
     window.activateWindow()
+    QTimer.singleShot(150, window._start_backend)
     QTimer.singleShot(250, window.showNormal)
     QTimer.singleShot(300, window.raise_)
     QTimer.singleShot(350, window.activateWindow)

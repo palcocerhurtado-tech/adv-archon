@@ -106,15 +106,15 @@ class PathsConfig:
 
 @dataclass(slots=True)
 class LLMConfig:
-    mode: str = "cloud"
+    mode: str = "local"
     gemini_model: str = "gemini-2.5-flash"
-    ollama_model: str = "qwen2.5:7b"
+    ollama_model: str = "llama3.2:3b"
     vision_local_model: str = "llava:latest"
-    fast_local_model: str | None = None
-    planner_local_model: str | None = None
-    document_local_model: str | None = None
-    coding_local_model: str | None = None
-    reasoning_local_model: str | None = None
+    fast_local_model: str | None = "llama3.2:3b"
+    planner_local_model: str | None = "llama3.2:3b"
+    document_local_model: str | None = "llama3.1:8b"
+    coding_local_model: str | None = "llama3.1:8b"
+    reasoning_local_model: str | None = "llama3.1:8b"
     fast_cloud_model: str | None = None
     planner_cloud_model: str | None = None
     document_cloud_model: str | None = None
@@ -152,9 +152,9 @@ class MemoryConfig:
 
 @dataclass(slots=True)
 class KnowledgeConfig:
-    default_roots: tuple[str, ...] = ("~",)
+    default_roots: tuple[str, ...] = ()
     vault_roots: tuple[str, ...] = ()
-    auto_index_on_search: bool = True
+    auto_index_on_search: bool = False
     max_files_per_root: int = 2000
     max_file_bytes: int = 2_000_000
     search_limit: int = 5
@@ -374,29 +374,31 @@ def load_app_config(
     llm = LLMConfig(
         mode=mode_override
         or os.getenv("ADV_ARCHON_DEFAULT_MODE")
-        or _lookup(data, "llm", "mode", default="cloud"),
+        or _lookup(data, "llm", "mode", default="local"),
         gemini_model=os.getenv("ADV_ARCHON_DEFAULT_GEMINI_MODEL")
         or _lookup(data, "llm", "gemini_model", default="gemini-2.5-flash"),
         ollama_model=os.getenv("ADV_ARCHON_DEFAULT_OLLAMA_MODEL")
-        or _lookup(data, "llm", "ollama_model", default="qwen2.5:7b"),
+        or _lookup(data, "llm", "ollama_model", default="llama3.2:3b"),
         vision_local_model=os.getenv("ADV_ARCHON_VISION_MODEL")
         or _lookup(data, "llm", "vision_local_model", default="llava:latest"),
-        fast_local_model=str(_lookup(data, "llm", "fast_local_model", default="")).strip()
+        fast_local_model=str(
+            _lookup(data, "llm", "fast_local_model", default="llama3.2:3b")
+        ).strip()
         or None,
         planner_local_model=str(
-            _lookup(data, "llm", "planner_local_model", default="")
+            _lookup(data, "llm", "planner_local_model", default="llama3.2:3b")
         ).strip()
         or None,
         document_local_model=str(
-            _lookup(data, "llm", "document_local_model", default="")
+            _lookup(data, "llm", "document_local_model", default="llama3.1:8b")
         ).strip()
         or None,
         coding_local_model=str(
-            _lookup(data, "llm", "coding_local_model", default="")
+            _lookup(data, "llm", "coding_local_model", default="llama3.1:8b")
         ).strip()
         or None,
         reasoning_local_model=str(
-            _lookup(data, "llm", "reasoning_local_model", default="")
+            _lookup(data, "llm", "reasoning_local_model", default="llama3.1:8b")
         ).strip()
         or None,
         fast_cloud_model=str(_lookup(data, "llm", "fast_cloud_model", default="")).strip()
@@ -431,7 +433,7 @@ def load_app_config(
             os.getenv("ADV_ARCHON_GEMINI_TIMEOUT_SECONDS")
             or _lookup(data, "llm", "gemini_timeout_seconds", default=300)
         ),
-        temperature=float(_lookup(data, "llm", "temperature", default=0.2)),
+        temperature=float(_lookup(data, "llm", "temperature", default=0.0)),
         redact_cloud_pii=bool(_lookup(data, "privacy", "redact_cloud_pii", default=False)),
         force_local_private_context=bool(
             _lookup(data, "privacy", "force_local_private_context", default=True)
@@ -462,10 +464,10 @@ def load_app_config(
         data,
         "knowledge",
         "default_roots",
-        default=["~"],
+        default=[],
     )
     if not isinstance(default_roots, list):
-        default_roots = ["~"]
+        default_roots = []
     vault_roots = _lookup(
         data,
         "knowledge",
@@ -478,7 +480,7 @@ def load_app_config(
         default_roots=tuple(str(item) for item in default_roots),
         vault_roots=tuple(str(item) for item in vault_roots),
         auto_index_on_search=bool(
-            _lookup(data, "knowledge", "auto_index_on_search", default=True)
+            _lookup(data, "knowledge", "auto_index_on_search", default=False)
         ),
         max_files_per_root=int(
             _lookup(data, "knowledge", "max_files_per_root", default=2000)

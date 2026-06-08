@@ -61,12 +61,14 @@ class ScraperDaemon:
         scraper: Any,
         interval_hours: float = 24.0,
         max_age_days: int = 30,
+        initial_delay_seconds: float = 0.0,
         on_refresh: Callable[[str, bool], None] | None = None,
     ) -> None:
         self._store          = pgou_store
         self._scraper        = scraper
         self._interval       = interval_hours * 3600
         self._max_age        = timedelta(days=max_age_days)
+        self._initial_delay  = max(0.0, initial_delay_seconds)
         self._on_refresh     = on_refresh   # callback(municipality, ok)
         self._stop_event     = threading.Event()
         self._thread: threading.Thread | None = None
@@ -109,7 +111,13 @@ class ScraperDaemon:
         with self._lock:
             self._stats.running = True
 
-        # Run first cycle immediately on startup
+        if self._initial_delay and self._stop_event.wait(timeout=self._initial_delay):
+            with self._lock:
+                self._stats.running = False
+            log.info("ScraperDaemon stopped before first delayed cycle")
+            return
+
+        # Run first cycle after optional startup grace period
         self._cycle()
 
         while not self._stop_event.wait(timeout=self._interval):

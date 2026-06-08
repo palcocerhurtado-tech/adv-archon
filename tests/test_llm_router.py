@@ -48,7 +48,8 @@ def test_llm_router_prefers_local_for_document_tasks(monkeypatch) -> None:
         mode="cloud",
         gemini_api_key="test-key",
         gemini_model="gemini-general",
-        ollama_model="llama-docs",
+        ollama_model="llama-general",
+        document_local_model="llama-docs",
     )
     router = LLMRouter(config)
     captured: dict[str, str] = {}

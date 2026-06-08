@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, Protocol, cast
 
 from adv_archon.core.context import RuntimeContext
 from adv_archon.core.costs import UsageLedger
@@ -24,8 +24,13 @@ from adv_archon.tools.task_tools import TaskTools
 from adv_archon.tools.urban_compliance import UrbanComplianceTools
 from adv_archon.tools.web import WebTools
 from adv_archon.ui.render import Renderer
-from adv_archon.voice.stt import WhisperSpeechToText
 from adv_archon.voice.tts import MacTextToSpeech
+
+
+class SpeechToText(Protocol):
+    def describe(self) -> str: ...
+
+    def listen_once(self) -> Any: ...
 
 
 @dataclass(slots=True)
@@ -62,7 +67,7 @@ class CommandServices:
     profile_manager: ProfileManager
     on_profile_changed: Callable[[str], None]
     tts: MacTextToSpeech
-    stt: WhisperSpeechToText
+    stt: SpeechToText
     urban_compliance_tools: UrbanComplianceTools
     geo_tools: Any  # GeoTools — imported lazily to avoid circular
     personal_kb: Any = None  # PersonalKB — imported lazily to avoid heavy deps at startup

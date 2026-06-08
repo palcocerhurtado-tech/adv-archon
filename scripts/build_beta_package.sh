@@ -90,8 +90,8 @@ PACKAGE_DIR="$(cd "$(dirname "$0")" && pwd)"
 APP_SRC="${PACKAGE_DIR}/ADV ARCHON.app"
 INSTALL_DIR="${HOME}/Applications"
 APP_DST="${INSTALL_DIR}/ADV ARCHON.app"
-MODEL="llama3.1:8b"
-FAST_MODEL="llama3.2:3b"
+MODEL="llama3.2:3b"
+ANALYSIS_MODEL="llama3.1:8b"
 LOG_FILE="${HOME}/.adv-archon/install.log"
 
 mkdir -p "${HOME}/.adv-archon"
@@ -173,12 +173,12 @@ if ! curl -fsS "http://127.0.0.1:11434/api/tags" >/dev/null 2>&1; then
 fi
 
 if ! "$OLLAMA_BIN" list | awk '{print $1}' | grep -qx "$MODEL"; then
-  echo "Descargando modelo local ${MODEL}. Puede tardar varios minutos…"
+  echo "Descargando modelo rápido local ${MODEL}. Puede tardar varios minutos…"
   "$OLLAMA_BIN" pull "$MODEL"
 fi
-if ! "$OLLAMA_BIN" list | awk '{print $1}' | grep -qx "$FAST_MODEL"; then
-  echo "Descargando modelo rápido ${FAST_MODEL}. Puede tardar varios minutos…"
-  "$OLLAMA_BIN" pull "$FAST_MODEL"
+if ! "$OLLAMA_BIN" list | awk '{print $1}' | grep -qx "$ANALYSIS_MODEL"; then
+  echo "Descargando modelo de análisis ${ANALYSIS_MODEL}. Puede tardar varios minutos…"
+  "$OLLAMA_BIN" pull "$ANALYSIS_MODEL"
 fi
 
 echo "5/5 Guardando configuración y preparando acceso directo…"
@@ -187,11 +187,16 @@ if [ ! -f "$HOME/.adv-archon/config.toml" ]; then
   cat > "$HOME/.adv-archon/config.toml" <<CONFIG_EOF
 [llm]
 mode = "local"
-ollama_model = "llama3.1:8b"
+ollama_model = "llama3.2:3b"
 fast_local_model = "llama3.2:3b"
 planner_local_model = "llama3.2:3b"
 reasoning_local_model = "llama3.1:8b"
 document_local_model = "llama3.1:8b"
+coding_local_model = "llama3.1:8b"
+
+[knowledge]
+default_roots = []
+auto_index_on_search = false
 CONFIG_EOF
 fi
 
@@ -240,8 +245,8 @@ cat > "${WINDOWS_INSTALLER}" <<'WIN_INSTALLER_EOF'
 setlocal EnableExtensions
 
 title ADV ARCHON - instalador beta
-set "MODEL=llama3.1:8b"
-set "FAST_MODEL=llama3.2:3b"
+set "MODEL=llama3.2:3b"
+set "ANALYSIS_MODEL=llama3.1:8b"
 set "PACKAGE_DIR=%~dp0"
 set "SOURCE_DIR=%PACKAGE_DIR%adv-archon-source"
 set "INSTALL_DIR=%USERPROFILE%\ADV ARCHON Beta"
@@ -328,13 +333,13 @@ if errorlevel 1 (
 
 ollama list | findstr /B /C:"%MODEL% " >nul 2>&1
 if errorlevel 1 (
-  echo Descargando modelo %MODEL%. Puede tardar varios minutos...
+  echo Descargando modelo rapido %MODEL%. Puede tardar varios minutos...
   ollama pull "%MODEL%" >> "%LOG_FILE%" 2>&1
 )
-ollama list | findstr /B /C:"%FAST_MODEL% " >nul 2>&1
+ollama list | findstr /B /C:"%ANALYSIS_MODEL% " >nul 2>&1
 if errorlevel 1 (
-  echo Descargando modelo rapido %FAST_MODEL%. Puede tardar varios minutos...
-  ollama pull "%FAST_MODEL%" >> "%LOG_FILE%" 2>&1
+  echo Descargando modelo de analisis %ANALYSIS_MODEL%. Puede tardar varios minutos...
+  ollama pull "%ANALYSIS_MODEL%" >> "%LOG_FILE%" 2>&1
 )
 
 echo 5/5 Guardando configuracion y acceso directo...
@@ -342,11 +347,16 @@ mkdir "%USERPROFILE%\.adv-archon" >nul 2>&1
 if not exist "%USERPROFILE%\.adv-archon\config.toml" (
   > "%USERPROFILE%\.adv-archon\config.toml" echo [llm]
   >> "%USERPROFILE%\.adv-archon\config.toml" echo mode = "local"
-  >> "%USERPROFILE%\.adv-archon\config.toml" echo ollama_model = "llama3.1:8b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo ollama_model = "llama3.2:3b"
   >> "%USERPROFILE%\.adv-archon\config.toml" echo fast_local_model = "llama3.2:3b"
   >> "%USERPROFILE%\.adv-archon\config.toml" echo planner_local_model = "llama3.2:3b"
   >> "%USERPROFILE%\.adv-archon\config.toml" echo reasoning_local_model = "llama3.1:8b"
   >> "%USERPROFILE%\.adv-archon\config.toml" echo document_local_model = "llama3.1:8b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo coding_local_model = "llama3.1:8b"
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo.
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo [knowledge]
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo default_roots = []
+  >> "%USERPROFILE%\.adv-archon\config.toml" echo auto_index_on_search = false
 )
 copy "%INSTALL_DIR%\ADV_ARCHON.cmd" "%DESKTOP%\ADV_ARCHON.cmd" >nul
 

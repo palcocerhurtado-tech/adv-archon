@@ -344,8 +344,9 @@ class MessageBubble(QFrame):
         parent: QWidget | None = None,
     ) -> None:
         super().__init__(parent)
-        self._role   = role
-        self._buffer = text
+        self._role          = role
+        self._buffer        = text
+        self._is_placeholder = not bool(text)   # True until first real content arrives
         self.setObjectName(f"bubble_{role}")
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
 
@@ -372,11 +373,18 @@ class MessageBubble(QFrame):
 
     def set_text(self, text: str) -> None:
         self._buffer = text
+        self._is_placeholder = False
         self._render()
 
     def append_text(self, chunk: str) -> None:
         self._buffer += chunk
+        self._is_placeholder = False
         self._render()
+
+    def show_status(self, status: str) -> None:
+        """Show italic status text without affecting the content buffer."""
+        self._view.setMarkdown(f"*{status}*")
+        self._fit()
 
     def _render(self) -> None:
         self._view.setMarkdown(self._buffer)
@@ -424,22 +432,26 @@ class ChatArea(QScrollArea):
         return bubble
 
     def start_stream(self) -> MessageBubble:
-        bubble = MessageBubble("agent", "▌")   # cursor indicator
+        bubble = MessageBubble("agent", "")
         self._insert(bubble)
         self._streaming_bubble = bubble
         return bubble
 
     def append_stream(self, chunk: str) -> None:
-        if self._streaming_bubble:
-            current = self._streaming_bubble._buffer
-            if current == "▌":
-                current = ""
-            self._streaming_bubble.append_text(chunk if not current else chunk)
-            # Replace initial cursor sentinel on first real chunk
-            if current == "":
-                self._streaming_bubble._buffer = chunk
-                self._streaming_bubble._render()
-            QTimer.singleShot(0, self._scroll_end)
+        if self._streaming_bubble is None:
+            return
+        if self._streaming_bubble._is_placeholder:
+            self._streaming_bubble._buffer = chunk
+            self._streaming_bubble._is_placeholder = False
+        else:
+            self._streaming_bubble._buffer += chunk
+        self._streaming_bubble._render()
+        QTimer.singleShot(0, self._scroll_end)
+
+    def update_stream_status(self, status: str) -> None:
+        """Show italic status in the active streaming bubble (placeholder phase only)."""
+        if self._streaming_bubble is not None and self._streaming_bubble._is_placeholder:
+            self._streaming_bubble.show_status(status)
 
     def finish_stream(self) -> None:
         self._streaming_bubble = None

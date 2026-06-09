@@ -172,6 +172,8 @@ if PYSIDE6_AVAILABLE:
         def _on_busy_state_changed(self, state: DesktopBusyState) -> None:
             if state.detail:
                 self._composer.set_status(state.detail)
+                if state.task == "prompt":
+                    self._chat.update_stream_status(state.detail)
             elif state.task == "initializing":
                 self._composer.set_status("Preparando motor local…")
             elif not state.backend_ready:

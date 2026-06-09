@@ -41,6 +41,7 @@ QSizePolicy: Any = None
 QTextBrowser: Any = None
 QVBoxLayout: Any = None
 QWidget: Any = None
+DraftEditorWidget: Any = None
 
 if PYSIDE6_AVAILABLE:
     from importlib import import_module
@@ -70,6 +71,7 @@ if PYSIDE6_AVAILABLE:
     QTextBrowser = _w.QTextBrowser
     QVBoxLayout = _w.QVBoxLayout
     QWidget = _w.QWidget
+    from adv_archon.desktop.draft_editor import DraftEditorWidget
 
 
 # ── Status colours / labels ───────────────────────────────────────────────────
@@ -336,6 +338,9 @@ if PYSIDE6_AVAILABLE:
             on_review: Any = None,
             on_run_agent: Any = None,
             on_agent_step_action: Any = None,
+            on_prepare_document: Any = None,
+            on_save_document: Any = None,
+            on_export_document: Any = None,
         ) -> None:
             super().__init__()
             self._on_attach_plan = on_attach_plan
@@ -345,9 +350,13 @@ if PYSIDE6_AVAILABLE:
             self._on_review = on_review
             self._on_run_agent = on_run_agent
             self._on_agent_step_action = on_agent_step_action
+            self._on_prepare_document = on_prepare_document
+            self._on_save_document = on_save_document
+            self._on_export_document = on_export_document
             self._expediente_id: str | None = None
             self._expediente: Any = None
             self._operation_busy = False
+            self._document_loaded = False
 
             layout = QVBoxLayout(self)
             layout.setContentsMargins(12, 8, 12, 8)
@@ -494,6 +503,39 @@ if PYSIDE6_AVAILABLE:
             review_row.addStretch(1)
             layout.addLayout(review_row)
 
+            document_frame = QFrame()
+            document_frame.setObjectName("Panel")
+            document_lay = QVBoxLayout(document_frame)
+            document_lay.setContentsMargins(10, 10, 10, 10)
+            document_lay.setSpacing(8)
+            document_header = QHBoxLayout()
+            document_title = QLabel("Documento de entrega")
+            document_title.setObjectName("StudioCase")
+            self._document_status_label = QLabel("Borrador pendiente")
+            self._document_status_label.setObjectName("Faint")
+            document_header.addWidget(document_title)
+            document_header.addStretch(1)
+            document_header.addWidget(self._document_status_label)
+            document_lay.addLayout(document_header)
+
+            self._draft_editor = DraftEditorWidget()
+            self._draft_editor.setMaximumHeight(260)
+            self._draft_editor.save_requested.connect(self._on_document_save_requested)
+            self._draft_editor.export_requested.connect(self._on_document_export_clicked)
+            document_lay.addWidget(self._draft_editor)
+
+            document_actions = QHBoxLayout()
+            self._document_prepare_btn = QPushButton("Preparar borrador")
+            self._document_prepare_btn.setObjectName("Ghost")
+            self._document_prepare_btn.clicked.connect(self._on_document_prepare_clicked)
+            document_actions.addWidget(self._document_prepare_btn)
+            document_hint = QLabel("Edita, guarda y exporta desde el editor.")
+            document_hint.setObjectName("Faint")
+            document_actions.addWidget(document_hint)
+            document_actions.addStretch(1)
+            document_lay.addLayout(document_actions)
+            layout.addWidget(document_frame)
+
         def _set_brand_icon(self, button: Any) -> None:
             try:
                 from adv_archon.desktop.branding import logo_path
@@ -525,6 +567,7 @@ if PYSIDE6_AVAILABLE:
                 self._plan_label.setStyleSheet(f"color:{TEXT_FAINT};font-size:11px;")
 
             self._context_browser.setHtml(self._render_context(exp))
+            self._load_document_draft(silent=True)
             can_analyze = bool(exp.plan_path) and bool(exp.municipality or exp.latitude)
             self._analyze_btn.setEnabled(can_analyze and not self._operation_busy)
             exportable = exp.status in (
@@ -543,6 +586,7 @@ if PYSIDE6_AVAILABLE:
                 self._review_exclude_btn,
             ):
                 button.setEnabled(not self._operation_busy)
+            self._document_prepare_btn.setEnabled(not self._operation_busy)
 
         def set_operation_busy(self, busy: bool, label: str = "") -> None:
             self._operation_busy = busy
@@ -554,6 +598,7 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setEnabled(False)
             self._talk_btn.setEnabled(False)
             self._agent_btn.setEnabled(False)
+            self._document_prepare_btn.setEnabled(False)
             for button in (
                 self._review_confirm_btn,
                 self._review_correct_btn,
@@ -1018,6 +1063,22 @@ if PYSIDE6_AVAILABLE:
             self._open_report_btn.setVisible(False)
             self._talk_btn.setEnabled(False)
             self._agent_btn.setEnabled(False)
+            self._document_loaded = False
+            self._document_status_label.setText("Borrador pendiente")
+            self._draft_editor.load_draft(
+                {
+                    "title": "Documento de entrega",
+                    "status": "Sin expediente",
+                    "sections": [
+                        {
+                            "id": "summary",
+                            "title": "Resumen",
+                            "content": "Selecciona un expediente para preparar el borrador.",
+                        }
+                    ],
+                }
+            )
+            self._document_prepare_btn.setEnabled(False)
             for button in (
                 self._review_confirm_btn,
                 self._review_correct_btn,
@@ -1072,6 +1133,70 @@ if PYSIDE6_AVAILABLE:
             if not self._on_review or not self._expediente_id:
                 return
             self._on_review(self._expediente_id, action)
+
+        def _load_document_draft(self, *, silent: bool = False) -> None:
+            if not self._expediente_id or not self._on_prepare_document:
+                return
+            try:
+                payload = self._on_prepare_document(self._expediente_id)
+            except Exception as exc:
+                if not silent:
+                    QMessageBox.warning(
+                        self,
+                        "Documento de entrega",
+                        f"No se pudo preparar el borrador: {exc}",
+                    )
+                self._document_status_label.setText("Borrador no disponible")
+                self._document_loaded = False
+                return
+            if not isinstance(payload, dict):
+                self._document_status_label.setText("Borrador no disponible")
+                self._document_loaded = False
+                return
+            self._draft_editor.load_draft(payload)
+            self._document_status_label.setText("Borrador listo")
+            self._document_loaded = True
+
+        def _on_document_prepare_clicked(self) -> None:
+            self._load_document_draft(silent=False)
+
+        def _on_document_save_requested(self, payload: object) -> None:
+            if isinstance(payload, dict):
+                self._save_document_payload(payload)
+
+        def _save_document_payload(self, payload: dict[str, Any]) -> None:
+            if not self._expediente_id or not self._on_save_document:
+                return
+            try:
+                self._on_save_document(self._expediente_id, payload)
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Documento de entrega",
+                    f"No se pudo guardar el borrador: {exc}",
+                )
+                return
+            self._document_status_label.setText("Borrador guardado")
+
+        def _on_document_export_clicked(self, kind: str) -> None:
+            if not self._expediente_id or not self._on_export_document:
+                return
+            try:
+                path_text = self._on_export_document(
+                    self._expediente_id,
+                    str(kind),
+                    self._draft_editor.current_draft(),
+                )
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Documento de entrega",
+                    f"No se pudo exportar el documento: {exc}",
+                )
+                return
+            self._document_status_label.setText(f"{str(kind).upper()} exportado")
+            if path_text:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(path_text)))
 
         def _on_open_report_clicked(self) -> None:
             if self._expediente and self._expediente.report_path:

@@ -130,6 +130,7 @@ if PYSIDE6_AVAILABLE:
         """Editable draft surface for PDF/DOCX/XLSX previews."""
 
         draft_changed = Signal(object)
+        save_requested = Signal(object)
         export_requested = Signal(str)
 
         def __init__(self, parent: Any | None = None) -> None:
@@ -174,7 +175,7 @@ if PYSIDE6_AVAILABLE:
 
             actions = QHBoxLayout()
             self._save_button = QPushButton("Guardar borrador")
-            self._save_button.clicked.connect(self.mark_saved)
+            self._save_button.clicked.connect(self._request_save)
             actions.addWidget(self._save_button)
 
             for kind, label in (("pdf", "PDF"), ("docx", "DOCX"), ("xlsx", "XLSX")):
@@ -250,6 +251,13 @@ if PYSIDE6_AVAILABLE:
             self._dirty = False
             self.set_status("Borrador guardado")
             self.draft_changed.emit(self.current_draft())
+
+        def _request_save(self) -> None:
+            draft = self.current_draft()
+            self._dirty = False
+            self.set_status("Borrador guardado")
+            self.save_requested.emit(draft)
+            self.draft_changed.emit(draft)
 
         def request_export(self, kind: str) -> None:
             self._save_current_section()

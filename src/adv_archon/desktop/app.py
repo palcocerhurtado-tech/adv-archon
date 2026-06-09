@@ -67,6 +67,7 @@ def launch_desktop_app(
             QComboBox,
             QFileDialog,
             QFrame,
+            QGridLayout,
             QHBoxLayout,
             QLabel,
             QListWidget,
@@ -661,6 +662,12 @@ def launch_desktop_app(
             self._pills_row.addStretch(1)
             fl.addLayout(self._pills_row)
 
+            self._attachment_hint_label = QLabel("")
+            self._attachment_hint_label.setObjectName("Faint")
+            self._attachment_hint_label.setWordWrap(True)
+            self._attachment_hint_label.setVisible(False)
+            fl.addWidget(self._attachment_hint_label)
+
             # Input + send
             input_row = QHBoxLayout()
             input_row.setSpacing(10)
@@ -1181,8 +1188,7 @@ def launch_desktop_app(
                 self._recent_attachment_entries = merge_recent_items(
                     self._recent_attachment_entries, labels, limit=12
                 )
-                self._recent_attachments_list.clear()
-                self._recent_attachments_list.addItems(self._recent_attachment_entries)
+                self._refresh_attachments_panel()
             self._pending_prompt = ""
             self._pending_attachments = []
 
@@ -1229,10 +1235,53 @@ def launch_desktop_app(
                 self._pills_row.insertWidget(self._pills_row.count() - 1, pill)
             has = bool(self._attachments)
             self._import_button.setVisible(has)
+            self._render_attachment_hint()
+            self._refresh_attachments_panel()
             if not has:
                 self._compliance.reset()
             self._refresh_compliance_ui()
             self._handle_busy_state_changed(self._busy_state)
+
+        def _refresh_attachments_panel(self) -> None:
+            if not hasattr(self, "_recent_attachments_list"):
+                return
+            self._recent_attachments_list.clear()
+            if self._attachments:
+                self._recent_attachments_list.addItem("Adjuntos del turno")
+                for path in self._attachments[:8]:
+                    self._recent_attachments_list.addItem(path.name or str(path))
+                if self._recent_attachment_entries:
+                    self._recent_attachments_list.addItem("— recientes —")
+            self._recent_attachments_list.addItems(self._recent_attachment_entries)
+
+        def _render_attachment_hint(self) -> None:
+            if not self._attachments:
+                self._attachment_hint_label.setVisible(False)
+                self._attachment_hint_label.setText("")
+                return
+            from adv_archon.core.vision_preflight import (
+                build_attachment_vision_hints,
+                summarize_vision_readiness,
+            )
+
+            hints = build_attachment_vision_hints(self._attachments)
+            needs_vision = any(hint.needs_vision for hint in hints)
+            readiness = summarize_vision_readiness(
+                [self._ollama_model],
+                configured_model=str(config.llm.vision_local_model),
+            )
+            kinds = ", ".join(dict.fromkeys(hint.kind for hint in hints))
+            if needs_vision and not readiness.can_analyze_images:
+                self._attachment_hint_label.setText(
+                    f"Adjuntos: {kinds}. {readiness.label}: se usará texto/OCR "
+                    "o se pedirá conversión si el archivo requiere inspección visual."
+                )
+            else:
+                self._attachment_hint_label.setText(
+                    f"Adjuntos listos: {kinds}. ARCHON puede usarlos para informe, "
+                    "Excel, análisis o entrega."
+                )
+            self._attachment_hint_label.setVisible(True)
 
         def _import_attachments_to_kb(self) -> None:
             paths = list(self._attachments)
@@ -1280,6 +1329,22 @@ def launch_desktop_app(
                 self._exp_context_bar.setVisible(False)
             else:
                 full_prompt = prompt
+            if attachments:
+                from adv_archon.core.vision_preflight import (
+                    build_attachment_vision_hints,
+                    build_multimodal_prompt,
+                    summarize_vision_readiness,
+                )
+
+                readiness = summarize_vision_readiness(
+                    [self._ollama_model],
+                    configured_model=str(config.llm.vision_local_model),
+                )
+                full_prompt = build_multimodal_prompt(
+                    full_prompt,
+                    build_attachment_vision_hints(attachments),
+                    readiness,
+                )
             self.prompt_requested.emit(full_prompt, [str(p) for p in attachments])
 
         def _submit_live_prompt(self, prompt: str) -> None:
@@ -1339,16 +1404,21 @@ def launch_desktop_app(
                 return
 
             from adv_archon.core.expediente import ExpedienteStore
-            from adv_archon.core.studio import load_studio_client_config
+            from adv_archon.core.workspace_v2 import build_workspace_snapshot
 
             self._close_workspace_panels()
             self._clear_message_area()
             self._home_visible = True
             self._set_nav_context("home")
             data_dir = self._studio_data_dir()
+            workspace_snapshot = build_workspace_snapshot(
+                (Path.home() / "Desktop", data_dir),
+                engine_status=self._ollama_state,
+                ollama_model=self._ollama_model,
+                last_expediente=self._last_exp_label,
+            )
             store = ExpedienteStore(data_dir / "expedientes.db")
             expedientes = store.list_all()
-            client_cfg = load_studio_client_config(data_dir)
             recent = expedientes[:5]
             reports = sum(1 for exp in expedientes if getattr(exp, "report_path", ""))
             risks = 0
@@ -1401,31 +1471,34 @@ def launch_desktop_app(
             hero_lay.addWidget(new_btn, alignment=Qt.AlignmentFlag.AlignVCenter)
             page_lay.addWidget(hero)
 
-            action_row = QHBoxLayout()
-            action_row.setSpacing(10)
+            action_grid = QGridLayout()
+            action_grid.setHorizontalSpacing(10)
+            action_grid.setVerticalSpacing(10)
             actions = [
                 (
-                    "Studio Demo",
-                    "Tres casos guiados con semáforo, riesgos, fuentes e informe.",
-                    self._open_studio_demo,
+                    "Research",
+                    "Investiga fuentes, extrae fórmulas y prepara entregables.",
+                    self._open_research_workbench,
                     "Primary",
                 ),
                 (
-                    "Revisión Pro",
-                    "Decisiones por paso, advertencias aceptadas y trazabilidad del agente.",
-                    self._show_professional_review,
+                    "Documentos",
+                    f"{len(workspace_snapshot.documents)} entregables generados.",
+                    lambda: QDesktopServices.openUrl(
+                        QUrl.fromLocalFile(str(Path.home() / "Desktop"))
+                    ),
                     "Ghost",
                 ),
                 (
-                    "Cliente / Licencia",
-                    f"{client_cfg.client_name} · {client_cfg.license_label}",
-                    self._open_client_license,
+                    "Estado sistema",
+                    "Motor local, rendimiento, permisos y modelos.",
+                    self._open_system_status,
                     "Ghost",
                 ),
                 (
-                    "Training Lab",
-                    "Dataset real, sintético y preparación de fine-tuning local.",
-                    self._open_training_lab,
+                    "Acciones rápidas",
+                    "Chat, voz, adjuntos y primer borrador desde un único flujo.",
+                    self._show_chat_home,
                     "Ghost",
                 ),
                 (
@@ -1435,7 +1508,7 @@ def launch_desktop_app(
                     "Ghost",
                 ),
             ]
-            for heading, copy, callback, btn_style in actions:
+            for index, (heading, copy, callback, btn_style) in enumerate(actions):
                 card = QFrame()
                 card.setObjectName("StudioCard")
                 card_lay = QVBoxLayout(card)
@@ -1453,14 +1526,15 @@ def launch_desktop_app(
                 card_lay.addWidget(body)
                 card_lay.addStretch(1)
                 card_lay.addWidget(btn)
-                action_row.addWidget(card)
-            page_lay.addLayout(action_row)
+                action_grid.addWidget(card, index // 3, index % 3)
+            page_lay.addLayout(action_grid)
 
             metrics_row = QHBoxLayout()
             metrics_row.setSpacing(10)
             metrics = [
                 ("Expedientes", str(len(expedientes))),
                 ("Informes", str(reports)),
+                ("Documentos", str(len(workspace_snapshot.documents))),
                 ("Riesgos", str(risks)),
                 ("Ollama", self._ollama_state),
                 ("Modelo", self._ollama_model),
@@ -1518,27 +1592,58 @@ def launch_desktop_app(
                 recent_lay.addWidget(empty)
             bottom_row.addWidget(recent_card, 2)
 
-            flow_card = QFrame()
-            flow_card.setObjectName("Panel")
-            flow_lay = QVBoxLayout(flow_card)
-            flow_lay.setContentsMargins(14, 14, 14, 14)
-            flow_lay.setSpacing(7)
-            flow_title = QLabel("Flujo guiado")
-            flow_title.setObjectName("StudioCase")
-            flow_lay.addWidget(flow_title)
-            for step in (
-                "1. Tipo de actuación",
-                "2. Dirección, Catastro o coordenadas",
-                "3. Plano del expediente",
-                "4. Análisis PGOU y afecciones",
-                "5. Revisión profesional trazable",
-                "6. Informe PDF profesional",
-            ):
-                lbl = QLabel(step)
-                lbl.setObjectName("Sub")
-                flow_lay.addWidget(lbl)
-            flow_lay.addStretch(1)
-            bottom_row.addWidget(flow_card, 1)
+            docs_card = QFrame()
+            docs_card.setObjectName("Panel")
+            docs_lay = QVBoxLayout(docs_card)
+            docs_lay.setContentsMargins(14, 14, 14, 14)
+            docs_lay.setSpacing(8)
+            docs_title = QLabel("Documentos generados")
+            docs_title.setObjectName("StudioCase")
+            docs_lay.addWidget(docs_title)
+            if workspace_snapshot.documents:
+                for document in workspace_snapshot.documents[:5]:
+                    row = QFrame()
+                    row.setObjectName("StudioMetric")
+                    row_lay = QHBoxLayout(row)
+                    row_lay.setContentsMargins(10, 8, 10, 8)
+                    txt = QLabel(f"{document.title}\n{document.kind.upper()}")
+                    txt.setObjectName("Sub")
+                    txt.setWordWrap(True)
+                    open_btn = QPushButton("Abrir")
+                    open_btn.setObjectName("Ghost")
+                    open_btn.clicked.connect(
+                        lambda _checked=False, p=document.path: QDesktopServices.openUrl(
+                            QUrl.fromLocalFile(p)
+                        )
+                    )
+                    row_lay.addWidget(txt, 1)
+                    row_lay.addWidget(open_btn)
+                    docs_lay.addWidget(row)
+            else:
+                empty_docs = QLabel(
+                    "Aún no hay PDF/DOCX/XLSX generados. Usa Research o Expedientes."
+                )
+                empty_docs.setObjectName("Sub")
+                empty_docs.setWordWrap(True)
+                docs_lay.addWidget(empty_docs)
+            docs_lay.addStretch(1)
+            bottom_row.addWidget(docs_card, 1)
+
+            activity_card = QFrame()
+            activity_card.setObjectName("Panel")
+            activity_lay = QVBoxLayout(activity_card)
+            activity_lay.setContentsMargins(14, 14, 14, 14)
+            activity_lay.setSpacing(8)
+            activity_title = QLabel("Última actividad")
+            activity_title.setObjectName("StudioCase")
+            activity_lay.addWidget(activity_title)
+            for item in workspace_snapshot.recent_activity[:5]:
+                activity = QLabel(f"• {item}")
+                activity.setObjectName("Sub")
+                activity.setWordWrap(True)
+                activity_lay.addWidget(activity)
+            activity_lay.addStretch(1)
+            bottom_row.addWidget(activity_card, 1)
             page_lay.addLayout(bottom_row, 1)
 
             idx = self._messages_layout.count() - 1
@@ -4344,6 +4449,7 @@ def launch_desktop_app(
                 QHBoxLayout as _QHBoxLayout,
             )
 
+            from adv_archon.core.document_store import DocumentStore
             from adv_archon.core.expediente import Expediente, ExpedienteStore
             from adv_archon.desktop.expediente_panel import (
                 ExpedienteDetailPanel,
@@ -4356,6 +4462,7 @@ def launch_desktop_app(
             data_dir = Path(os.getenv("ADV_ARCHON_HOME", str(Path.home() / ".adv-archon")))
             data_dir.mkdir(parents=True, exist_ok=True)
             store = ExpedienteStore(data_dir / "expedientes.db")
+            document_store = DocumentStore(data_dir / "documents.db")
             runtime = getattr(self._backend_worker, "_runtime", None)
             if runtime is not None:
                 for attr in (
@@ -5009,7 +5116,12 @@ def launch_desktop_app(
             root_layout.addLayout(dlg_layout, 1)
             back_btn.clicked.connect(self._show_chat_home)
             close_btn.clicked.connect(dlg.close)
-            dlg.finished.connect(lambda _code: setattr(self, "_expedientes_dialog", None))
+            def _on_expedientes_finished(_code: int) -> None:
+                self._expedientes_dialog = None
+                with suppress(Exception):
+                    document_store.close()
+
+            dlg.finished.connect(_on_expedientes_finished)
             self._expedientes_dialog = dlg
 
             def _launch_agent_review(eid: str) -> None:
@@ -5303,6 +5415,49 @@ def launch_desktop_app(
                 if action == "repeat":
                     QTimer.singleShot(120, lambda: _launch_agent_review(eid))
 
+            def _prepare_document_draft(eid: str) -> dict[str, Any]:
+                exp = store.get(eid)
+                if exp is None:
+                    return {}
+                from adv_archon.core.expediente_documents import ensure_expediente_draft
+
+                draft = ensure_expediente_draft(document_store, exp)
+                return draft.to_dict()
+
+            def _save_document_draft(eid: str, payload: dict[str, Any]) -> dict[str, Any]:
+                payload = dict(payload)
+                payload["expediente_id"] = eid
+                payload["kind"] = payload.get("kind") or "expediente"
+                from adv_archon.core.expediente_documents import (
+                    save_edited_expediente_draft,
+                )
+
+                draft = save_edited_expediente_draft(document_store, payload)
+                self.statusBar().showMessage("Borrador de expediente guardado.", 3500)
+                return draft.to_dict()
+
+            def _export_document_draft(
+                eid: str,
+                kind: str,
+                payload: dict[str, Any],
+            ) -> str:
+                del eid
+                from adv_archon.core.expediente_documents import (
+                    export_expediente_draft,
+                    save_edited_expediente_draft,
+                )
+
+                draft = save_edited_expediente_draft(document_store, payload)
+                output = export_expediente_draft(
+                    draft,
+                    kind,
+                    Path.home() / "Desktop",
+                    archon_logo_path=logo_path(),
+                )
+                document_store.mark_exported(draft.id, kind, output)
+                self.statusBar().showMessage(f"Documento exportado: {output.name}", 5000)
+                return str(output)
+
             detail_panel = ExpedienteDetailPanel(
                 on_attach_plan=lambda eid: _attach_plan(eid),
                 on_analyze=_on_analyze,
@@ -5311,6 +5466,9 @@ def launch_desktop_app(
                 on_review=_on_review,
                 on_run_agent=_launch_agent_review,
                 on_agent_step_action=_on_agent_step_action,
+                on_prepare_document=_prepare_document_draft,
+                on_save_document=_save_document_draft,
+                on_export_document=_export_document_draft,
             )
 
             def _attach_plan(eid: str) -> None:

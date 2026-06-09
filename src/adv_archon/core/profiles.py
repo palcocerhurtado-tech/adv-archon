@@ -37,6 +37,30 @@ DEFAULT_PROFILE_DEFINITIONS = {
             "and structured findings."
         ),
     ),
+    "urbanismo": ProfileDefinition(
+        name="urbanismo",
+        description="Revisión urbanística española, PGOU, afecciones y viabilidad.",
+        system_hint=(
+            "Prioriza cumplimiento urbanístico español, PGOU municipal, Catastro, "
+            "afecciones sectoriales, trazabilidad oficial y advertencias jurídicas prudentes."
+        ),
+    ),
+    "arquitectura": ProfileDefinition(
+        name="arquitectura",
+        description="Expedientes de arquitectura, memoria, planos, mediciones e informes.",
+        system_hint=(
+            "Prioriza entregables de despacho: memoria, mediciones, presupuesto, "
+            "análisis de planos, coordinación técnica y claridad para cliente final."
+        ),
+    ),
+    "legal": ProfileDefinition(
+        name="legal",
+        description="Lectura jurídico-técnica prudente con fuentes y límites explícitos.",
+        system_hint=(
+            "Prioriza precisión legal, separación entre dato oficial e inferencia, "
+            "citas verificables, cautelas y asuntos pendientes de validación técnica."
+        ),
+    ),
     "coding": ProfileDefinition(
         name="coding",
         description="Enfocado en repos, código, debugging y cambios verificables.",

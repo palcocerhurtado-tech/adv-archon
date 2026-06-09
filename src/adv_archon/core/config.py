@@ -10,7 +10,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 
-from adv_archon.core.profiles import ProfileDefinition
+from adv_archon.core.profiles import DEFAULT_PROFILE_DEFINITIONS, ProfileDefinition
 
 PACKAGE_ROOT = Path(__file__).resolve().parents[1]
 BUNDLED_SYSTEM_PROMPT = PACKAGE_ROOT / "resources" / "system.md"
@@ -671,9 +671,14 @@ def load_app_config(
             knowledge_roots=tuple(str(item) for item in raw_knowledge_roots),
             vault_roots=tuple(str(item) for item in raw_vault_roots),
         )
+    merged_definitions = dict(DEFAULT_PROFILE_DEFINITIONS)
+    merged_definitions.update(definitions)
+    default_profile = str(profiles_data.get("default", "general"))
+    if default_profile not in merged_definitions:
+        default_profile = "general"
     profiles = ProfilesConfig(
-        default_profile=str(profiles_data.get("default", "general")),
-        definitions=definitions,
+        default_profile=default_profile,
+        definitions=merged_definitions,
     )
 
     system_prompt_path = system_prompt_override or DEFAULT_SYSTEM_PROMPT

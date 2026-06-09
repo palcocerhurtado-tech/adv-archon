@@ -20,7 +20,7 @@ if PYSIDE6_AVAILABLE:
     # ── Confirm bridge ─────────────────────────────────────────────────────────
     # Same pattern as ConfirmBridge in app.py but standalone.
     from PySide6.QtCore import QObject, Qt, QThread, Signal
-    from PySide6.QtWidgets import QApplication, QMessageBox
+    from PySide6.QtWidgets import QApplication, QDialog, QMessageBox
 
     from adv_archon.desktop.redesigned_main_window import RedesignedMainWindow
     from adv_archon.desktop.workers import DesktopBusyState, DesktopRuntimeWorker
@@ -117,9 +117,7 @@ if PYSIDE6_AVAILABLE:
             self._backend_worker.tool.connect(
                 lambda name, _args: self.receive_tool_call(name)
             )
-            self._backend_worker.prompt_finished.connect(
-                lambda _text: self.receive_final()
-            )
+            self._backend_worker.prompt_finished.connect(self._on_prompt_finished)
             self._backend_worker.ready.connect(self._on_backend_ready)
             self._backend_worker.failed.connect(self._on_worker_failed)
             self._backend_worker.cancelled.connect(self._on_worker_cancelled)
@@ -169,6 +167,11 @@ if PYSIDE6_AVAILABLE:
             self._chat.finish_stream()
             self._composer.set_enabled_input(True)
 
+        def _on_prompt_finished(self, _text: str) -> None:
+            self.receive_final()
+            self._try_load_expedientes()
+            self._refresh_active_expediente()
+
         def _on_busy_state_changed(self, state: DesktopBusyState) -> None:
             if state.detail:
                 self._composer.set_status(state.detail)
@@ -200,6 +203,9 @@ if PYSIDE6_AVAILABLE:
             self._worker_run_prompt.emit(text, [str(p) for p in attachments])
 
         def _forward_command(self, cmd_id: str) -> None:  # noqa: C901
+            if cmd_id == "theme_toggle":
+                self._toggle_theme()
+                return
             # Mode changes — update worker AND redraw UI
             if cmd_id in ("mode_local", "mode_cloud"):
                 new_mode = cmd_id.split("_", 1)[1]
@@ -210,13 +216,17 @@ if PYSIDE6_AVAILABLE:
             if cmd_id.startswith("exp_open:"):
                 self._activate_expediente(cmd_id.split(":", 1)[1])
                 return
+            if cmd_id == "exp_open":
+                self._toggle_left()
+                self._composer.set_status("Selecciona un expediente en el panel izquierdo.")
+                return
+            if cmd_id == "exp_list":
+                self._try_load_expedientes()
+                self._toggle_left()
+                return
             # New expediente
             if cmd_id == "exp_new":
-                self._chat.add_message(
-                    "agent",
-                    "Función **Nuevo expediente** disponible próximamente en v2.\n"
-                    "Por ahora crea expedientes desde la versión clásica.",
-                )
+                self._create_expediente()
                 return
             # Shortcuts reference
             if cmd_id == "shortcuts":
@@ -253,6 +263,47 @@ if PYSIDE6_AVAILABLE:
                 self._composer.set_enabled_input(False)
                 self._worker_run_prompt.emit(prompt, [])
                 return
+            direct_messages = {
+                "research": (
+                    "**Research Workbench**\n\n"
+                    "Arrastra PDF/DOCX/XLSX/imagen al composer y pide: "
+                    "`investiga este material y genera un entregable editable`."
+                ),
+                "training": (
+                    "**Training Lab**\n\n"
+                    "El laboratorio de datos está disponible desde las herramientas "
+                    "documentales del agente. Puedes pedir: `exporta mi dataset de "
+                    "fine-tuning` o `genera ejemplos sintéticos locales`."
+                ),
+                "studio_demo": (
+                    "**Studio Demo**\n\n"
+                    "Pide: `abre o prepara una demo comercial de ADV ARCHON Studio` "
+                    "para revisar casos guiados, valor ahorrado e informes."
+                ),
+                "qa_system": (
+                    "**QA permisos**\n\n"
+                    "Comprueba Ollama, micrófono, modelos locales y knowledge con: "
+                    "`haz un diagnóstico del sistema local`."
+                ),
+                "system_status": (
+                    "**Estado del sistema**\n\n"
+                    "Pide `mide el rendimiento de ADV ARCHON` para lanzar el profiler "
+                    "local y revisar latencia, SQLite, workers y Ollama."
+                ),
+                "beta_guide": (
+                    "**Guía beta**\n\n"
+                    "Flujo recomendado: crea expediente, adjunta plano, ejecuta "
+                    "Autopilot, revisa la bandeja profesional y exporta informe."
+                ),
+                "settings": (
+                    "**Ajustes**\n\n"
+                    "Usa el selector de perfil/modo en el panel izquierdo. Para modelos, "
+                    "pide `cambia el modelo local a llama3.2:3b`."
+                ),
+            }
+            if cmd_id in direct_messages:
+                self._chat.add_message("agent", direct_messages[cmd_id])
+                return
             # Status commands
             if cmd_id == "pgou_status":
                 self._chat.add_message(
@@ -267,6 +318,45 @@ if PYSIDE6_AVAILABLE:
             self._composer.set_status(f"⌘ {cmd_id}")
 
         # ── Expediente handling ────────────────────────────────────────────────
+
+        def _create_expediente(self) -> None:
+            try:
+                from adv_archon.core.expediente import ExpedienteStore
+                from adv_archon.desktop.expediente_panel import NewExpedienteDialog
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Nuevo expediente",
+                    f"No se pudo abrir el formulario de expediente: {exc}",
+                )
+                return
+
+            dialog = NewExpedienteDialog(self)
+            if dialog.exec() != QDialog.DialogCode.Accepted:
+                return
+            try:
+                store = ExpedienteStore(self._data_dir() / "expedientes.db")
+                expediente = store.create(
+                    title=dialog.title_text(),
+                    address=dialog.address_text(),
+                    notes=dialog.notes_text(),
+                    case_type=dialog.case_type(),
+                )
+            except Exception as exc:
+                QMessageBox.warning(
+                    self,
+                    "Nuevo expediente",
+                    f"No se pudo crear el expediente: {exc}",
+                )
+                return
+
+            self._try_load_expedientes()
+            self._activate_expediente(expediente.id)
+            self._chat.add_message(
+                "agent",
+                f"Expediente **{expediente.title}** creado. "
+                "Adjunta un plano o pide ejecutar Autopilot para continuar.",
+            )
 
         def _activate_expediente(self, exp_id: str) -> None:
             """Look up full expediente, update UI + notify worker."""
@@ -290,6 +380,14 @@ if PYSIDE6_AVAILABLE:
                 })
             except Exception:
                 pass
+
+        def _refresh_active_expediente(self) -> None:
+            active = getattr(self, "_active_exp", None)
+            if not isinstance(active, dict):
+                return
+            exp_id = str(active.get("id") or "")
+            if exp_id:
+                self._activate_expediente(exp_id)
 
         def _try_load_expedientes(self) -> None:
             """Populate the left-panel list from the local DB (best-effort)."""

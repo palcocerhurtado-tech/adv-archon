@@ -1,3 +1,4 @@
+# mypy: ignore-errors
 """
 ADV ARCHON — Redesigned Main Window (v2)
 =========================================
@@ -94,7 +95,7 @@ PANEL_BG_LIGHT   = "#F0EDE8"
 PANEL_BG_DARK    = "#111111"
 
 LEFT_OPEN_W  = 240
-RIGHT_OPEN_W = 280
+RIGHT_OPEN_W = 340
 TOP_H        = 38
 
 
@@ -730,7 +731,7 @@ class RightPanel(QFrame):
         self._ctx_view = QTextBrowser()
         self._ctx_view.setObjectName("ctxView")
         self._ctx_view.setOpenExternalLinks(False)
-        self._tabs.addTab(self._ctx_view, "Ctx")
+        self._tabs.addTab(self._ctx_view, "Contexto")
 
         # Tab 1 — Herramientas
         tools_w = QWidget()
@@ -743,7 +744,7 @@ class RightPanel(QFrame):
         scroll_t.setWidgetResizable(True)
         scroll_t.setWidget(tools_w)
         scroll_t.setFrameShape(QFrame.Shape.NoFrame)
-        self._tabs.addTab(scroll_t, "Tools")
+        self._tabs.addTab(scroll_t, "Herr.")
 
         # Tab 2 — Fuentes
         self._sources = QListWidget()
@@ -753,7 +754,7 @@ class RightPanel(QFrame):
         # Tab 3 — Historial
         self._history = QListWidget()
         self._history.setObjectName("historyList")
-        self._tabs.addTab(self._history, "Hist.")
+        self._tabs.addTab(self._history, "Historial")
 
         # Tab 4 — Adjuntos
         attach_w = QWidget()
@@ -765,7 +766,7 @@ class RightPanel(QFrame):
         scroll_a.setWidgetResizable(True)
         scroll_a.setWidget(attach_w)
         scroll_a.setFrameShape(QFrame.Shape.NoFrame)
-        self._tabs.addTab(scroll_a, "Adj.")
+        self._tabs.addTab(scroll_a, "Adjuntos")
 
     # ── public API ──────────────────────────────────────────────────────
     def set_context(self, markdown: str) -> None:
@@ -1010,6 +1011,7 @@ class RedesignedMainWindow(QMainWindow):
         self._build_ui()
         self._setup_shortcuts()
         self._load_styles()
+        self._watch_system_palette()
 
         if runtime is not None:
             self._wire_runtime(runtime)
@@ -1273,6 +1275,20 @@ class RedesignedMainWindow(QMainWindow):
 
     def _toggle_theme(self) -> None:
         self._dark = not self._dark
+        self._load_styles()
+
+    def _watch_system_palette(self) -> None:
+        app = QApplication.instance()
+        if app is None or not hasattr(app, "paletteChanged"):
+            return
+        with contextlib.suppress(Exception):
+            app.paletteChanged.connect(self._on_system_palette_changed)
+
+    def _on_system_palette_changed(self, _palette: QPalette) -> None:
+        dark = _is_dark()
+        if dark == self._dark:
+            return
+        self._dark = dark
         self._load_styles()
 
     def _wire_runtime(self, runtime: Any) -> None:

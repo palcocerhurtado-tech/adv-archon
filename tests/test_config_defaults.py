@@ -36,3 +36,30 @@ def test_load_app_config_safe_defaults(tmp_path, monkeypatch) -> None:
     assert cfg.llm.reasoning_local_model == "llama3.1:8b"
     assert cfg.knowledge.default_roots == ()
     assert cfg.knowledge.auto_index_on_search is False
+    assert {"general", "urbanismo", "arquitectura", "legal"}.issubset(
+        cfg.profiles.definitions
+    )
+
+
+def test_load_app_config_profile_defaults_can_be_overridden(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("ADV_ARCHON_HOME", str(tmp_path))
+    (tmp_path / "config.toml").write_text(
+        """
+[profiles]
+default = "legal"
+
+[profiles.despacho]
+description = "Perfil propio del despacho"
+system_hint = "Usa criterios internos validados."
+knowledge_roots = ["~/Desktop/Despacho"]
+""",
+        encoding="utf-8",
+    )
+
+    cfg = load_app_config()
+
+    assert cfg.profiles.default_profile == "legal"
+    assert "urbanismo" in cfg.profiles.definitions
+    assert cfg.profiles.definitions["despacho"].system_hint == (
+        "Usa criterios internos validados."
+    )

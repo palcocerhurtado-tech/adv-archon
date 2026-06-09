@@ -5637,7 +5637,13 @@ def launch_desktop_app(
     if resolved_logo.exists():
         app.setWindowIcon(QIcon(str(resolved_logo)))
     global _DESKTOP_WINDOW_REF
-    window = DesktopWindow()
+    from adv_archon.desktop.app_v2 import DesktopWindowV2
+    window = DesktopWindowV2(
+        config=config,
+        project_root=project_root,
+        system_prompt=system_prompt,
+        incognito=incognito,
+    )
     _DESKTOP_WINDOW_REF = window
     app._adv_archon_window = window  # keep a strong Python reference for Finder launches
     app.aboutToQuit.connect(window._stop_background_threads)

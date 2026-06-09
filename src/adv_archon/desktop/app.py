@@ -2359,6 +2359,9 @@ def launch_desktop_app(
             result_lay.addWidget(result_view, 1)
             body.addWidget(result_panel, 2)
 
+            from adv_archon.desktop.document_intelligence_panel import (
+                DocumentIntelligencePanel,
+            )
             from adv_archon.desktop.draft_editor import DraftEditorWidget
 
             draft_editor = DraftEditorWidget()
@@ -2380,7 +2383,15 @@ def launch_desktop_app(
                     ],
                 }
             )
-            body.addWidget(draft_editor, 1)
+            intelligence_panel = DocumentIntelligencePanel()
+            intelligence_panel.setMinimumWidth(320)
+            document_column = QWidget()
+            document_column_lay = QVBoxLayout(document_column)
+            document_column_lay.setContentsMargins(0, 0, 0, 0)
+            document_column_lay.setSpacing(10)
+            document_column_lay.addWidget(draft_editor, 2)
+            document_column_lay.addWidget(intelligence_panel, 1)
+            body.addWidget(document_column, 1)
             lay.addLayout(body, 1)
 
             state: dict[str, Any] = {
@@ -2406,6 +2417,10 @@ def launch_desktop_app(
                 if paths:
                     state["attachments"] = list(dict.fromkeys([*state["attachments"], *paths]))
                     render_attachments()
+                    intelligence_panel.set_empty(
+                        "Adjuntos listos. Ejecuta la investigacion para detectar tablas, "
+                        "formulas y magnitudes."
+                    )
 
             def set_exports_enabled(enabled: bool) -> None:
                 export_docx_btn.setEnabled(enabled)
@@ -2491,7 +2506,12 @@ def launch_desktop_app(
                     result_view.setPlainText(render_result(result))
                     from adv_archon.core.document_draft import build_research_draft
 
-                    draft_editor.load_draft(build_research_draft(result).to_dict())
+                    draft = build_research_draft(result).to_dict()
+                    draft_editor.load_draft(draft)
+                    intelligence_panel.analyze_draft(
+                        draft,
+                        attachment_names=[Path(path).name for path in state["attachments"]],
+                    )
                     set_exports_enabled(True)
                     self.statusBar().showMessage(
                         f"Investigación lista: {getattr(result, 'evidence_count', 0)} evidencias.",
@@ -2559,6 +2579,13 @@ def launch_desktop_app(
             export_pdf_btn.clicked.connect(export_pdf)
             export_xlsx_btn.clicked.connect(export_xlsx)
             draft_editor.export_requested.connect(
+                lambda kind: {
+                    "docx": export_docx,
+                    "pdf": export_pdf,
+                    "xlsx": export_xlsx,
+                }.get(str(kind), lambda: None)()
+            )
+            intelligence_panel.export_requested.connect(
                 lambda kind: {
                     "docx": export_docx,
                     "pdf": export_pdf,

@@ -41,6 +41,7 @@ QSizePolicy: Any = None
 QTextBrowser: Any = None
 QVBoxLayout: Any = None
 QWidget: Any = None
+DocumentIntelligencePanel: Any = None
 DraftEditorWidget: Any = None
 
 if PYSIDE6_AVAILABLE:
@@ -71,6 +72,7 @@ if PYSIDE6_AVAILABLE:
     QTextBrowser = _w.QTextBrowser
     QVBoxLayout = _w.QVBoxLayout
     QWidget = _w.QWidget
+    from adv_archon.desktop.document_intelligence_panel import DocumentIntelligencePanel
     from adv_archon.desktop.draft_editor import DraftEditorWidget
 
 
@@ -523,6 +525,13 @@ if PYSIDE6_AVAILABLE:
             self._draft_editor.save_requested.connect(self._on_document_save_requested)
             self._draft_editor.export_requested.connect(self._on_document_export_clicked)
             document_lay.addWidget(self._draft_editor)
+
+            self._document_intelligence_panel = DocumentIntelligencePanel()
+            self._document_intelligence_panel.setMaximumHeight(245)
+            self._document_intelligence_panel.export_requested.connect(
+                self._on_document_export_clicked
+            )
+            document_lay.addWidget(self._document_intelligence_panel)
 
             document_actions = QHBoxLayout()
             self._document_prepare_btn = QPushButton("Preparar borrador")
@@ -1078,6 +1087,9 @@ if PYSIDE6_AVAILABLE:
                     ],
                 }
             )
+            self._document_intelligence_panel.set_empty(
+                "Selecciona un expediente para detectar tablas, formulas y magnitudes."
+            )
             self._document_prepare_btn.setEnabled(False)
             for button in (
                 self._review_confirm_btn,
@@ -1154,6 +1166,7 @@ if PYSIDE6_AVAILABLE:
                 self._document_loaded = False
                 return
             self._draft_editor.load_draft(payload)
+            self._refresh_document_intelligence(payload)
             self._document_status_label.setText("Borrador listo")
             self._document_loaded = True
 
@@ -1177,6 +1190,21 @@ if PYSIDE6_AVAILABLE:
                 )
                 return
             self._document_status_label.setText("Borrador guardado")
+            self._refresh_document_intelligence(payload)
+
+        def _refresh_document_intelligence(self, payload: dict[str, Any]) -> None:
+            attachment_names = []
+            if self._expediente and self._expediente.plan_path:
+                attachment_names.append(Path(self._expediente.plan_path).name)
+            try:
+                self._document_intelligence_panel.analyze_draft(
+                    payload,
+                    attachment_names=attachment_names,
+                )
+            except Exception:
+                self._document_intelligence_panel.set_empty(
+                    "No se pudo analizar el borrador documental en local."
+                )
 
         def _on_document_export_clicked(self, kind: str) -> None:
             if not self._expediente_id or not self._on_export_document:

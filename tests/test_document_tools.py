@@ -31,10 +31,33 @@ def test_document_tools_update_and_export(tmp_path) -> None:
     store.close()
 
 
+def test_document_tools_analyze_document_intelligence_creates_exportable_draft(
+    tmp_path,
+) -> None:
+    store = DocumentStore(tmp_path / "documents.db")
+    tools = DocumentTools(store, output_dir=tmp_path)
+
+    result = tools.analyze_document_intelligence(
+        "Concepto,Importe\nPEM,120000 EUR\nIVA = PEM*0.21",
+        attachment_names=["presupuesto.csv"],
+        title="Presupuesto QA",
+    )
+    draft_id = str(result["draft_id"])
+    xlsx = tools.generate_xlsx(draft_id=draft_id)
+
+    assert result["intent"] in {"table", "xlsx"}
+    assert result["tables"][0]["columns"] == ["Concepto", "Importe"]
+    assert result["formulas"][0]["label"] == "IVA"
+    assert str(xlsx["output_path"]).endswith(".xlsx")
+    assert store.get_draft(draft_id) is not None
+    store.close()
+
+
 def test_build_document_tool_specs_exposes_expected_tools(tmp_path) -> None:
     specs = build_document_tool_specs(DocumentTools(DocumentStore(tmp_path / "db.sqlite")))
 
     assert {spec["name"] for spec in specs} == {
+        "analyze_document_intelligence",
         "update_pdf_draft",
         "generate_docx",
         "generate_xlsx",

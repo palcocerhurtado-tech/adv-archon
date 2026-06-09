@@ -1985,6 +1985,11 @@ class Agent:
             sections.append("hacer triage del inbox y proponerte borradores de respuesta")
         if {"read_file", "notes_create"} & tool_names:
             sections.append("actuar como study partner sobre documentos locales")
+        if {"analyze_document_intelligence", "generate_docx", "generate_xlsx"} & tool_names:
+            sections.append(
+                "convertir documentos leídos en borradores editables, tablas Excel, "
+                "DOCX, XLSX y PDF con trazabilidad"
+            )
         if {"crear_excel_auditable"} & tool_names:
             sections.append("crear libros Excel/XLSX auditables con entradas y formulas visibles")
         if {

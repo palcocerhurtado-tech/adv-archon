@@ -61,6 +61,39 @@ class DocumentTools:
             "message": "Borrador actualizado. Revisa antes de exportar.",
         }
 
+    def analyze_document_intelligence(
+        self,
+        text: str,
+        attachment_names: list[str] | None = None,
+        title: str = "",
+    ) -> dict[str, Any]:
+        """Analyze document text and create an editable delivery draft."""
+
+        from adv_archon.core.document_intelligence import analyze_document_intelligence
+
+        result = analyze_document_intelligence(
+            text,
+            attachment_names=attachment_names or [],
+            title=title or None,
+        )
+        saved = self._store.save_draft(result.draft)
+        return {
+            "ok": True,
+            "draft_id": saved.id,
+            "intent": result.intent.kind,
+            "confidence": result.intent.confidence,
+            "signals": list(result.intent.signals),
+            "tables": [table.to_dict() for table in result.tables],
+            "formulas": [formula.as_payload() for formula in result.formulas],
+            "magnitudes": [magnitude.as_payload() for magnitude in result.magnitudes],
+            "next_steps": list(result.next_steps),
+            "draft": saved.to_dict(),
+            "message": (
+                "Documento analizado localmente. Se ha creado un borrador editable "
+                "que puedes exportar a PDF, DOCX o XLSX."
+            ),
+        }
+
     def generate_docx(
         self,
         draft_id: str = "",
@@ -171,6 +204,32 @@ def build_document_tool_specs(tools: DocumentTools) -> list[dict[str, Any]]:
                 },
             },
             "fn": tools.update_pdf_draft,
+        },
+        {
+            "name": "analyze_document_intelligence",
+            "description": (
+                "Analyze text extracted from a local document and create an editable "
+                "DocumentDraft. Use after read_file when the user asks to turn a PDF, "
+                "DOCX, XLSX, image OCR, class assignment, budget or research material "
+                "into a report, DOCX, PDF, XLSX, table or professional deliverable. "
+                "Detects tables, formulas, magnitudes and next steps locally."
+            ),
+            "schema": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text extracted from read_file or provided by the user.",
+                    },
+                    "attachment_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                    },
+                    "title": {"type": "string"},
+                },
+                "required": ["text"],
+            },
+            "fn": tools.analyze_document_intelligence,
         },
         {
             "name": "generate_docx",

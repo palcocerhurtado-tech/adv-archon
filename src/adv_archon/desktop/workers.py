@@ -485,6 +485,7 @@ else:
 def _tool_progress(name: str) -> int:
     return {
         "read_file": 35,
+        "analyze_document_intelligence": 62,
         "knowledge_search": 45,
         "vault_search": 45,
         "web_search": 55,
@@ -511,6 +512,9 @@ def _tool_progress(name: str) -> int:
 def _tool_detail(name: str, *, has_attachments: bool) -> str:
     details = {
         "read_file": "Leyendo documento local…",
+        "analyze_document_intelligence": (
+            "Extrayendo tablas, formulas y borrador documental…"
+        ),
         "knowledge_search": "Buscando en tu conocimiento local…",
         "vault_search": "Buscando en tus notas Markdown…",
         "web_search": "Buscando contexto externo…",

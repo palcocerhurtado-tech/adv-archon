@@ -1389,47 +1389,157 @@ class RedesignedMainWindow(QMainWindow):
     def _dark_overrides(self) -> str:
         b, c, t, s, br = BG_DARK, CARD_DARK, TEXT_PRI_DARK, TEXT_SEC_DARK, BORDER_DARK
         return f"""
+            /* ── Base ── */
             QMainWindow {{ background: {b}; }}
+            QWidget {{ background: {b}; color: {t}; }}
             QWidget#centralWidget, QWidget#centerWidget, QWidget#chatContent {{ background: {b}; }}
-            QScrollArea#chatArea {{ background: {b}; }}
-            QFrame#topBar {{ background: rgba(28,28,30,0.95); border-bottom: 1px solid {br}; }}
-            QLabel#appTitle {{ color: {t}; }}
-            QPushButton#topBtn {{ color: {t}; }}
-            QPushButton#topBtn:hover {{ background: rgba(255,255,255,0.08); }}
-            QPushButton#expPill {{ background: {br}; color: {s}; }}
-            QFrame#composer {{ background: {c}; border-color: {br}; }}
-            QTextEdit#composerEdit {{ color: {t}; }}
-            QLabel#statusLabel {{ color: {s}; }}
-            QPushButton#cmdKBtn {{ background: {br}; color: {s}; }}
-            QFrame#chiclet {{ background: {br}; }}
-            QLabel#chicletLabel {{ color: {t}; }}
-            QFrame#bubble_user {{ background: {USER_BG_DARK}; }}
-            QFrame#bubble_agent {{ background: {AGENT_BG_DARK}; }}
-            QTextBrowser#bubbleView_user {{ color: {t}; }}
-            QTextBrowser#bubbleView_agent {{ color: {t}; }}
-            QFrame#leftPanel {{ background: {PANEL_BG_DARK}; border-right-color: {br}; }}
-            QFrame#rightPanel {{ background: {PANEL_BG_DARK}; border-left-color: {br}; }}
-            QTabWidget#contextTabs::pane {{ background: {PANEL_BG_DARK}; }}
-            QTabBar::tab {{ color: {s}; }}
-            QTabBar::tab:selected {{ color: {t}; }}
-            QLabel#sectionLabel {{ color: {s}; }}
-            QLabel#sideFooter {{ color: {ACCENT}; }}
-            QPushButton#miniSelector {{ background: {br}; color: {t}; }}
-            QPushButton#moreBtn {{ color: {s}; border-color: {br}; }}
-            QLineEdit#sideSearch {{ background: {br}; border-color: #555; color: {t}; }}
-            QListWidget#sideList {{ color: {t}; }}
-            QListWidget#sideList::item:selected {{ background: {br}; }}
-            QFrame#paletteInner {{ background: {c}; border-color: {br}; }}
-            QLineEdit#paletteSearch {{ color: {t}; }}
-            QListWidget#paletteList {{ color: {t}; }}
-            QListWidget#paletteList::item:selected {{ background: {br}; }}
-            QTextBrowser#ctxView {{ background: {PANEL_BG_DARK}; color: {t}; border: none; }}
-            QListWidget#sourcesList, QListWidget#historyList {{
-                background: transparent; color: {t}; border: none;
+
+            /* ── Top bar ── */
+            QFrame#topBar {{
+                background: rgba(28,28,30,0.96);
+                border-bottom: 1px solid {br};
             }}
-            QFrame#floatingToolbar {{ background: {c}; border-color: {br}; }}
-            QPushButton#floatBtn {{ color: {t}; }}
-            QPushButton#floatBtn:hover {{ background: {br}; }}
-            QSplitter#mainSplitter::handle {{ background: {br}; }}
-            QScrollBar::handle:vertical {{ background: {br}; }}
+            QLabel#appTitle {{ color: {t}; }}
+            QPushButton#topBtn {{
+                color: {t}; background: transparent; border: none;
+            }}
+            QPushButton#topBtn:hover {{ background: rgba(255,255,255,0.09); }}
+            QPushButton#topBtn:pressed {{ background: rgba(255,255,255,0.14); }}
+            QPushButton#expPill {{
+                background: {br}; color: {s}; border: none;
+            }}
+            QPushButton#expPill:hover {{ background: {ACCENT}; color: #111; }}
+
+            /* ── Chat ── */
+            QScrollArea#chatArea {{ background: {b}; border: none; }}
+            QFrame#bubble_user {{ background: {USER_BG_DARK}; border-radius: 14px; }}
+            QFrame#bubble_agent {{ background: transparent; }}
+            QTextBrowser#bubbleView_user {{
+                background: transparent; border: none; color: {t}; font-size: 14px;
+            }}
+            QTextBrowser#bubbleView_agent {{
+                background: transparent; border: none; color: {t}; font-size: 14px;
+            }}
+
+            /* ── Composer ── */
+            QFrame#composer {{
+                background: {c}; border: 1px solid {br}; border-radius: 16px;
+            }}
+            QTextEdit#composerEdit {{
+                background: transparent; color: {t}; border: none; font-size: 14px;
+            }}
+            QLabel#statusLabel {{ color: {s}; font-size: 11px; }}
+            QPushButton#cmdKBtn {{
+                background: {br}; color: {s}; border: none; border-radius: 5px;
+            }}
+            QPushButton#cmdKBtn:hover {{ background: {ACCENT}; color: #111; }}
+
+            /* ── Chiclets ── */
+            QFrame#chiclet {{ background: {br}; border-radius: 11px; }}
+            QLabel#chicletLabel {{ color: {t}; }}
+            QPushButton#chicletRemove {{ color: {s}; background: transparent; border: none; }}
+
+            /* ── Left panel ── */
+            QFrame#leftPanel {{
+                background: {PANEL_BG_DARK}; border-right: 1px solid {br};
+            }}
+            QLabel#sectionLabel {{ color: {s}; font-size: 10px; font-weight: bold; }}
+            QLabel#sideFooter {{ color: {ACCENT}; font-size: 10px; }}
+            QLineEdit#sideSearch {{
+                background: #2C2C2E; border: 1px solid {br};
+                border-radius: 7px; color: {t}; font-size: 12px; padding: 4px 10px;
+            }}
+            QLineEdit#sideSearch:focus {{ border-color: {ACCENT}; }}
+            QListWidget#sideList {{
+                background: transparent; border: none; color: {t}; font-size: 12px;
+            }}
+            QListWidget#sideList::item {{ padding: 5px 8px; border-radius: 6px; }}
+            QListWidget#sideList::item:selected {{
+                background: {br}; color: {t};
+            }}
+            QListWidget#sideList::item:hover {{ background: rgba(255,255,255,0.06); }}
+            QPushButton#newExpBtn {{
+                background: {ACCENT}; color: #111; font-weight: 700;
+                border: none; border-radius: 8px;
+            }}
+            QPushButton#newExpBtn:hover {{ background: #D4AF60; }}
+            QPushButton#miniSelector {{
+                background: {br}; color: {t}; border: none; border-radius: 5px;
+            }}
+            QPushButton#miniSelector:hover {{ background: #4A4A4C; }}
+            QPushButton#moreBtn {{
+                background: transparent; color: {s};
+                border: 1px solid {br}; border-radius: 6px;
+            }}
+            QPushButton#moreBtn:hover {{ color: {t}; border-color: {ACCENT}; }}
+
+            /* ── Right panel ── */
+            QFrame#rightPanel {{
+                background: {PANEL_BG_DARK}; border-left: 1px solid {br};
+            }}
+            QTabWidget#contextTabs::pane {{ border: none; background: {PANEL_BG_DARK}; }}
+            QTabBar {{ background: transparent; }}
+            QTabBar::tab {{
+                background: transparent; color: {s};
+                padding: 6px 12px; font-size: 11px;
+                border: none; border-bottom: 2px solid transparent;
+            }}
+            QTabBar::tab:selected {{
+                color: {t}; border-bottom: 2px solid {ACCENT}; font-weight: bold;
+            }}
+            QTabBar::tab:hover:!selected {{ color: {t}; }}
+            QTextBrowser#ctxView {{
+                background: transparent; border: none; color: {t}; font-size: 12px;
+            }}
+            QListWidget#sourcesList, QListWidget#historyList {{
+                background: transparent; border: none; color: {t}; font-size: 12px;
+            }}
+            QListWidget#sourcesList::item, QListWidget#historyList::item {{
+                padding: 4px 8px; border-radius: 4px;
+            }}
+            QListWidget#sourcesList::item:hover, QListWidget#historyList::item:hover {{
+                background: rgba(255,255,255,0.06);
+            }}
+            QLabel#toolBadge {{
+                background: rgba(201,168,76,0.18); color: {ACCENT};
+                border-radius: 5px; font-size: 11px; padding: 0 8px;
+            }}
+
+            /* ── Command palette ── */
+            QDialog#cmdPalette {{ background: transparent; }}
+            QFrame#paletteInner {{
+                background: #2C2C2E; border: 1px solid {br}; border-radius: 14px;
+            }}
+            QLineEdit#paletteSearch {{
+                background: transparent; border: none; color: {t}; font-size: 16px; padding: 0 18px;
+            }}
+            QFrame#palSep {{ background: {br}; max-height: 1px; border: none; }}
+            QListWidget#paletteList {{
+                background: transparent; border: none; color: {t}; font-size: 13px;
+            }}
+            QListWidget#paletteList::item {{
+                padding: 6px 10px; border-radius: 6px; margin: 0 6px;
+            }}
+            QListWidget#paletteList::item:selected {{ background: {br}; }}
+            QListWidget#paletteList::item:hover {{ background: rgba(255,255,255,0.06); }}
+
+            /* ── Floating toolbar ── */
+            QFrame#floatingToolbar {{
+                background: #2C2C2E; border: 1px solid {br}; border-radius: 10px;
+            }}
+            QPushButton#floatBtn {{
+                background: transparent; border: none; color: {t}; font-size: 12px;
+            }}
+            QPushButton#floatBtn:hover {{ background: {br}; border-radius: 5px; }}
+
+            /* ── Infrastructure ── */
+            QSplitter#mainSplitter::handle {{ background: {br}; width: 1px; }}
+            QScrollBar:vertical {{
+                background: transparent; width: 6px; margin: 0;
+            }}
+            QScrollBar::handle:vertical {{
+                background: #555557; border-radius: 3px; min-height: 30px;
+            }}
+            QScrollBar::handle:vertical:hover {{ background: #6E6E70; }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0px; }}
         """

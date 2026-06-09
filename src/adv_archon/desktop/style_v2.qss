@@ -5,7 +5,7 @@
 
 /* ── Globals ─────────────────────────────────────────────────────────────── */
 QMainWindow, QWidget {
-    font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Inter, sans-serif;
+    font-family: ".AppleSystemUIFont", "SF Pro Text", "Helvetica Neue", sans-serif;
     font-size: 13px;
 }
 

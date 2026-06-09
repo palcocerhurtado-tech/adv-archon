@@ -540,11 +540,13 @@ class LeftPanel(QFrame):
     expediente_selected     = Signal(str)   # expediente id
     new_expediente_requested = Signal()
     command_triggered       = Signal(str)
+    profile_changed         = Signal(str)   # new profile name
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("leftPanel")
         self.setMinimumWidth(0)
+        self._profiles: list[str] = ["general"]
 
         lay = QVBoxLayout(self)
         lay.setContentsMargins(12, 12, 12, 12)
@@ -555,10 +557,10 @@ class LeftPanel(QFrame):
         self._profile_btn = QPushButton("general")
         self._profile_btn.setObjectName("miniSelector")
         self._profile_btn.setFixedHeight(26)
+        self._profile_btn.clicked.connect(self._show_profile_menu)
         self._mode_btn = QPushButton("local")
         self._mode_btn.setObjectName("miniSelector")
         self._mode_btn.setFixedHeight(26)
-        # Mode button: toggle local/cloud
         self._mode_btn.clicked.connect(self._toggle_mode)
         row.addWidget(self._profile_btn)
         row.addWidget(self._mode_btn)
@@ -649,10 +651,34 @@ class LeftPanel(QFrame):
         self._current_mode = mode
         self._mode_btn.setText(mode)
 
+    def set_profiles(self, profiles: list[str], active: str = "general") -> None:
+        self._profiles = profiles or ["general"]
+        self._profile_btn.setText(active)
+
+    def set_active_profile(self, profile: str) -> None:
+        self._profile_btn.setText(profile)
+
     # ── private ─────────────────────────────────────────────────────────
     def _toggle_mode(self) -> None:
         new = "cloud" if self._current_mode == "local" else "local"
+        self.set_mode_display(new)
         self.command_triggered.emit(f"mode_{new}")
+
+    def _show_profile_menu(self) -> None:
+        menu = QMenu(self._profile_btn)
+        current = self._profile_btn.text()
+        for p in self._profiles:
+            act = menu.addAction(("✓  " if p == current else "    ") + p)
+            act.triggered.connect(
+                lambda _=False, name=p: self._select_profile(name)
+            )
+        menu.exec(self._profile_btn.mapToGlobal(
+            self._profile_btn.rect().bottomLeft()
+        ))
+
+    def _select_profile(self, name: str) -> None:
+        self._profile_btn.setText(name)
+        self.profile_changed.emit(name)
 
     def _filter(self, query: str) -> None:
         q = query.lower()

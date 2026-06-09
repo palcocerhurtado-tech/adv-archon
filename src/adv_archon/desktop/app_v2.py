@@ -62,12 +62,13 @@ if PYSIDE6_AVAILABLE:
 
         # Cross-thread signals → worker slots
         # (queued automatically when worker lives in a different QThread)
-        _worker_run_prompt  = Signal(str, object)   # (text, list[str])
-        _worker_set_mode    = Signal(str)
-        _worker_set_model   = Signal(str)
-        _worker_cancel      = Signal()
-        _worker_shutdown    = Signal()
-        _worker_select_exp  = Signal(object)        # Expediente dataclass
+        _worker_run_prompt   = Signal(str, object)   # (text, list[str])
+        _worker_set_mode     = Signal(str)
+        _worker_set_model    = Signal(str)
+        _worker_set_profile  = Signal(str)
+        _worker_cancel       = Signal()
+        _worker_shutdown     = Signal()
+        _worker_select_exp   = Signal(object)        # Expediente dataclass
 
         def __init__(
             self,
@@ -103,6 +104,7 @@ if PYSIDE6_AVAILABLE:
             self._worker_run_prompt.connect(self._backend_worker.run_prompt)
             self._worker_set_mode.connect(self._backend_worker.set_mode)
             self._worker_set_model.connect(self._backend_worker.set_ollama_model)
+            self._worker_set_profile.connect(self._backend_worker.set_profile)
             self._worker_cancel.connect(
                 self._backend_worker.cancel_prompt,
                 Qt.ConnectionType.DirectConnection,
@@ -133,6 +135,12 @@ if PYSIDE6_AVAILABLE:
             # Window → Worker (application-level)
             self.prompt_submitted.connect(self._forward_prompt)
             self.command_triggered.connect(self._forward_command)
+
+            # Profile list → sidebar
+            profile_names = list(config.profiles.definitions.keys()) or ["general"]
+            active_profile = config.profiles.default_profile or "general"
+            self._left.set_profiles(profile_names, active_profile)
+            self._left.profile_changed.connect(self._on_profile_changed)
 
             # Initial UI state
             self.set_mode(config.llm.mode)
@@ -180,18 +188,81 @@ if PYSIDE6_AVAILABLE:
             self._backend_worker = None
             self.close()
 
+        def _on_profile_changed(self, profile: str) -> None:
+            self._worker_set_profile.emit(profile)
+            self._left.set_active_profile(profile)
+
         # ── UI → Worker forwarding ─────────────────────────────────────────────
 
         def _forward_prompt(self, text: str, attachments: list[Path]) -> None:
             self._worker_run_prompt.emit(text, [str(p) for p in attachments])
 
-        def _forward_command(self, cmd_id: str) -> None:
-            if cmd_id == "mode_local":
-                self._worker_set_mode.emit("local")
-            elif cmd_id == "mode_cloud":
-                self._worker_set_mode.emit("cloud")
-            elif cmd_id.startswith("exp_open:"):
+        def _forward_command(self, cmd_id: str) -> None:  # noqa: C901
+            # Mode changes — update worker AND redraw UI
+            if cmd_id in ("mode_local", "mode_cloud"):
+                new_mode = cmd_id.split("_", 1)[1]
+                self._worker_set_mode.emit(new_mode)
+                self.set_mode(new_mode)
+                return
+            # Expediente activation
+            if cmd_id.startswith("exp_open:"):
                 self._activate_expediente(cmd_id.split(":", 1)[1])
+                return
+            # New expediente
+            if cmd_id == "exp_new":
+                self._chat.add_message(
+                    "agent",
+                    "Función **Nuevo expediente** disponible próximamente en v2.\n"
+                    "Por ahora crea expedientes desde la versión clásica.",
+                )
+                return
+            # Shortcuts reference
+            if cmd_id == "shortcuts":
+                self._chat.add_message(
+                    "agent",
+                    "**Atajos de teclado**\n\n"
+                    "| Atajo | Acción |\n|---|---|\n"
+                    "| ⌘K | Paleta de comandos |\n"
+                    "| ⌘⇧L | Panel izquierdo |\n"
+                    "| ⌘⇧R | Panel derecho |\n"
+                    "| ⌘N | Nuevo expediente |\n"
+                    "| ⌘O | Abrir expediente |\n"
+                    "| ⌘E | Exportar PDF |\n"
+                    "| ↩ | Enviar mensaje |\n"
+                    "| ⇧↩ | Nueva línea |",
+                )
+                return
+            # Commands that forward to agent as a prompt
+            _as_prompt = {
+                "pgou_analyze":    "Analiza el expediente activo con el PGOU.",
+                "pgou_params":     "Extrae los parámetros urbanísticos del expediente activo.",
+                "review_pro":      "Realiza una revisión pro del expediente activo.",
+                "edificabilidad":  "Calcula la edificabilidad del expediente activo.",
+                "doc_pdf":         "Genera un informe PDF del expediente activo.",
+                "doc_docx":        "Genera un informe DOCX del expediente activo.",
+                "doc_informe":     "Genera el informe integrado del expediente activo.",
+                "doc_memoria":     "Redacta la Memoria Descriptiva del expediente activo.",
+                "boe_search":      "Busca en el BOE la normativa relevante para el expediente activo.",  # noqa: E501
+            }
+            if cmd_id in _as_prompt and self._backend_worker and self._backend_worker._backend_ready:  # noqa: E501
+                prompt = _as_prompt[cmd_id]
+                self._chat.add_message("user", prompt)
+                self._chat.start_stream()
+                self._composer.set_enabled_input(False)
+                self._worker_run_prompt.emit(prompt, [])
+                return
+            # Status commands
+            if cmd_id == "pgou_status":
+                self._chat.add_message(
+                    "agent", "¿Sobre qué municipio quieres consultar el estado del PGOU?"
+                )
+                return
+            # Settings stub
+            if cmd_id in ("settings", "mode_local", "mode_cloud", "model_select"):
+                self._composer.set_status(f"Comando: {cmd_id}")
+                return
+            # Everything else → just update the status bar so the user sees it fired
+            self._composer.set_status(f"⌘ {cmd_id}")
 
         # ── Expediente handling ────────────────────────────────────────────────
 

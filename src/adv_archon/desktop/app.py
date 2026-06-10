@@ -5636,6 +5636,13 @@ def launch_desktop_app(
     resolved_logo = logo_path()
     if resolved_logo.exists():
         app.setWindowIcon(QIcon(str(resolved_logo)))
+
+    # ── First-run consent gate ────────────────────────────────────────────────
+    from adv_archon.desktop.consent_dialog import show_if_needed as _show_consent
+    _data_dir = Path(config.data_dir) if hasattr(config, "data_dir") and config.data_dir else Path.home() / ".adv-archon"
+    if not _show_consent(_data_dir):
+        return 0
+
     global _DESKTOP_WINDOW_REF
     from adv_archon.desktop.app_v2 import DesktopWindowV2
     window = DesktopWindowV2(

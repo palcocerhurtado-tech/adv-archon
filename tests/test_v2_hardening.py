@@ -233,3 +233,62 @@ def test_mark_exported_roundtrip(tmp_path):
             store.mark_exported(draft.id, "exe", tmp_path / "x.exe")
     finally:
         store.close()
+
+
+# ── First-run consent state ──────────────────────────────────────────────────
+
+
+def test_consent_not_accepted_by_default(tmp_path):
+    from adv_archon.core.consent import is_consent_accepted
+
+    assert not is_consent_accepted(tmp_path)
+
+
+def test_consent_accepted_after_mark(tmp_path):
+    from adv_archon.core.consent import is_consent_accepted, mark_consent_accepted
+
+    mark_consent_accepted(tmp_path)
+    assert is_consent_accepted(tmp_path)
+
+
+def test_consent_persists_correct_version(tmp_path):
+    import json
+
+    from adv_archon.core.consent import mark_consent_accepted
+    from adv_archon.core.legal import LEGAL_VERSION
+
+    mark_consent_accepted(tmp_path)
+    stamp = json.loads((tmp_path / "consent.json").read_text())
+    assert stamp["legal_version"] == LEGAL_VERSION
+    assert stamp["accepted"] is True
+    assert "accepted_at" in stamp
+
+
+def test_consent_reset_clears_state(tmp_path):
+    from adv_archon.core.consent import is_consent_accepted, mark_consent_accepted, reset_consent
+
+    mark_consent_accepted(tmp_path)
+    assert is_consent_accepted(tmp_path)
+    reset_consent(tmp_path)
+    assert not is_consent_accepted(tmp_path)
+
+
+def test_consent_corrupt_file_returns_false(tmp_path):
+    from adv_archon.core.consent import is_consent_accepted
+
+    (tmp_path / "consent.json").write_text("{not json}", encoding="utf-8")
+    assert not is_consent_accepted(tmp_path)
+
+
+def test_consent_wrong_version_returns_false(tmp_path):
+    import json
+
+    from adv_archon.core.consent import is_consent_accepted
+
+    stamp = {  # version deliberately wrong
+        "accepted": True,
+        "legal_version": "1900.0",
+        "accepted_at": "2000-01-01T00:00:00+00:00",
+    }
+    (tmp_path / "consent.json").write_text(json.dumps(stamp), encoding="utf-8")
+    assert not is_consent_accepted(tmp_path)

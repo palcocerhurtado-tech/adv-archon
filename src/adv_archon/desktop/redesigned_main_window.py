@@ -68,6 +68,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTabWidget,
     QTextBrowser,
     QTextEdit,
@@ -1121,7 +1122,11 @@ class RedesignedMainWindow(QMainWindow):
         cl.setSpacing(0)
 
         self._chat = ChatArea()
-        cl.addWidget(self._chat, stretch=1)
+        self._workspace_stack = QStackedWidget()
+        self._workspace_stack.setObjectName("workspaceStack")
+        self._workspace_stack.addWidget(self._chat)
+        self._workspace_page: QWidget | None = None
+        cl.addWidget(self._workspace_stack, stretch=1)
 
         self._composer = Composer()
         self._composer.submitted.connect(self._on_submit)
@@ -1154,6 +1159,61 @@ class RedesignedMainWindow(QMainWindow):
             "Escribe tu consulta, arrastra un **plano PDF** al campo de texto, "
             "o pulsa **⌘K** para ver todos los comandos disponibles.",
         )
+
+    def show_chat_workspace(self) -> None:
+        """Return the central area to the conversational chat."""
+        self._workspace_stack.setCurrentWidget(self._chat)
+
+    def show_workspace(
+        self,
+        title: str,
+        widget: QWidget,
+        *,
+        subtitle: str = "",
+    ) -> None:
+        """Show a real tool/expediente workspace inside the v2 central canvas."""
+        if self._workspace_page is not None:
+            old = self._workspace_page
+            self._workspace_stack.removeWidget(old)
+            old.deleteLater()
+
+        page = QWidget()
+        page.setObjectName("toolWorkspace")
+        root = QVBoxLayout(page)
+        root.setContentsMargins(22, 18, 22, 12)
+        root.setSpacing(12)
+
+        header = QFrame()
+        header.setObjectName("workspaceHeader")
+        header_lay = QHBoxLayout(header)
+        header_lay.setContentsMargins(14, 10, 14, 10)
+        header_lay.setSpacing(12)
+
+        title_box = QWidget()
+        title_lay = QVBoxLayout(title_box)
+        title_lay.setContentsMargins(0, 0, 0, 0)
+        title_lay.setSpacing(2)
+        title_label = QLabel(title)
+        title_label.setObjectName("workspaceTitle")
+        title_lay.addWidget(title_label)
+        if subtitle:
+            subtitle_label = QLabel(subtitle)
+            subtitle_label.setObjectName("workspaceSubtitle")
+            subtitle_label.setWordWrap(True)
+            title_lay.addWidget(subtitle_label)
+
+        back_btn = QPushButton("Volver al chat")
+        back_btn.setObjectName("Ghost")
+        back_btn.clicked.connect(self.show_chat_workspace)
+
+        header_lay.addWidget(title_box, 1)
+        header_lay.addWidget(back_btn)
+        root.addWidget(header)
+        root.addWidget(widget, 1)
+
+        self._workspace_page = page
+        self._workspace_stack.addWidget(page)
+        self._workspace_stack.setCurrentWidget(page)
 
     def _setup_shortcuts(self) -> None:
         bindings: dict[str, Any] = {

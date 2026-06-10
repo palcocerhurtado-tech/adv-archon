@@ -429,6 +429,29 @@ QSplitter#mainSplitter::handle {
     width: 1px;
 }
 
+/* ── Real workspaces (v2 parity) ─────────────────────────────────────────── */
+QWidget#workspaceStack,
+QWidget#toolWorkspace {
+    background: #F7F4EF;
+}
+
+QFrame#workspaceHeader {
+    background: #FFFFFF;
+    border: 1px solid #E8E4DD;
+    border-radius: 10px;
+}
+
+QLabel#workspaceTitle {
+    color: #111111;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+QLabel#workspaceSubtitle {
+    color: #6B6B6B;
+    font-size: 12px;
+}
+
 /* ── Scrollbars (macOS minimal style) ────────────────────────────────────── */
 QScrollBar:vertical {
     background: transparent;

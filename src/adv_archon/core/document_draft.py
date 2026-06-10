@@ -242,7 +242,14 @@ def build_expediente_draft(expediente: Any) -> DocumentDraft:
                 ),
             ),
         ),
-        warnings=("Informe preliminar no vinculante juridicamente.",),
+        warnings=(
+            "Informe preliminar no vinculante juridicamente; requiere validacion "
+            "de tecnico competente.",
+            "Contenido asistido por IA (Reglamento UE 2024/1689): revise siempre "
+            "las conclusiones antes de su uso.",
+            "Datos tratados en local; el despacho usuario es responsable del "
+            "tratamiento (RGPD/LOPDGDD).",
+        ),
         next_steps=("Revision tecnica por arquitecto antes de presentar.",),
     )
 

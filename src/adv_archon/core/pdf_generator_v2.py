@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fpdf.enums import XPos, YPos
 
+from adv_archon.core import legal
 from adv_archon.core.document_draft import DocumentDraft, DraftSection, DraftSource, DraftTable
 
 
@@ -50,6 +51,7 @@ def generate_draft_pdf(
         for index, step in enumerate(draft.next_steps, start=1):
             _paragraph(pdf, f"{index}. {step}")
 
+    _legal_notice(pdf)
     _footer(pdf)
     pdf.output(str(output_path))
     return output_path
@@ -140,14 +142,27 @@ def _notice(pdf: object) -> None:
     pdf.multi_cell(
         0,
         6,
-        _pdf_text(
-            "Documento preliminar. Separar dato oficial, inferencia de ARCHON y "
-            "validación técnica es obligatorio antes de presentar o firmar."
-        ),
+        _pdf_text(legal.document_short_disclaimer()),
         border=1,
         fill=True,
     )  # type: ignore[attr-defined]
     pdf.ln(5)  # type: ignore[attr-defined]
+
+
+def _legal_notice(pdf: object) -> None:
+    """Full legal/compliance block (RGPD, AI Act, professional liability)."""
+    _section(pdf, "Aviso legal y de uso")
+    pdf.set_font("Helvetica", "", 7)  # type: ignore[attr-defined]
+    pdf.set_text_color(60, 60, 60)  # type: ignore[attr-defined]
+    for block in legal.document_legal_footer().split("\n\n"):
+        text = block.strip()
+        if not text:
+            continue
+        _reset_x(pdf)
+        pdf.multi_cell(0, 4.5, _pdf_text(text))  # type: ignore[attr-defined]
+        pdf.ln(1)  # type: ignore[attr-defined]
+    pdf.set_text_color(5, 5, 5)  # type: ignore[attr-defined]
+    pdf.ln(3)  # type: ignore[attr-defined]
 
 
 def _draft_section(pdf: object, section: DraftSection) -> None:

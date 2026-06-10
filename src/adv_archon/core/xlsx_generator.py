@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+from adv_archon.core import legal
 from adv_archon.core.document_draft import DocumentDraft, DraftTable
 
 
@@ -28,6 +29,7 @@ def generate_expediente_xlsx(
     risks = workbook.create_sheet("Riesgos")
     tables = workbook.create_sheet("Tablas")
     audit = workbook.create_sheet("Auditoria")
+    legal_sheet = workbook.create_sheet("Aviso legal")
 
     styles = _Styles(Font=Font, PatternFill=PatternFill)
     _write_summary(summary, draft, styles)
@@ -36,6 +38,7 @@ def generate_expediente_xlsx(
     _write_risks(risks, draft, styles)
     _write_tables(tables, draft, styles)
     _write_audit(audit, draft, styles)
+    _write_legal(legal_sheet, styles)
 
     for sheet in workbook.worksheets:
         _autosize(sheet, get_column_letter=get_column_letter)
@@ -199,6 +202,21 @@ def _write_audit(sheet: Any, draft: DocumentDraft, styles: _Styles) -> None:
     for row_idx, row in enumerate(rows, start=2):
         for col_idx, value in enumerate(row, start=1):
             sheet.cell(row_idx, col_idx, value)
+
+
+def _write_legal(sheet: Any, styles: _Styles) -> None:
+    """Aviso legal sheet (RGPD, AI Act, professional liability)."""
+    from openpyxl.styles import Alignment  # type: ignore[import-untyped]
+
+    _title(sheet, "ADV ARCHON - Aviso legal y de uso", styles)
+    row = 3
+    for block in legal.document_legal_footer().split("\n\n"):
+        text = block.strip()
+        if not text:
+            continue
+        cell = sheet.cell(row, 1, text)
+        cell.alignment = Alignment(wrapText=True, vertical="top")
+        row += 1
 
 
 def _title(sheet: Any, value: str, styles: _Styles) -> None:

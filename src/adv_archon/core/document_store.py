@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import sqlite3
 import uuid
 from dataclasses import dataclass
@@ -7,6 +8,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from adv_archon.core.document_draft import DocumentDraft
+
+# SQL identifiers (column names) may only ever come from internal allowlists.
+# This guard makes that invariant explicit and defends against accidental
+# interpolation of untrusted input into DDL/DML statements.
+_SQL_IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def _safe_identifier(name: str) -> str:
+    if not _SQL_IDENTIFIER.match(name):
+        raise ValueError(f"Unsafe SQL identifier: {name!r}")
+    return name
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,7 +77,8 @@ class DocumentStore:
         for name, definition in columns.items():
             if name not in existing:
                 self._conn.execute(
-                    f"ALTER TABLE document_drafts ADD COLUMN {name} {definition}"
+                    f"ALTER TABLE document_drafts "
+                    f"ADD COLUMN {_safe_identifier(name)} {definition}"
                 )
         self._conn.commit()
 
@@ -144,7 +157,8 @@ class DocumentStore:
         if column is None:
             raise ValueError("file_type must be one of: pdf, docx, xlsx")
         cursor = self._conn.execute(
-            f"UPDATE document_drafts SET {column} = ?, updated_at = ? WHERE id = ?",
+            f"UPDATE document_drafts SET {_safe_identifier(column)} = ?, "
+            f"updated_at = ? WHERE id = ?",
             (str(output_path.expanduser()), datetime.now(UTC).isoformat(), draft_id),
         )
         self._conn.commit()

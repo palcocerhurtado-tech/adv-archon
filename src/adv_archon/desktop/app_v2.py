@@ -19,8 +19,26 @@ from pathlib import Path
 from typing import Any
 
 from adv_archon.core.config import AppConfig
+from adv_archon.core.expediente_analysis import build_expediente_analysis
 
 PYSIDE6_AVAILABLE = find_spec("PySide6") is not None
+
+
+def _drain_thread_pairs(pairs: list, timeout_ms: int = 5000) -> None:
+    """Quit and join any still-running (thread, worker) pairs.
+
+    Duck-typed (operates on anything exposing ``isRunning``/``quit``/``wait``)
+    so it can be unit tested without a Qt runtime.  Prevents orphaned QThreads
+    and the "QThread destroyed while still running" crash on window close.
+    """
+    for thread, _worker in list(pairs):
+        try:
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(timeout_ms)
+        except RuntimeError:
+            # Underlying C++ object already deleted — nothing to join.
+            pass
 
 if PYSIDE6_AVAILABLE:
     # ── Confirm bridge ─────────────────────────────────────────────────────────
@@ -68,89 +86,8 @@ if PYSIDE6_AVAILABLE:
                 self._waiting.set()
                 self._waiting = None
 
-    def _build_expediente_analysis(exp: Any) -> dict[str, Any]:
-        from adv_archon.core.studio import get_case_template
-
-        template = get_case_template(getattr(exp, "case_type", ""))
-        try:
-            ctx = json.loads(exp.site_context) if exp.site_context else {}
-        except (TypeError, ValueError):
-            ctx = {}
-        checks = ctx.get("legal_checks") if isinstance(ctx, dict) else []
-        checks = checks if isinstance(checks, list) else []
-        statuses = {
-            str(check.get("status") or "")
-            for check in checks
-            if isinstance(check, dict)
-        }
-        if not checks:
-            verdict = "revisar"
-            verdict_label = "REVISAR"
-            summary = (
-                "Falta contexto legal completo. Debe resolverse parcela, PGOU y fuentes "
-                "sectoriales antes de emitir criterio profesional."
-            )
-        elif {"pending_review", "missing"} & statuses:
-            verdict = "revisar"
-            verdict_label = "REVISAR"
-            summary = (
-                "Hay comprobaciones pendientes o datos insuficientes. Requiere revisión "
-                "técnica antes de cerrar el informe."
-            )
-        elif "conditional" in statuses:
-            verdict = "condicionado"
-            verdict_label = "CONDICIONADO"
-            summary = (
-                "Se detectan condiciones o afecciones que deben contrastarse con el "
-                "expediente y la administración competente."
-            )
-        else:
-            verdict = "viable"
-            verdict_label = "VIABLE"
-            summary = (
-                "No se detectan alertas sectoriales relevantes en el cribado preliminar. "
-                "Confirmar siempre ordenanza y plano de proyecto."
-            )
-
-        annotations: list[dict[str, str]] = []
-        next_steps: list[str] = []
-        status_map = {
-            "ready": "ok",
-            "not_applicable": "info",
-            "conditional": "warning",
-            "pending_review": "info",
-            "missing": "violation",
-        }
-        for check in checks:
-            if not isinstance(check, dict):
-                continue
-            status = str(check.get("status") or "")
-            title = str(check.get("title") or "")
-            detail = str(check.get("detail") or "")
-            action = str(check.get("recommended_action") or "")
-            annotations.append(
-                {
-                    "status": status_map.get(status, "info"),
-                    "description": f"{title}: {detail}".strip(": "),
-                    "recommendation": action,
-                }
-            )
-            if status not in {"ready", "not_applicable"} and action:
-                next_steps.append(action)
-        if getattr(exp, "plan_path", ""):
-            next_steps.append("Revisar el plano adjunto frente a la ordenanza aplicable.")
-        for item in template.checklist:
-            if len(next_steps) >= 12:
-                break
-            next_steps.append(item)
-        return {
-            "verdict": verdict,
-            "verdict_label": verdict_label,
-            "summary": f"{template.label}. {summary}",
-            "annotations": annotations[:30],
-            "next_steps": next_steps[:12],
-            "generated_at": datetime.now().isoformat(timespec="minutes"),
-        }
+    # Pure analysis logic lives in core (PySide6-free, headless-testable).
+    _build_expediente_analysis = build_expediente_analysis
 
     class _ExportWorker(QObject):
         exported = Signal(str)
@@ -1422,14 +1359,27 @@ if PYSIDE6_AVAILABLE:
             self._worker_cancel.emit()
             self._worker_shutdown.emit()
 
+        def _drain_active_threads(self, timeout_ms: int = 5000) -> None:
+            """Quit and wait for any in-flight export/autopilot threads.
+
+            Prevents orphaned QThreads (and the "QThread destroyed while still
+            running" crash) when the window is closed during a long export or
+            Autopilot run.
+            """
+            _drain_thread_pairs(self._active_threads, timeout_ms)
+            self._active_threads.clear()
+
         def closeEvent(self, ev) -> None:  # type: ignore[override]
             if self._backend_thread is None or not self._backend_thread.isRunning():
+                self._drain_active_threads()
                 ev.accept()
                 return
             if self._close_requested:
+                self._drain_active_threads()
                 QApplication.quit()
                 ev.accept()
                 return
             self._close_requested = True
             ev.ignore()
+            self._drain_active_threads()
             self._stop_background_threads()

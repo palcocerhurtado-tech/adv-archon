@@ -4,6 +4,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
+from adv_archon.core import legal
 from adv_archon.core.document_draft import DocumentDraft, DraftSection, DraftSource, DraftTable
 
 
@@ -124,8 +125,24 @@ def _generate_docx(
         for step in draft.next_steps:
             document.add_paragraph(step, style="List Number")
 
+    _add_legal_notice(document)
     document.save(str(output_path))
     return output_path
+
+
+def _add_legal_notice(document: object) -> None:
+    """Full legal/compliance block (RGPD, AI Act, professional liability)."""
+    from docx.shared import Pt  # type: ignore[import-untyped]
+
+    document.add_heading("Aviso legal y de uso", level=1)  # type: ignore[attr-defined]
+    for block in legal.document_legal_footer().split("\n\n"):
+        text = block.strip()
+        if not text:
+            continue
+        paragraph = document.add_paragraph()  # type: ignore[attr-defined]
+        run = paragraph.add_run(text)
+        run.italic = True
+        run.font.size = Pt(8)
 
 
 def _configure_styles(document: object) -> None:

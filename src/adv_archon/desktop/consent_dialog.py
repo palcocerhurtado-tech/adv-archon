@@ -74,7 +74,7 @@ def show_if_needed(data_dir: Path, parent=None) -> bool:
 
     # ── Acceptance checkbox ───────────────────────────────────────────────────
     checkbox = QCheckBox(legal.acceptance_summary())
-    checkbox.setWordWrap(True)
+    checkbox.setStyleSheet("QCheckBox { color: #2E2E2C; }")
     layout.addWidget(checkbox)
 
     # ── Buttons ───────────────────────────────────────────────────────────────

@@ -5639,7 +5639,11 @@ def launch_desktop_app(
 
     # ── First-run consent gate ────────────────────────────────────────────────
     from adv_archon.desktop.consent_dialog import show_if_needed as _show_consent
-    _data_dir = Path(config.data_dir) if hasattr(config, "data_dir") and config.data_dir else Path.home() / ".adv-archon"
+    _data_dir = (
+        Path(config.data_dir)
+        if hasattr(config, "data_dir") and config.data_dir
+        else Path.home() / ".adv-archon"
+    )
     if not _show_consent(_data_dir):
         return 0
 

@@ -164,6 +164,27 @@ QPushButton#moreBtn:hover {
     border-color: #C9A84C;
 }
 
+QPushButton#sideNavBtn {
+    background: transparent;
+    color: #111111;
+    border: 1px solid transparent;
+    border-radius: 8px;
+    text-align: left;
+    padding: 0 12px;
+    font-size: 13px;
+    font-weight: 650;
+}
+
+QPushButton#sideNavBtn:hover {
+    background: #FFFFFF;
+    border-color: #E8E4DD;
+}
+
+QPushButton#sideNavBtn:pressed {
+    background: #E8E4DD;
+    border-color: #C9A84C;
+}
+
 /* ── Chat Area ───────────────────────────────────────────────────────────── */
 QScrollArea#chatArea {
     background: #F7F4EF;
@@ -431,7 +452,8 @@ QSplitter#mainSplitter::handle {
 
 /* ── Real workspaces (v2 parity) ─────────────────────────────────────────── */
 QWidget#workspaceStack,
-QWidget#toolWorkspace {
+QWidget#toolWorkspace,
+QWidget#studioHome {
     background: #F7F4EF;
 }
 
@@ -450,6 +472,82 @@ QLabel#workspaceTitle {
 QLabel#workspaceSubtitle {
     color: #6B6B6B;
     font-size: 12px;
+}
+
+QFrame#homeHero {
+    background: #FFFFFF;
+    border: 1px solid #D9C47C;
+    border-radius: 14px;
+}
+
+QLabel#homeEyebrow {
+    color: #8B742E;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.8px;
+}
+
+QLabel#homeTitle {
+    color: #111111;
+    font-size: 26px;
+    font-weight: 850;
+    line-height: 1.08;
+}
+
+QLabel#homeSubtitle {
+    color: #4F4B45;
+    font-size: 14px;
+    line-height: 1.45;
+}
+
+QPushButton#homePrimary {
+    background: #C9A84C;
+    color: #111111;
+    border: none;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 800;
+    padding: 0 22px;
+    min-width: 170px;
+}
+
+QPushButton#homePrimary:hover {
+    background: #D4AF60;
+}
+
+QFrame#homeCard,
+QFrame#homeFlow {
+    background: #FFFFFF;
+    border: 1px solid #E8E4DD;
+    border-radius: 12px;
+}
+
+QLabel#homeCardTitle,
+QLabel#homeSectionTitle {
+    color: #111111;
+    font-size: 17px;
+    font-weight: 800;
+}
+
+QLabel#homeCardBody,
+QLabel#homeStep {
+    color: #5E5A54;
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+QPushButton#homeCardButton {
+    background: #F0EDE8;
+    color: #111111;
+    border: 1px solid #E8E4DD;
+    border-radius: 8px;
+    font-size: 13px;
+    font-weight: 750;
+}
+
+QPushButton#homeCardButton:hover {
+    background: #C9A84C;
+    border-color: #C9A84C;
 }
 
 /* ── Scrollbars (macOS minimal style) ────────────────────────────────────── */

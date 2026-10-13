@@ -57,6 +57,7 @@ from PySide6.QtWidgets import (
     QApplication,
     QDialog,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -95,7 +96,7 @@ AGENT_BG_DARK    = "#2C2C2E"
 PANEL_BG_LIGHT   = "#F0EDE8"
 PANEL_BG_DARK    = "#111111"
 
-LEFT_OPEN_W  = 240
+LEFT_OPEN_W  = 300
 RIGHT_OPEN_W = 340
 TOP_H        = 38
 
@@ -580,6 +581,25 @@ class LeftPanel(QFrame):
         row.addWidget(self._mode_btn)
         lay.addLayout(row)
 
+        nav_label = QLabel("TRABAJO")
+        nav_label.setObjectName("sectionLabel")
+        lay.addWidget(nav_label)
+
+        for label, command in [
+            ("Inicio", "home"),
+            ("Expedientes", "exp_open"),
+            ("Studio Demo", "studio_demo"),
+            ("Research", "research"),
+            ("Estado sistema", "system_status"),
+        ]:
+            btn = QPushButton(label)
+            btn.setObjectName("sideNavBtn")
+            btn.setFixedHeight(32)
+            btn.clicked.connect(
+                lambda _=False, c=command: self.command_triggered.emit(c)
+            )
+            lay.addWidget(btn)
+
         # Search
         self._search = QLineEdit()
         self._search.setObjectName("sideSearch")
@@ -732,7 +752,7 @@ class RightPanel(QFrame):
         self._ctx_view = QTextBrowser()
         self._ctx_view.setObjectName("ctxView")
         self._ctx_view.setOpenExternalLinks(False)
-        self._tabs.addTab(self._ctx_view, "Contexto")
+        self._tabs.addTab(self._ctx_view, "Resumen")
 
         # Tab 1 — Herramientas
         tools_w = QWidget()
@@ -745,7 +765,7 @@ class RightPanel(QFrame):
         scroll_t.setWidgetResizable(True)
         scroll_t.setWidget(tools_w)
         scroll_t.setFrameShape(QFrame.Shape.NoFrame)
-        self._tabs.addTab(scroll_t, "Herr.")
+        self._tabs.addTab(scroll_t, "Herramientas")
 
         # Tab 2 — Fuentes
         self._sources = QListWidget()
@@ -755,7 +775,7 @@ class RightPanel(QFrame):
         # Tab 3 — Historial
         self._history = QListWidget()
         self._history.setObjectName("historyList")
-        self._tabs.addTab(self._history, "Historial")
+        self._tabs.addTab(self._history, "Actividad")
 
         # Tab 4 — Adjuntos
         attach_w = QWidget()
@@ -767,11 +787,15 @@ class RightPanel(QFrame):
         scroll_a.setWidgetResizable(True)
         scroll_a.setWidget(attach_w)
         scroll_a.setFrameShape(QFrame.Shape.NoFrame)
-        self._tabs.addTab(scroll_a, "Adjuntos")
+        self._tabs.addTab(scroll_a, "Archivos")
 
     # ── public API ──────────────────────────────────────────────────────
     def set_context(self, markdown: str) -> None:
-        self._ctx_view.setMarkdown(markdown)
+        self._ctx_view.setMarkdown(
+            markdown
+            or "## Sin expediente activo\n\nAbre o crea un expediente para ver aquí "
+            "su parcela, fuentes consultadas, riesgos y próximos pasos."
+        )
         self._tabs.setCurrentIndex(0)
 
     def add_tool(self, name: str) -> None:
@@ -801,6 +825,137 @@ class RightPanel(QFrame):
         lbl  = QLabel(f"{icon}  {name}")
         lbl.setObjectName("attachLabel")
         self._attach_lay.insertWidget(self._attach_lay.count() - 1, lbl)
+
+
+# ── Studio Home ────────────────────────────────────────────────────────────
+class StudioHome(QWidget):
+    """Clear first screen for non-technical users."""
+
+    command_triggered = Signal(str)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("studioHome")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(28, 24, 28, 24)
+        root.setSpacing(18)
+
+        hero = QFrame()
+        hero.setObjectName("homeHero")
+        hero_lay = QHBoxLayout(hero)
+        hero_lay.setContentsMargins(24, 22, 24, 22)
+        hero_lay.setSpacing(18)
+
+        copy = QWidget()
+        copy_lay = QVBoxLayout(copy)
+        copy_lay.setContentsMargins(0, 0, 0, 0)
+        copy_lay.setSpacing(8)
+
+        eyebrow = QLabel("ADV ARCHON STUDIO")
+        eyebrow.setObjectName("homeEyebrow")
+        title = QLabel("Expedientes urbanísticos claros, de la parcela al informe.")
+        title.setObjectName("homeTitle")
+        title.setWordWrap(True)
+        subtitle = QLabel(
+            "Crea un expediente, adjunta planos, consulta fuentes oficiales, "
+            "ejecuta Autopilot y exporta un informe revisable."
+        )
+        subtitle.setObjectName("homeSubtitle")
+        subtitle.setWordWrap(True)
+        copy_lay.addWidget(eyebrow)
+        copy_lay.addWidget(title)
+        copy_lay.addWidget(subtitle)
+
+        primary = QPushButton("Nuevo expediente")
+        primary.setObjectName("homePrimary")
+        primary.setFixedHeight(46)
+        primary.clicked.connect(lambda: self.command_triggered.emit("exp_new"))
+
+        hero_lay.addWidget(copy, 1)
+        hero_lay.addWidget(primary)
+        root.addWidget(hero)
+
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
+
+        cards = [
+            (
+                "Expedientes",
+                "Gestiona caso, plano, Autopilot, revisión y documento final.",
+                "Abrir expedientes",
+                "exp_open",
+            ),
+            (
+                "Studio Demo",
+                "Tres casos guiados para enseñar valor comercial en minutos.",
+                "Abrir demo",
+                "studio_demo",
+            ),
+            (
+                "Research",
+                "Investiga documentos, extrae evidencias y prepara entregables.",
+                "Abrir research",
+                "research",
+            ),
+            (
+                "Estado del sistema",
+                "Comprueba Ollama, permisos, modelo local y rendimiento.",
+                "Ver estado",
+                "system_status",
+            ),
+        ]
+        for index, (title_text, body, button, command) in enumerate(cards):
+            grid.addWidget(
+                self._card(title_text, body, button, command),
+                index // 2,
+                index % 2,
+            )
+        root.addLayout(grid)
+
+        flow = QFrame()
+        flow.setObjectName("homeFlow")
+        flow_lay = QVBoxLayout(flow)
+        flow_lay.setContentsMargins(18, 16, 18, 16)
+        flow_lay.setSpacing(8)
+        flow_title = QLabel("Flujo recomendado")
+        flow_title.setObjectName("homeSectionTitle")
+        flow_lay.addWidget(flow_title)
+        for step in [
+            "1. Crea expediente o abre uno demo.",
+            "2. Adjunta plano, dirección o referencia catastral.",
+            "3. Ejecuta Autopilot y revisa la bandeja profesional.",
+            "4. Edita el documento de entrega y exporta PDF/DOCX/XLSX.",
+        ]:
+            lbl = QLabel(step)
+            lbl.setObjectName("homeStep")
+            flow_lay.addWidget(lbl)
+        root.addWidget(flow)
+        root.addStretch()
+
+    def _card(self, title: str, body: str, button: str, command: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("homeCard")
+        card.setMinimumHeight(150)
+        lay = QVBoxLayout(card)
+        lay.setContentsMargins(18, 16, 18, 16)
+        lay.setSpacing(8)
+        title_label = QLabel(title)
+        title_label.setObjectName("homeCardTitle")
+        body_label = QLabel(body)
+        body_label.setObjectName("homeCardBody")
+        body_label.setWordWrap(True)
+        body_label.setMinimumHeight(42)
+        btn = QPushButton(button)
+        btn.setObjectName("homeCardButton")
+        btn.setFixedHeight(34)
+        btn.clicked.connect(lambda: self.command_triggered.emit(command))
+        lay.addWidget(title_label)
+        lay.addWidget(body_label, 1)
+        lay.addWidget(btn)
+        return card
 
 
 # ── Command Palette ────────────────────────────────────────────────────────
@@ -1001,8 +1156,11 @@ class RedesignedMainWindow(QMainWindow):
     ) -> None:
         super().__init__(parent)
         self._runtime    = runtime
-        self._dark       = _is_dark()
-        self._left_open  = False
+        # Studio starts in the polished light theme by default.  Dark mode is
+        # still available from the command palette, but the macOS system theme
+        # should not make the first run look like a developer console.
+        self._dark       = False
+        self._left_open  = True
         self._right_open = False
         self._model_name = "llama3.2:3b"
         self._mode       = "local"
@@ -1121,9 +1279,12 @@ class RedesignedMainWindow(QMainWindow):
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(0)
 
-        self._chat = ChatArea()
         self._workspace_stack = QStackedWidget()
         self._workspace_stack.setObjectName("workspaceStack")
+        self._home = StudioHome()
+        self._home.command_triggered.connect(self._on_command)
+        self._workspace_stack.addWidget(self._home)
+        self._chat = ChatArea()
         self._workspace_stack.addWidget(self._chat)
         self._workspace_page: QWidget | None = None
         cl.addWidget(self._workspace_stack, stretch=1)
@@ -1138,9 +1299,10 @@ class RedesignedMainWindow(QMainWindow):
         # Right panel
         self._right = RightPanel()
         self._splitter.addWidget(self._right)
+        self._right.set_context("")
 
-        # Initial sizes: left collapsed, center full, right collapsed
-        self._splitter.setSizes([0, 1280, 0])
+        # Initial sizes: navigation visible, context opens when it has value.
+        self._splitter.setSizes([300, 980, 0])
 
         # Command palette (singleton)
         self._palette = CommandPalette(self)
@@ -1159,6 +1321,11 @@ class RedesignedMainWindow(QMainWindow):
             "Escribe tu consulta, arrastra un **plano PDF** al campo de texto, "
             "o pulsa **⌘K** para ver todos los comandos disponibles.",
         )
+        self.show_home_workspace()
+
+    def show_home_workspace(self) -> None:
+        """Show the friendly Studio dashboard."""
+        self._workspace_stack.setCurrentWidget(self._home)
 
     def show_chat_workspace(self) -> None:
         """Return the central area to the conversational chat."""
@@ -1262,6 +1429,9 @@ class RedesignedMainWindow(QMainWindow):
 
     def _on_command(self, cmd_id: str) -> None:
         # Handle built-in UI commands directly; delegate the rest
+        if cmd_id == "home":
+            self.show_home_workspace()
+            return
         if cmd_id == "theme_toggle":
             self._toggle_theme()
             return
@@ -1328,7 +1498,20 @@ class RedesignedMainWindow(QMainWindow):
                 if checks:
                     lines.append("\n### Afecciones\n")
                     for c in checks[:8]:
-                        lines.append(f"- {c}")
+                        if isinstance(c, dict):
+                            title = (
+                                c.get("title")
+                                or c.get("label")
+                                or c.get("id")
+                                or "Comprobación"
+                            )
+                            status = c.get("status", "pendiente")
+                            detail = c.get("detail") or c.get("summary") or ""
+                            lines.append(f"- **{title}:** {status}")
+                            if detail:
+                                lines.append(f"  {detail}")
+                        else:
+                            lines.append(f"- {c}")
             except Exception:
                 pass
         return "\n".join(lines)
@@ -1338,11 +1521,9 @@ class RedesignedMainWindow(QMainWindow):
         self._load_styles()
 
     def _watch_system_palette(self) -> None:
-        app = QApplication.instance()
-        if app is None or not hasattr(app, "paletteChanged"):
-            return
-        with contextlib.suppress(Exception):
-            app.paletteChanged.connect(self._on_system_palette_changed)
+        # Keep the default Studio interface stable.  Users can still toggle
+        # theme explicitly with the command palette.
+        return
 
     def _on_system_palette_changed(self, _palette: QPalette) -> None:
         dark = _is_dark()

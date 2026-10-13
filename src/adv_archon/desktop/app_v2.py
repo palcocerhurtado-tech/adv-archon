@@ -46,7 +46,6 @@ if PYSIDE6_AVAILABLE:
     from PySide6.QtCore import QObject, Qt, QThread, QTimer, QUrl, Signal
     from PySide6.QtGui import QDesktopServices
     from PySide6.QtWidgets import (
-        QApplication,
         QDialog,
         QFileDialog,
         QFrame,
@@ -266,7 +265,10 @@ if PYSIDE6_AVAILABLE:
                 self._backend_worker.cancel_prompt,
                 Qt.ConnectionType.DirectConnection,
             )
-            self._worker_shutdown.connect(self._backend_worker.shutdown)
+            self._worker_shutdown.connect(
+                self._backend_worker.shutdown,
+                Qt.ConnectionType.BlockingQueuedConnection,
+            )
             self._worker_select_exp.connect(self._backend_worker.on_expediente_selected)
 
             # Worker → UI
@@ -360,6 +362,9 @@ if PYSIDE6_AVAILABLE:
             self._worker_run_prompt.emit(text, [str(p) for p in attachments])
 
         def _forward_command(self, cmd_id: str) -> None:  # noqa: C901
+            if cmd_id == "home":
+                self.show_home_workspace()
+                return
             if cmd_id == "theme_toggle":
                 self._toggle_theme()
                 return
@@ -1357,7 +1362,16 @@ if PYSIDE6_AVAILABLE:
 
         def _stop_background_threads(self) -> None:
             self._worker_cancel.emit()
-            self._worker_shutdown.emit()
+            thread = self._backend_thread
+            if thread is None or not thread.isRunning():
+                self._drain_active_threads()
+                return
+            with suppress(RuntimeError):
+                self._worker_shutdown.emit()
+            if thread.isRunning():
+                thread.quit()
+                thread.wait(8000)
+            self._drain_active_threads()
 
         def _drain_active_threads(self, timeout_ms: int = 5000) -> None:
             """Quit and wait for any in-flight export/autopilot threads.
@@ -1374,12 +1388,6 @@ if PYSIDE6_AVAILABLE:
                 self._drain_active_threads()
                 ev.accept()
                 return
-            if self._close_requested:
-                self._drain_active_threads()
-                QApplication.quit()
-                ev.accept()
-                return
             self._close_requested = True
-            ev.ignore()
-            self._drain_active_threads()
             self._stop_background_threads()
+            ev.accept()

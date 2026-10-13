@@ -71,12 +71,12 @@ def test_expediente_store_persists_case_type_and_migrates_old_db(tmp_path: Path)
     assert saved.review_state == ""
 
 
-def test_create_studio_demo_expedientes_generates_three_reports(tmp_path: Path) -> None:
+def test_create_studio_demo_expedientes_generates_reports(tmp_path: Path) -> None:
     store = ExpedienteStore(tmp_path / "expedientes.db")
 
     demos = create_studio_demo_expedientes(store, data_dir=tmp_path)
 
-    assert len(demos) == 3
+    assert len(demos) == 4
     assert {demo.case_type for demo in demos} == {
         "cambio_uso_vivienda",
         "vivienda_unifamiliar",

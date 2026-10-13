@@ -111,12 +111,23 @@ class GeoTools:
             return geo_result
 
         municipality = geo_result.payload["municipality"]
-        pgou_indexed = self._pgou.get_municipality(municipality) is not None
+        planning_record = self._pgou.get_municipality(municipality)
+        pgou_indexed = planning_record is not None
         indexed_munis = [m.name for m in self._pgou.list_municipalities()]
 
         payload = {**geo_result.payload}
         payload["pgou_indexed"] = pgou_indexed
         payload["indexed_municipalities"] = indexed_munis
+        if planning_record is not None:
+            payload["planning"] = {
+                "municipality": planning_record.name,
+                "planning_type": planning_record.planning_type,
+                "status": planning_record.status,
+                "province": planning_record.province,
+                "autonomous_community": planning_record.autonomous_community,
+                "source_url": planning_record.source_url or planning_record.source,
+                "indexed_at": planning_record.indexed_at,
+            }
 
         # Parallel sectorial API calls — circuit breaker + persistent cache per endpoint.
         cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
@@ -283,7 +294,7 @@ class GeoTools:
         payload["legal_readiness"] = self._legal_readiness(payload, pgou_indexed=pgou_indexed)
         payload["legal_summary"] = self._legal_summary(payload, pgou_indexed=pgou_indexed)
         payload["next_step"] = (
-            f"La normativa PGOU de {municipality} ya está indexada. "
+            f"El planeamiento municipal de {municipality} ya está indexado. "
             "Puedes usar plan_compliance_check directamente, pero conviene revisar también "
             "las afecciones sectoriales y la ordenanza concreta de parcela."
             if pgou_indexed
@@ -379,6 +390,12 @@ class GeoTools:
         province = str(payload.get("province") or "").strip()
         cadastral_ref = str(payload.get("cadastral_ref") or "").strip()
         cadastral_use = str(payload.get("cadastral_use") or "").strip()
+        raw_planning = payload.get("planning")
+        planning_payload: dict[str, Any] = (
+            raw_planning if isinstance(raw_planning, dict) else {}
+        )
+        planning_type = str(planning_payload.get("planning_type") or "pgou")
+        planning_label = _planning_display_name(planning_type)
 
         # Use pre-fetched data — avoids duplicate HTTP calls.
         parcel_detail: dict[str, Any] = _parcel_detail or {}
@@ -662,7 +679,7 @@ class GeoTools:
             _zoning_status = "pending_review"
             _zoning_detail = (
                 "No se puede identificar la clasificación, calificación u ordenanza "
-                "de parcela porque el PGOU municipal todavía no está indexado."
+                "de parcela porque el planeamiento municipal todavía no está indexado."
             )
             _zoning_action = (
                 "Indexar primero la normativa municipal y después contrastar la parcela "
@@ -730,14 +747,14 @@ class GeoTools:
             ),
             LegalCheck(
                 code="pgou-municipal",
-                title="Normativa municipal aplicable",
+                title="Planeamiento municipal aplicable",
                 status="ready" if pgou_indexed else "pending_review",
-                authority=f"PGOU / normas urbanísticas de {municipality or 'municipio'}",
+                authority=f"{planning_label} de {municipality or 'municipio'}",
                 detail=(
-                    f"El PGOU de {municipality} ya está indexado para el análisis."
+                    f"{planning_label} de {municipality} ya está indexado para el análisis."
                     if pgou_indexed
                     else (
-                        f"El PGOU de {municipality or 'este municipio'} "
+                        f"El planeamiento de {municipality or 'este municipio'} "
                         "todavía no está indexado en ARCHON."
                     )
                 ),
@@ -755,7 +772,7 @@ class GeoTools:
                 code="parcel-zoning",
                 title="Ordenanza y zona de parcela",
                 status=_zoning_status,  # type: ignore[arg-type]
-                authority=f"PGOU / normas urbanísticas de {municipality or 'municipio'}",
+                authority=f"{planning_label} de {municipality or 'municipio'}",
                 detail=_zoning_detail,
                 recommended_action=_zoning_action,
                 confidence=_zoning_conf,  # type: ignore[arg-type]
@@ -877,3 +894,11 @@ def _format_zoning_parts(data: dict[str, Any]) -> str:
         if joined:
             parts.append(f"usos: {joined}")
     return "; ".join(parts)
+
+
+def _planning_display_name(planning_type: str) -> str:
+    if planning_type == "normas_subsidiarias":
+        return "Normas Subsidiarias"
+    if planning_type == "pdelimitacion":
+        return "Proyecto de delimitación de suelo urbano"
+    return "PGOU / normas urbanísticas"

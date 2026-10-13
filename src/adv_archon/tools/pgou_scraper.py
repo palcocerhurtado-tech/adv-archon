@@ -24,6 +24,10 @@ class MuniSource:
     kind: str                    # "pdf" | "html" | "boe"
     fallback_query: str          # DuckDuckGo search query if primary fails
     notes: str = ""              # free-text notes
+    planning_type: str = "pgou"   # "pgou" | "normas_subsidiarias" | "pdelimitacion"
+    status: str = "catalogado"
+    province: str = ""
+    autonomous_community: str = ""
 
 
 # fmt: off
@@ -58,6 +62,23 @@ SOURCES: list[MuniSource] = [
         url="https://www.zaragoza.es/sede/portal/urbanismo/plan-general/normativa",
         kind="html",
         fallback_query="PGOU Zaragoza Plan General normativa urbanística PDF texto",
+    ),
+    MuniSource(
+        name="Molina de Aragón",
+        url="https://molinadearagon.es/ayuntamiento/urbanismo/",
+        kind="html",
+        fallback_query=(
+            "Molina de Aragón Normas Subsidiarias ordenanzas urbanísticas "
+            "régimen suelo urbano PDF"
+        ),
+        notes=(
+            "Normas Subsidiarias de Planeamiento, no PGOU ordinario. "
+            "Paquete preliminar: requiere cruce con planos o validación municipal."
+        ),
+        planning_type="normas_subsidiarias",
+        status="preliminar",
+        province="Guadalajara",
+        autonomous_community="Castilla-La Mancha",
     ),
     MuniSource(
         name="Málaga",
@@ -424,6 +445,11 @@ class PGOUScraper:
             result.text,
             municipality=source.name,
             source=result.source_url,
+            planning_type=source.planning_type,
+            status="indexado" if source.status == "catalogado" else source.status,
+            province=source.province,
+            autonomous_community=source.autonomous_community,
+            source_url=source.url,
         )
 
         return {

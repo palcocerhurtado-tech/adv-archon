@@ -150,6 +150,26 @@ CITY_PACKS: tuple[CityNormativePack, ...] = (
         source_url="https://www.zaragoza.es/",
     ),
     CityNormativePack(
+        municipality="Molina de Aragón",
+        status="preliminar",
+        label="Molina de Aragón — Normas Subsidiarias",
+        sources=(
+            "Normas Subsidiarias Ayuntamiento",
+            "LOTAU Castilla-La Mancha",
+            "Catastro OVC",
+            "SNCZI/CNIG",
+            "Red Natura 2000/CNIG",
+            "Transportes INSPIRE/CNIG",
+        ),
+        note=(
+            "Paquete preliminar basado en fuentes oficiales públicas. Molina de Aragón "
+            "dispone de Normas Subsidiarias, no de PGOU ordinario; la ordenanza exacta "
+            "requiere cruce con planos o criterio técnico municipal."
+        ),
+        last_updated="2026-10-12",
+        source_url="https://molinadearagon.es/ayuntamiento/urbanismo/",
+    ),
+    CityNormativePack(
         municipality="Barcelona",
         status="preliminar",
         label="Barcelona Studio Pack",
@@ -266,7 +286,14 @@ def load_studio_client_config(root: Path | None = None) -> StudioClientConfig:
             data = {}
     municipalities = data.get("included_municipalities")
     if not isinstance(municipalities, list) or not municipalities:
-        municipalities = ["Madrid", "Zaragoza", "Barcelona", "Valencia", "Sevilla"]
+        municipalities = [
+            "Madrid",
+            "Zaragoza",
+            "Molina de Aragón",
+            "Barcelona",
+            "Valencia",
+            "Sevilla",
+        ]
     return StudioClientConfig(
         client_name=str(data.get("client_name") or "Despacho beta ADV ARCHON"),
         logo_path=str(data.get("logo_path") or ""),
@@ -309,7 +336,14 @@ def save_studio_client_config(
         if str(item).strip()
     ]
     if not municipalities:
-        municipalities = ["Madrid", "Zaragoza", "Barcelona", "Valencia", "Sevilla"]
+        municipalities = [
+            "Madrid",
+            "Zaragoza",
+            "Molina de Aragón",
+            "Barcelona",
+            "Valencia",
+            "Sevilla",
+        ]
     payload = {
         "client_name": client_name.strip() or "Despacho beta ADV ARCHON",
         "logo_path": logo_path.strip(),

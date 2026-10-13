@@ -10,6 +10,14 @@ from typing import cast
 from fpdf import FPDF
 
 from adv_archon.core.expediente import Expediente, ExpedienteStore
+from adv_archon.core.municipal_planning import (
+    MOLINA_DE_ARAGON_WARNING,
+    MOLINA_DE_ARAGON_ZONING,
+    molina_de_aragon_planning_payload,
+    seed_molina_de_aragon_planning,
+    write_molina_de_aragon_catalog,
+)
+from adv_archon.core.pgou_store import PGOUStore
 from adv_archon.core.report_generator import generate_expediente_pdf
 
 DEMO_TITLE = "DEMO - Cambio de uso local a vivienda"
@@ -17,6 +25,7 @@ DEMO_ADDRESS = "Calle Mayor 24, Madrid"
 DEMO_NOTES = "ADV_ARCHON_DEMO_EXPEDIENTE"
 DEMO_NOTES_FLOOD = "ADV_ARCHON_DEMO_INUNDABILIDAD"
 DEMO_NOTES_PGOU_PENDING = "ADV_ARCHON_DEMO_PGOU_PENDIENTE"
+DEMO_NOTES_MOLINA = "ADV_ARCHON_DEMO_MOLINA_DE_ARAGON"
 
 
 def create_demo_expediente(
@@ -82,8 +91,55 @@ def create_studio_demo_expedientes(
             "site_context": _demo_site_context_pgou_pending(),
             "analysis": _demo_analysis_pgou_pending(),
         },
+        {
+            "notes": DEMO_NOTES_MOLINA,
+            "title": "DEMO - Consulta urbanística — Molina de Aragón",
+            "address": "Plaza de España 1, Molina de Aragón",
+            "municipality": "Molina de Aragón",
+            "province": "Guadalajara",
+            "latitude": 40.8436,
+            "longitude": -1.8876,
+            "cadastral_ref": "19190A000000000000XX",
+            "case_type": "vivienda_unifamiliar",
+            "plan": demo_dir / "plano_demo_molina_de_aragon.pdf",
+            "report": demo_dir / "informe_demo_molina_de_aragon.pdf",
+            "site_context": _demo_site_context_molina(),
+            "analysis": _demo_analysis_molina(),
+        },
     ]
     return [_refresh_demo(store, spec) for spec in specs]
+
+
+def create_molina_de_aragon_demo(
+    store: ExpedienteStore,
+    *,
+    data_dir: Path,
+    pgou_store: PGOUStore | None = None,
+) -> Expediente:
+    """Create the curated Molina de Aragón demo expediente and catalogue files."""
+    write_molina_de_aragon_catalog(data_dir)
+    if pgou_store is not None:
+        seed_molina_de_aragon_planning(pgou_store)
+    demo_dir = data_dir / "demo"
+    demo_dir.mkdir(parents=True, exist_ok=True)
+    return _refresh_demo(
+        store,
+        {
+            "notes": DEMO_NOTES_MOLINA,
+            "title": "DEMO - Consulta urbanística — Molina de Aragón",
+            "address": "Plaza de España 1, Molina de Aragón",
+            "municipality": "Molina de Aragón",
+            "province": "Guadalajara",
+            "latitude": 40.8436,
+            "longitude": -1.8876,
+            "cadastral_ref": "19190A000000000000XX",
+            "case_type": "vivienda_unifamiliar",
+            "plan": demo_dir / "plano_demo_molina_de_aragon.pdf",
+            "report": demo_dir / "informe_demo_molina_de_aragon.pdf",
+            "site_context": _demo_site_context_molina(),
+            "analysis": _demo_analysis_molina(),
+        },
+    )
 
 
 def _refresh_demo(store: ExpedienteStore, spec: dict[str, object]) -> Expediente:
@@ -142,7 +198,9 @@ def _write_demo_plan(path: Path, *, title: str, case_type: str) -> None:
     pdf.cell(
         0,
         7,
-        f"{title} - {case_type} - pieza demostrativa sin validez tecnica",
+        _demo_pdf_text(
+            f"{title} - {case_type} - pieza demostrativa sin validez tecnica"
+        ),
         align="C",
     )
     pdf.ln(7)
@@ -163,6 +221,20 @@ def _write_demo_plan(path: Path, *, title: str, case_type: str) -> None:
     pdf.set_font("Helvetica", "", 8)
     pdf.text(35, 170, "Superficie util demo: 54,20 m2 | Escala grafica no vinculante")
     pdf.output(path)
+
+
+def _demo_pdf_text(text: str) -> str:
+    replacements = {
+        "—": "-",
+        "–": "-",
+        "“": '"',
+        "”": '"',
+        "‘": "'",
+        "’": "'",
+    }
+    for src, dst in replacements.items():
+        text = text.replace(src, dst)
+    return text
 
 
 def _demo_site_context() -> dict[str, object]:
@@ -515,9 +587,209 @@ def _demo_analysis_pgou_pending() -> dict[str, object]:
     }
 
 
+def _demo_site_context_molina() -> dict[str, object]:
+    planning = molina_de_aragon_planning_payload()
+    zoning = dict(MOLINA_DE_ARAGON_ZONING)
+    zoning.update(
+        {
+            "queried": True,
+            "available": True,
+            "source": planning["source_url"],
+            "method": "búsqueda textual preliminar en Normas Subsidiarias indexadas",
+            "excerpts": [
+                {
+                    "article_ref": "Ordenanza 07",
+                    "title": "Residencial unifamiliar",
+                    "text": (
+                        "La documentación municipal cita una ordenanza residencial "
+                        "unifamiliar. La adscripción exacta debe confirmarse sobre plano."
+                    ),
+                    "source": planning["source_url"],
+                }
+            ],
+        }
+    )
+    return {
+        "ok": True,
+        "demo": True,
+        "municipality": "Molina de Aragón",
+        "province": "Guadalajara",
+        "autonomous_community": "Castilla-La Mancha",
+        "latitude": 40.8436,
+        "longitude": -1.8876,
+        "cadastral_ref": "19190A000000000000XX",
+        "cadastral_address": "Plaza de España 1, Molina de Aragón",
+        "pgou_indexed": True,
+        "legal_readiness": "preliminary-ready",
+        "planning": planning,
+        "parcel_detail": {
+            "surface_m2": 118,
+            "construction_year": 1950,
+            "floors_above": 2,
+            "floors_below": 0,
+            "use_detail": "Residencial / núcleo urbano histórico",
+        },
+        "parcel_zoning": zoning,
+        "flood_zone": {
+            "queried": True,
+            "in_flood_zone": False,
+            "periods": [],
+            "source": "SNCZI/CNIG - demo",
+        },
+        "natura2000": {
+            "queried": True,
+            "in_protected_area": False,
+            "zones": [],
+            "source": "Red Natura 2000/CNIG - demo",
+        },
+        "costas": {
+            "queried": False,
+            "in_public_domain": False,
+            "in_protection_servitude": False,
+            "source": "SIGCOSTAS/MITECO - no aplicable",
+        },
+        "carreteras": {
+            "queried": True,
+            "in_affection_zone": False,
+            "method": "cribado geométrico demo sobre viario oficial",
+            "source": "Transportes INSPIRE/CNIG - demo",
+        },
+        "legal_checks": [
+            {
+                "code": "cadastral-identification",
+                "title": "Identificación catastral",
+                "status": "ready",
+                "authority": "Catastro OVC",
+                "detail": "Referencia demo fijada para mostrar el flujo de consulta.",
+                "recommended_action": "Sustituir por referencia real del expediente.",
+                "confidence": "medium",
+            },
+            {
+                "code": "pgou-municipal",
+                "title": "Planeamiento municipal aplicable",
+                "status": "ready",
+                "authority": "Ayuntamiento de Molina de Aragón",
+                "detail": (
+                    "Paquete preliminar de Normas Subsidiarias indexado con fuente "
+                    "municipal oficial."
+                ),
+                "recommended_action": "Consultar el PDF municipal vigente antes de firmar.",
+                "confidence": "medium",
+            },
+            {
+                "code": "parcel-zoning",
+                "title": "Ordenanza y zona de parcela",
+                "status": "conditional",
+                "authority": "Normas Subsidiarias de Molina de Aragón",
+                "detail": (
+                    "Indicio textual de Ordenanza 07 residencial unifamiliar. "
+                    "No hay cruce cartográfico exacto en esta demo."
+                ),
+                "recommended_action": (
+                    "Confirmar ordenanza en plano, ficha o consulta técnica municipal."
+                ),
+                "confidence": "low",
+            },
+            {
+                "code": "heritage-environment",
+                "title": "Patrimonio y entorno histórico",
+                "status": "pending_review",
+                "authority": "Ayuntamiento / Castilla-La Mancha",
+                "detail": (
+                    "Molina de Aragón tiene un carácter histórico relevante. "
+                    "El expediente debe revisar catálogo patrimonial y protección local."
+                ),
+                "recommended_action": "Pedir contraste de protección patrimonial municipal.",
+                "confidence": "medium",
+            },
+            {
+                "code": "hydraulic-domain",
+                "title": "Cauces, inundabilidad y dominio público hidráulico",
+                "status": "ready",
+                "authority": "SNCZI/CNIG",
+                "detail": "Sin afección hidráulica en el cribado demo.",
+                "recommended_action": "Revisar SNCZI con coordenadas reales si avanza.",
+                "confidence": "medium",
+            },
+            {
+                "code": "coastal-domain",
+                "title": "Costas",
+                "status": "not_applicable",
+                "authority": "SIGCOSTAS/MITECO",
+                "detail": "Guadalajara no tiene fachada litoral.",
+                "recommended_action": "No aplica.",
+                "confidence": "high",
+            },
+            {
+                "code": "roads-servitudes",
+                "title": "Carreteras y servidumbres",
+                "status": "ready",
+                "authority": "Transportes INSPIRE/CNIG",
+                "detail": "Sin proximidad viaria relevante en el cribado demo.",
+                "recommended_action": (
+                    "Contrastar manualmente si la parcela real linda con carretera."
+                ),
+                "confidence": "medium",
+            },
+        ],
+        "planning_warning": MOLINA_DE_ARAGON_WARNING,
+    }
+
+
+def _demo_analysis_molina() -> dict[str, object]:
+    return {
+        "verdict": "condicionado",
+        "verdict_label": "CONDICIONADO",
+        "confidence": "media-baja",
+        "summary": (
+            "La consulta demo de Molina de Aragón puede avanzar como lectura "
+            "preliminar, pero la viabilidad queda condicionada a confirmar la "
+            "ordenanza exacta en planos municipales y a revisar patrimonio."
+        ),
+        "annotations": [
+            {
+                "status": "warning",
+                "description": (
+                    "Molina de Aragón opera con Normas Subsidiarias, no con PGOU "
+                    "ordinario."
+                ),
+                "recommendation": (
+                    "Citar siempre la fuente municipal y validar la versión vigente."
+                ),
+            },
+            {
+                "status": "warning",
+                "description": (
+                    "Ordenanza residencial unifamiliar detectada solo como indicio textual."
+                ),
+                "recommendation": "Cruzar con plano de ordenación o consulta técnica.",
+            },
+            {
+                "status": "info",
+                "description": "Costas no aplica por ubicación interior en Guadalajara.",
+                "recommendation": "Mantener la comprobación sectorial como trazabilidad.",
+            },
+        ],
+        "next_steps": [
+            "Abrir la documentación oficial del Ayuntamiento y confirmar versión.",
+            "Cruzar la parcela real con plano o ficha de ordenación.",
+            "Revisar si hay protección patrimonial o entorno histórico afectado.",
+            "Emitir informe solo como preliminar hasta validación técnica municipal.",
+        ],
+        "full_analysis": (
+            "Este demo posiciona ADV ARCHON como copiloto de consulta urbanística "
+            "municipal: identifica fuente aplicable, separa dato oficial de inferencia "
+            "preliminar y no inventa parámetros sin plano."
+        ),
+        "generated_at": datetime.now(UTC).isoformat(timespec="minutes"),
+    }
+
+
 __all__ = [
     "DEMO_NOTES",
+    "DEMO_NOTES_MOLINA",
     "DEMO_TITLE",
     "create_demo_expediente",
+    "create_molina_de_aragon_demo",
     "create_studio_demo_expedientes",
 ]

@@ -42,6 +42,8 @@ def query_parcel_zoning(
     candidate planning parameters found in indexed text and flags that the exact
     parcel ordinance still requires map/plan confirmation.
     """
+    planning = store.get_municipality(municipality) if municipality.strip() else None
+    planning_label = _planning_label(planning.planning_type if planning else "")
     result: dict[str, Any] = {
         "queried": False,
         "available": False,
@@ -53,8 +55,8 @@ def query_parcel_zoning(
         "occupancy": "",
         "height": "",
         "setbacks": "",
-        "source": "PGOU municipal indexado",
-        "method": "búsqueda textual preliminar en normativa PGOU indexada",
+        "source": planning.source if planning and planning.source else planning_label,
+        "method": f"búsqueda textual preliminar en {planning_label.lower()} indexado",
         "requires_map_crossing": True,
         "confidence": "low",
         "excerpts": [],
@@ -63,7 +65,9 @@ def query_parcel_zoning(
 
     municipality = municipality.strip()
     if not municipality or not pgou_indexed:
-        result["error"] = "PGOU municipal no indexado; no se puede extraer zonificación textual."
+        result["error"] = (
+            "Planeamiento municipal no indexado; no se puede extraer zonificación textual."
+        )
         return result
 
     result["queried"] = True
@@ -100,8 +104,9 @@ def query_parcel_zoning(
     result["ordinance"] = _extract_first(
         combined,
         (
-            r"ordenanza(?:\s+de\s+aplicaci[oó]n)?\s*[:\-]?\s*([^\.;\n]{2,100})",
-            r"ordenanza\s+([A-ZÁÉÍÓÚÜÑ]{1,8}[\w\-. ]{0,60})",
+            r"\bordenanza\s+de\s+aplicaci[oó]n\s*[:\-]?\s*([^\.;\n]{2,100})",
+            r"\bordenanza\s+([0-9]{1,3}\s*[-–—]?\s*[^\.;\n]{2,100})",
+            r"\bordenanza\s+([A-ZÁÉÍÓÚÜÑ]{1,8}[\w\-. ]{0,60})",
         ),
     )
     result["allowed_uses"] = _extract_uses(combined)
@@ -198,3 +203,11 @@ def _chunk_excerpt(chunk: PGOUChunk) -> dict[str, str]:
         "text": text[:360],
         "source": chunk.source,
     }
+
+
+def _planning_label(planning_type: str) -> str:
+    if planning_type == "normas_subsidiarias":
+        return "Normas Subsidiarias municipales"
+    if planning_type == "pdelimitacion":
+        return "Proyecto de delimitación de suelo urbano"
+    return "PGOU municipal"

@@ -171,6 +171,12 @@ class MunicipalityEntry(BaseModel):
     chunks: int | None = None
     indexed_at: str | None = None
     source: str | None = None
+    planning_type: str = "pgou"
+    status: str = "catalogado"
+    province: str = ""
+    autonomous_community: str = ""
+    source_url: str = ""
+    notes: str = ""
 
 
 class MunicipalitiesResponse(BaseModel):

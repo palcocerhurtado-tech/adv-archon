@@ -41,6 +41,16 @@ def list_municipalities(
             chunks=m.chunk_count if m else None,
             indexed_at=m.indexed_at[:10] if m else None,
             source=m.source if m else None,
+            planning_type=m.planning_type if m else src.planning_type,
+            status=m.status if m else src.status,
+            province=m.province if m and m.province else src.province,
+            autonomous_community=(
+                m.autonomous_community
+                if m and m.autonomous_community
+                else src.autonomous_community
+            ),
+            source_url=m.source_url if m and m.source_url else src.url,
+            notes=src.notes,
         ))
     return MunicipalitiesResponse(
         total=len(entries),

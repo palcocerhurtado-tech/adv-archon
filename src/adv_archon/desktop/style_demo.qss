@@ -1,0 +1,89 @@
+/* ADV ARCHON Demo Molina de Aragón
+   Derivada de style_v2: negro, blanco roto, acento cian técnico y naranja aviso. */
+
+QWidget {
+    background: #F7F7F4;
+    color: #111111;
+    font-family: "Inter", "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+}
+
+QMainWindow {
+    background: #F7F7F4;
+}
+
+QFrame#Sidebar {
+    background: #050505;
+    border-right: 1px solid #2E2E2C;
+}
+
+QLabel#BrandTitle {
+    color: #F7F7F4;
+    font-weight: 700;
+    letter-spacing: 0px;
+}
+
+QLabel#BrandSubtitle {
+    color: #B8B6AE;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QPushButton {
+    background: #FFFFFF;
+    border: 1px solid #D8D4C8;
+    border-radius: 8px;
+    padding: 8px 12px;
+    font-weight: 600;
+}
+
+QPushButton:hover {
+    background: #F0F6F7;
+    border-color: #4CA7B8;
+}
+
+QPushButton#PrimaryButton {
+    background: #D18A22;
+    color: #050505;
+    border: 1px solid #D18A22;
+}
+
+QPushButton#PrimaryButton:hover {
+    background: #E0A13E;
+}
+
+QPushButton#DemoPrimary {
+    background: #4CA7B8;
+    color: #FFFFFF;
+    border: 1px solid #4CA7B8;
+}
+
+QPushButton#DemoPrimary:hover {
+    background: #5DB8C9;
+}
+
+QFrame#StudioHero,
+QFrame#StudioCard,
+QFrame#StudioMetric {
+    background: #FFFFFF;
+    border: 1px solid #D8D4C8;
+    border-radius: 10px;
+}
+
+QFrame#DemoWarning {
+    background: #FFF3E0;
+    border: 1px solid #D18A22;
+    border-radius: 8px;
+}
+
+QLabel#StudioTitle {
+    color: #050505;
+    font-family: "Libre Baskerville", Georgia, serif;
+    font-size: 24px;
+    font-weight: 700;
+}
+
+QLabel#StudioDecision {
+    color: #D18A22;
+    font-weight: 800;
+}

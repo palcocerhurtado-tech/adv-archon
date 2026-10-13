@@ -35,6 +35,11 @@ class PGOUMunicipality:
     source: str
     chunk_count: int
     indexed_at: str
+    planning_type: str = "pgou"
+    status: str = "indexado"
+    province: str = ""
+    autonomous_community: str = ""
+    source_url: str = ""
 
 
 @dataclass(slots=True)
@@ -71,7 +76,12 @@ class PGOUStore:
                 canonical   TEXT NOT NULL UNIQUE,
                 source      TEXT NOT NULL DEFAULT '',
                 chunk_count INTEGER NOT NULL DEFAULT 0,
-                indexed_at  TEXT NOT NULL
+                indexed_at  TEXT NOT NULL,
+                planning_type TEXT NOT NULL DEFAULT 'pgou',
+                status      TEXT NOT NULL DEFAULT 'indexado',
+                province    TEXT NOT NULL DEFAULT '',
+                autonomous_community TEXT NOT NULL DEFAULT '',
+                source_url  TEXT NOT NULL DEFAULT ''
             );
 
             CREATE TABLE IF NOT EXISTS pgou_chunks (
@@ -90,6 +100,22 @@ class PGOUStore:
             CREATE INDEX IF NOT EXISTS idx_pgou_chunks_municipality
                 ON pgou_chunks(municipality);
         """)
+        existing_cols = {
+            row["name"]
+            for row in conn.execute("PRAGMA table_info(pgou_municipalities)").fetchall()
+        }
+        new_columns = {
+            "planning_type": "TEXT NOT NULL DEFAULT 'pgou'",
+            "status": "TEXT NOT NULL DEFAULT 'indexado'",
+            "province": "TEXT NOT NULL DEFAULT ''",
+            "autonomous_community": "TEXT NOT NULL DEFAULT ''",
+            "source_url": "TEXT NOT NULL DEFAULT ''",
+        }
+        for name, definition in new_columns.items():
+            if name not in existing_cols:
+                conn.execute(
+                    f"ALTER TABLE pgou_municipalities ADD COLUMN {name} {definition}"
+                )
         conn.commit()
 
     # ------------------------------------------------------------------ #
@@ -115,6 +141,11 @@ class PGOUStore:
         *,
         municipality: str,
         source: str = "",
+        planning_type: str = "pgou",
+        status: str = "indexado",
+        province: str = "",
+        autonomous_community: str = "",
+        source_url: str = "",
     ) -> int:
         canonical = _canonicalize(municipality)
         now = datetime.now(UTC).isoformat()
@@ -131,9 +162,20 @@ class PGOUStore:
         else:
             cur = self._conn.execute(
                 "INSERT INTO pgou_municipalities "
-                "(name, canonical, source, chunk_count, indexed_at) "
-                "VALUES (?, ?, ?, 0, ?)",
-                (municipality.strip().title(), canonical, source, now),
+                "(name, canonical, source, chunk_count, indexed_at, planning_type, "
+                "status, province, autonomous_community, source_url) "
+                "VALUES (?, ?, ?, 0, ?, ?, ?, ?, ?, ?)",
+                (
+                    municipality.strip(),
+                    canonical,
+                    source,
+                    now,
+                    planning_type,
+                    status,
+                    province,
+                    autonomous_community,
+                    source_url or source,
+                ),
             )
             muni_id = cur.lastrowid
 
@@ -169,8 +211,20 @@ class PGOUStore:
 
         self._conn.execute(
             "UPDATE pgou_municipalities "
-            "SET chunk_count = ?, source = ?, indexed_at = ? WHERE id = ?",
-            (len(chunks), source, now, muni_id),
+            "SET chunk_count = ?, source = ?, indexed_at = ?, planning_type = ?, "
+            "status = ?, province = ?, autonomous_community = ?, source_url = ? "
+            "WHERE id = ?",
+            (
+                len(chunks),
+                source,
+                now,
+                planning_type,
+                status,
+                province,
+                autonomous_community,
+                source_url or source,
+                muni_id,
+            ),
         )
         self._conn.commit()
         return len(chunks)
@@ -238,6 +292,7 @@ class PGOUStore:
 
     @staticmethod
     def _row_to_municipality(row: sqlite3.Row) -> PGOUMunicipality:
+        columns = set(row.keys())
         return PGOUMunicipality(
             id=row["id"],
             name=row["name"],
@@ -245,6 +300,13 @@ class PGOUStore:
             source=row["source"],
             chunk_count=row["chunk_count"],
             indexed_at=row["indexed_at"],
+            planning_type=row["planning_type"] if "planning_type" in columns else "pgou",
+            status=row["status"] if "status" in columns else "indexado",
+            province=row["province"] if "province" in columns else "",
+            autonomous_community=(
+                row["autonomous_community"] if "autonomous_community" in columns else ""
+            ),
+            source_url=row["source_url"] if "source_url" in columns else "",
         )
 
     @staticmethod

@@ -466,9 +466,17 @@ def _verdict_box(pdf: ArchonPDF, verdict: str) -> None:
 
 
 def _sources_table(pdf: ArchonPDF, site_ctx: dict[str, Any]) -> None:
+    raw_planning = site_ctx.get("planning")
+    planning: dict[str, Any] = raw_planning if isinstance(raw_planning, dict) else {}
+    planning_type = str(planning.get("planning_type") or "")
+    planning_source = (
+        "Normas Subsidiarias"
+        if planning_type == "normas_subsidiarias"
+        else "PGOU municipal"
+    )
     sources = [
         ("Catastro OVC", "Parcela y referencia catastral", bool(site_ctx.get("cadastral_ref"))),
-        ("PGOU municipal", "Normativa urbanística indexada", bool(site_ctx.get("pgou_indexed"))),
+        (planning_source, "Planeamiento urbanístico indexado", bool(site_ctx.get("pgou_indexed"))),
         ("SNCZI/CNIG", "Inundabilidad", bool(site_ctx.get("flood_zone"))),
         ("Red Natura 2000/CNIG", "Protección ambiental", bool(site_ctx.get("natura2000"))),
         ("SIGCOSTAS/MITECO", "Dominio público marítimo-terrestre", bool(site_ctx.get("costas"))),
@@ -496,6 +504,58 @@ def _sources_table(pdf: ArchonPDF, site_ctx: dict[str, Any]) -> None:
             new_y=YPos.NEXT,
         )
         pdf.set_text_color(*_C_BLACK)
+
+
+def _has_planning_section(site_ctx: dict[str, Any]) -> bool:
+    planning = site_ctx.get("planning")
+    if isinstance(planning, dict) and planning:
+        return True
+    municipality = str(site_ctx.get("municipality") or "").casefold()
+    return "molina de aragón" in municipality or "molina de aragon" in municipality
+
+
+def _planning_section_title(site_ctx: dict[str, Any]) -> str:
+    raw_planning = site_ctx.get("planning")
+    planning: dict[str, Any] = raw_planning if isinstance(raw_planning, dict) else {}
+    municipality = str(planning.get("municipality") or site_ctx.get("municipality") or "").strip()
+    if municipality:
+        return f"PLANEAMIENTO APLICABLE — {municipality.upper()}"
+    return "PLANEAMIENTO APLICABLE"
+
+
+def _planning_section(pdf: ArchonPDF, site_ctx: dict[str, Any]) -> None:
+    raw_planning = site_ctx.get("planning")
+    raw_zoning = site_ctx.get("parcel_zoning")
+    planning: dict[str, Any] = raw_planning if isinstance(raw_planning, dict) else {}
+    zoning: dict[str, Any] = raw_zoning if isinstance(raw_zoning, dict) else {}
+    planning_type = str(planning.get("planning_type") or "").replace("_", " ")
+    status = str(planning.get("status") or "preliminar")
+    query_date = str(planning.get("query_date") or "")
+    version = str(planning.get("version_label") or "")
+    source_url = str(planning.get("source_url") or zoning.get("source") or "")
+    warning = str(
+        planning.get("legal_warning")
+        or zoning.get("warning")
+        or (
+            "La identificación exacta de ordenanza y parámetros requiere cruce "
+            "con planos de ordenación o visor municipal y validación técnica."
+        )
+    )
+    rows = [
+        ("Tipo de planeamiento", planning_type or "Planeamiento municipal"),
+        ("Estado del paquete", status),
+        ("Versión / fuente", version or "Documentación municipal indexada"),
+        ("Fecha de consulta", query_date or "No indicada"),
+        ("URL oficial", source_url or "No indicada"),
+        (
+            "Ordenanza preliminar",
+            str(zoning.get("ordinance") or zoning.get("zoning") or "Pendiente"),
+        ),
+        ("Confianza", str(zoning.get("confidence") or "baja")),
+    ]
+    _simple_key_value_table(pdf, rows)
+    pdf.ln(2)
+    _summary_box(pdf, warning)
 
 
 def _annotations_table(pdf: ArchonPDF, annotations: list[dict[str, Any]]) -> None:
@@ -837,6 +897,11 @@ def generate_expediente_pdf(expediente: Any, *, output_path: Path | None = None)
     _section_title(pdf, "FUENTES CONSULTADAS")
     _sources_table(pdf, site_ctx)
     pdf.ln(5)
+
+    if _has_planning_section(site_ctx):
+        _section_title(pdf, _planning_section_title(site_ctx))
+        _planning_section(pdf, site_ctx)
+        pdf.ln(5)
 
     _section_title(pdf, "TRAZABILIDAD DE CONCLUSIONES")
     _traceability_table(pdf, quality.source_traces)
